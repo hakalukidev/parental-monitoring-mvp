@@ -15,8 +15,8 @@ android {
         versionName = "1.0"
 
         // Point this at your VPS-hosted backend (use wss:// once TLS is set up).
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:4000\"")
-        buildConfigField("String", "SOCKET_URL", "\"http://10.0.2.2:4000\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://api.hakaluki.dev\"")
+        buildConfigField("String", "SOCKET_URL", "\"https://api.hakaluki.dev\"")
     }
 
     buildTypes {

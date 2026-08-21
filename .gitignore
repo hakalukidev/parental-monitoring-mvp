@@ -1,0 +1,64 @@
+# =========================
+# Backend (Node.js / TypeScript)
+# =========================
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/*.log
+backend/npm-debug.log*
+
+# =========================
+# Parent App (Flutter)
+# =========================
+parent-app/.dart_tool/
+parent-app/.flutter-plugins
+parent-app/.flutter-plugins-dependencies
+parent-app/.packages
+parent-app/.pub-cache/
+parent-app/.pub/
+parent-app/build/
+parent-app/android/.gradle/
+parent-app/android/local.properties
+parent-app/android/app/build/
+parent-app/android/build/
+parent-app/ios/Flutter/Flutter.framework
+parent-app/ios/Flutter/Flutter.podspec
+parent-app/ios/Pods/
+parent-app/ios/.symlinks/
+parent-app/ios/Runner.xcworkspace/
+parent-app/ios/Runner.xcodeproj/xcuserdata/
+parent-app/windows/flutter/ephemeral/
+parent-app/linux/flutter/ephemeral/
+parent-app/macos/Flutter/ephemeral/
+parent-app/*.iml
+parent-app/.idea/
+
+# =========================
+# Child App (Android / Kotlin / Gradle)
+# =========================
+child-app/*.iml
+child-app/.idea/
+child-app/.gradle/
+child-app/local.properties
+child-app/build/
+child-app/app/build/
+child-app/gradle/wrapper/gradle-wrapper.jar
+child-app/captures/
+child-app/.cxx/
+child-app/*.apk
+child-app/*.aab
+
+# Keep the Gradle wrapper scripts themselves (needed to build without a pre-installed Gradle)
+!child-app/gradlew
+!child-app/gradlew.bat
+
+# =========================
+# General / OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+.vscode/
+.idea/
+*.swp

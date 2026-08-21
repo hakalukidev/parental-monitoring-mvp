@@ -111,7 +111,8 @@ class WebRtcManager(
 
         val constraints = MediaConstraints()
         peerConnection!!.createOffer(object : SdpObserverAdapter() {
-            override fun onCreateSuccess(desc: SessionDescription) {
+            override fun onCreateSuccess(desc: SessionDescription?) {
+                if (desc == null) return
                 peerConnection!!.setLocalDescription(SdpObserverAdapter(), desc)
                 val json = JSONObject().put("sdp", desc.description).put("type", desc.type.canonicalForm())
                 onLocalOffer(json)

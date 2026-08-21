@@ -17,6 +17,11 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+export const childLoginSchema = z.object({
+  email: z.string().min(3), // child logs in with username, not necessarily an email
+  password: z.string().min(1),
+});
+
 export const createChildSchema = z
   .object({
     name: z.string().min(2).max(100),

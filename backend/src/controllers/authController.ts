@@ -3,7 +3,7 @@ import { User } from "../models/User";
 import { hashPassword, verifyPassword } from "../utils/password";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
 import { asyncHandler, AppError } from "../utils/http";
-import { registerParentSchema, loginSchema } from "../utils/validation";
+import { registerParentSchema, loginSchema, childLoginSchema } from "../utils/validation";
 import { AuthedRequest } from "../middleware/auth";
 
 const REFRESH_COOKIE = "refresh_token";
@@ -96,7 +96,7 @@ export const logout = asyncHandler(async (req: AuthedRequest, res: Response) => 
 });
 
 export const childLogin = asyncHandler(async (req: Request, res: Response) => {
-  const data = loginSchema.parse(req.body);
+  const data = childLoginSchema.parse(req.body);
 
   const user = await User.findOne({ email: data.email.toLowerCase(), role: "CHILD" });
   if (!user) throw new AppError("Invalid username or password", 401);
