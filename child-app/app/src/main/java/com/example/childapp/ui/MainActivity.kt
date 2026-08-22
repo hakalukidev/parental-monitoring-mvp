@@ -103,6 +103,19 @@ class MainActivity : ComponentActivity() {
                             onStop = {
                                 ScreenCaptureService.stop(this@MainActivity)
                                 screenState.value = ChildScreenState.Idle
+                            },
+                            onLogout = {
+                                // Stop any active/pending screen share first.
+                                if (state is ChildScreenState.Active) {
+                                    ScreenCaptureService.stop(this@MainActivity)
+                                }
+                                screenState.value = ChildScreenState.Idle
+                                socketManager?.disconnect()
+                                socketManager = null
+                                session.clear()
+                                loggedIn = false
+                                deviceConnected = false
+                                error = null
                             }
                         )
                     }

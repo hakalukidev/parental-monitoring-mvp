@@ -3,6 +3,7 @@ import '../models/child.dart';
 import '../services/api_service.dart';
 import 'create_child_screen.dart';
 import 'screen_share_screen.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -39,6 +40,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log Out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await ApiService.instance.logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -46,6 +75,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text('Parent Dashboard'),
         actions: [
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+          IconButton(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout),
+            tooltip: 'Log Out',
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -53,20 +87,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
-                ? Center(child: Text(_error!))
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Text('My Children', style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 12),
-                      if (_children.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 24),
-                          child: Text('No children yet.'),
-                        ),
-                      for (final child in _children) _ChildCard(child: child),
-                    ],
-                  ),
+            ? Center(child: Text(_error!))
+            : ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text('My Children', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            if (_children.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('No children yet.'),
+              ),
+            for (final child in _children) _ChildCard(child: child),
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -124,10 +158,10 @@ class _ChildCard extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: online
                     ? () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ScreenShareScreen(childId: child.id, childName: child.name),
-                          ),
-                        )
+                  MaterialPageRoute(
+                    builder: (_) => ScreenShareScreen(childId: child.id, childName: child.name),
+                  ),
+                )
                     : null,
                 icon: const Icon(Icons.screen_share),
                 label: const Text('Share Screen'),

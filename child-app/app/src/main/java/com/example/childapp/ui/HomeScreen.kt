@@ -1,6 +1,8 @@
 package com.example.childapp.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -12,6 +14,7 @@ sealed class ChildScreenState {
     data class Active(val sessionId: String) : ChildScreenState()
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     childName: String,
@@ -20,9 +23,23 @@ fun HomeScreen(
     state: ChildScreenState,
     onAccept: (sessionId: String) -> Unit,
     onReject: (sessionId: String) -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onLogout: () -> Unit
 ) {
-    Scaffold { padding ->
+    var showLogoutConfirm by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Child Monitoring") },
+                actions = {
+                    IconButton(onClick = { showLogoutConfirm = true }) {
+                        Icon(Icons.Filled.ExitToApp, contentDescription = "Log Out")
+                    }
+                }
+            )
+        }
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -73,7 +90,7 @@ fun HomeScreen(
             text = {
                 Text(
                     "Your parent wants to view your screen.\n\n" +
-                        "Screen sharing will start only after you approve."
+                            "Screen sharing will start only after you approve."
                 )
             },
             confirmButton = {
@@ -81,6 +98,23 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { onReject(state.sessionId) }) { Text("Reject") }
+            }
+        )
+    }
+
+    if (showLogoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirm = false },
+            title = { Text("Log Out") },
+            text = { Text("Are you sure you want to log out?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLogoutConfirm = false
+                    onLogout()
+                }) { Text("Log Out") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") }
             }
         )
     }

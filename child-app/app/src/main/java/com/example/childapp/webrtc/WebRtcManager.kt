@@ -2,7 +2,6 @@ package com.example.childapp.webrtc
 
 import android.content.Context
 import android.content.Intent
-import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjection
 import android.util.DisplayMetrics
 import android.view.WindowManager
@@ -27,7 +26,6 @@ class WebRtcManager(
     private var videoCapturer: VideoCapturer? = null
     private var videoSource: VideoSource? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
-    private var mediaProjection: MediaProjection? = null
 
     private val eglBase: EglBase = EglBase.create()
 
@@ -56,7 +54,10 @@ class WebRtcManager(
         resultData: Intent,
         iceServers: List<PeerConnection.IceServer>
     ) {
-        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
+        // NOTE: Do NOT call mediaProjectionManager.getMediaProjection(resultCode, resultData) here.
+        // ScreenCapturerAndroid below creates and owns its own MediaProjection internally from
+        // resultData. Creating a second one from the same grant double-consumes it and crashes
+        // right as capture starts (this was the bug causing the crash after accepting).
 
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -148,8 +149,8 @@ class WebRtcManager(
         surfaceTextureHelper = null
         peerConnection?.close()
         peerConnection = null
-        mediaProjection?.stop()
-        mediaProjection = null
+        // videoCapturer.dispose() above already stops/releases the MediaProjection
+        // that ScreenCapturerAndroid owns internally.
     }
 
     fun release() {
