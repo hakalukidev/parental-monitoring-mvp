@@ -136,29 +136,31 @@ export function registerSocketHandlers(io: Server): void {
       if (role === "CHILD") {
         const childId = findChildIdBySocket(socket.id);
         if (childId) {
-          removeChildSocket(childId);
-          await Device.findOneAndUpdate(
-            { childId },
-            { status: "OFFLINE", lastSeen: new Date(), socketId: null },
-            { sort: { updatedAt: -1 } }
-          );
-          socket.broadcast.emit("child_status_changed", { childId, status: "OFFLINE" });
+          const isNowOffline = removeChildSocket(childId, socket.id);
+          if (isNowOffline) {
+            await Device.findOneAndUpdate(
+              { childId },
+              { status: "OFFLINE", lastSeen: new Date(), socketId: null },
+              { sort: { updatedAt: -1 } }
+            );
+            socket.broadcast.emit("child_status_changed", { childId, status: "OFFLINE" });
 
-          // Auto-end any still-active session for this child so the parent UI doesn't hang.
-          const activeSessions = await ScreenShareSession.find({
-            childId,
-            status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
-          });
-          for (const s of activeSessions) {
-            s.status = "ENDED";
-            s.endedAt = new Date();
-            s.endedBy = "SYSTEM";
-            await s.save();
-            io.to(`session:${s.id}`).emit("screen_share_stopped", {
-              sessionId: s.id,
-              endedBy: "SYSTEM",
-              reason: "child_disconnected",
+            // Auto-end any still-active session for this child so the parent UI doesn't hang.
+            const activeSessions = await ScreenShareSession.find({
+              childId,
+              status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
             });
+            for (const s of activeSessions) {
+              s.status = "ENDED";
+              s.endedAt = new Date();
+              s.endedBy = "SYSTEM";
+              await s.save();
+              io.to(`session:${s.id}`).emit("screen_share_stopped", {
+                sessionId: s.id,
+                endedBy: "SYSTEM",
+                reason: "child_disconnected",
+              });
+            }
           }
         }
       } else if (role === "PARENT") {

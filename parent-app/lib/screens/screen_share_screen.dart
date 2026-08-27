@@ -52,6 +52,9 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
     _socketService.onWebrtcAnswer(_onAnswer);
     _socketService.onIceCandidate(_onRemoteIceCandidate);
 
+    // Pre-initialize peer connection & listeners so we never miss webrtc_offer
+    _setupPeerConnection();
+
     try {
       final res = await ApiService.instance.requestScreenShare(widget.childId);
       _sessionId = res['sessionId'] as String;
@@ -65,14 +68,25 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
 
   Future<void> _onAccept(Map<String, dynamic> data) async {
     if (data['sessionId'] != _sessionId) return;
-    await _setupPeerConnection();
+    if (_pc == null) {
+      await _setupPeerConnection();
+    }
   }
 
   Future<void> _setupPeerConnection() async {
-    final iceServersRaw = await ApiService.instance.getIceServers();
-    final iceServers = iceServersRaw
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    if (_pc != null) return;
+    List<Map<String, dynamic>> iceServers = [
+      {'urls': 'stun:stun.l.google.com:19302'},
+      {'urls': 'stun:stun1.l.google.com:19302'},
+    ];
+    try {
+      final iceServersRaw = await ApiService.instance.getIceServers();
+      if (iceServersRaw.isNotEmpty) {
+        iceServers = iceServersRaw
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
+    } catch (_) {}
 
     _pc = await createPeerConnection({'iceServers': iceServers});
 

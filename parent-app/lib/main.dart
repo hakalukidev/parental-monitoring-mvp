@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'services/api_service.dart';
-import 'screens/login_screen.dart';
+
 import 'screens/dashboard_screen.dart';
+import 'screens/login_screen.dart';
+import 'services/api_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +16,7 @@ class ParentApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Parent Monitoring',
       theme: ThemeData(
         useMaterial3: true,
@@ -24,7 +26,8 @@ class ParentApp extends StatelessWidget {
         future: ApiService.instance.accessToken,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+            return const Scaffold(
+                body: Center(child: CircularProgressIndicator()));
           }
           final hasToken = snapshot.data != null;
           return hasToken ? const DashboardScreen() : const LoginScreen();

@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
         val sid = pendingSessionId
         val token = session.accessToken
         if (result.resultCode == RESULT_OK && result.data != null && sid != null && token != null) {
+            ScreenCaptureService.pendingProjectionIntent = result.data
             ScreenCaptureService.start(this, result.resultCode, result.data!!, token, sid)
             screenState.value = ChildScreenState.Active(sid)
         } else {

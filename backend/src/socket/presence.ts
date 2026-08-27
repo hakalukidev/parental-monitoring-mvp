@@ -3,19 +3,30 @@
 // multiple Node processes, replace this with a Redis-backed adapter
 // (e.g. @socket.io/redis-adapter) and store presence in Redis too.
 
-const childSockets = new Map<string, string>(); // childId -> socketId
+const childSockets = new Map<string, Set<string>>(); // childId -> set of socketIds
 const parentSockets = new Map<string, Set<string>>(); // parentId -> set of socketIds (parent may have multiple sessions)
 
 export function setChildSocket(childId: string, socketId: string): void {
-  childSockets.set(childId, socketId);
+  const set = childSockets.get(childId) ?? new Set<string>();
+  set.add(socketId);
+  childSockets.set(childId, set);
 }
 
-export function removeChildSocket(childId: string): void {
-  childSockets.delete(childId);
+export function removeChildSocket(childId: string, socketId: string): boolean {
+  const set = childSockets.get(childId);
+  if (!set) return true;
+  set.delete(socketId);
+  if (set.size === 0) {
+    childSockets.delete(childId);
+    return true;
+  }
+  return false;
 }
 
 export function getChildSocketId(childId: string): string | undefined {
-  return childSockets.get(childId);
+  const set = childSockets.get(childId);
+  if (!set || set.size === 0) return undefined;
+  return Array.from(set)[set.size - 1];
 }
 
 export function addParentSocket(parentId: string, socketId: string): void {
@@ -37,8 +48,8 @@ export function getParentSocketIds(parentId: string): string[] {
 
 /** Find which childId (if any) owns a given socketId — used on disconnect. */
 export function findChildIdBySocket(socketId: string): string | undefined {
-  for (const [childId, sId] of childSockets.entries()) {
-    if (sId === socketId) return childId;
+  for (const [childId, set] of childSockets.entries()) {
+    if (set.has(socketId)) return childId;
   }
   return undefined;
 }

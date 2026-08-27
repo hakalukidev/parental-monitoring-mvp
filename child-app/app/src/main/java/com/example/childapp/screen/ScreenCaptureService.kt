@@ -35,7 +35,7 @@ class ScreenCaptureService : Service() {
         }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity_RESULT_CANCELED) ?: Activity_RESULT_CANCELED
-        val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+        val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA) ?: pendingProjectionIntent
         val token = intent?.getStringExtra(EXTRA_ACCESS_TOKEN)
         val sid = intent?.getStringExtra(EXTRA_SESSION_ID)
 
@@ -47,9 +47,6 @@ class ScreenCaptureService : Service() {
         sessionId = sid
         startForeground(NOTIFICATION_ID, buildNotification())
 
-        val session = SessionStore(applicationContext)
-        val api = ApiClient(session)
-
         val socket = SocketManager(token).also { socketManager = it }
         socket.onScreenShareStopped = { stoppedId ->
             if (stoppedId == sessionId) stopSharing()
@@ -60,13 +57,16 @@ class ScreenCaptureService : Service() {
         socket.onIceCandidate = { iceSessionId, candidate ->
             if (iceSessionId == sessionId) webRtcManager?.addRemoteIceCandidate(candidate)
         }
-        socket.connect()
-
-        val iceServers = try {
-            parseIceServers(api.getIceServers())
-        } catch (e: Exception) {
-            emptyList()
+        socket.onConnected = {
+            socket.acceptScreenShare(sid)
         }
+        socket.connect()
+        socket.acceptScreenShare(sid)
+
+        val iceServers = listOf(
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+        )
 
         val webRtc = WebRtcManager(
             context = applicationContext,
@@ -83,7 +83,11 @@ class ScreenCaptureService : Service() {
         webRtc.init()
 
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        webRtc.startSharing(mgr, resultCode, resultData, iceServers)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (webRtcManager != null) {
+                webRtc.startSharing(mgr, resultCode, resultData, iceServers)
+            }
+        }, 300)
 
         return START_NOT_STICKY
     }
@@ -154,6 +158,7 @@ class ScreenCaptureService : Service() {
     }
 
     companion object {
+        var pendingProjectionIntent: Intent? = null
         const val ACTION_STOP = "com.example.childapp.action.STOP_SHARING"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
