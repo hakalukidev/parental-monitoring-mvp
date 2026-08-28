@@ -25,6 +25,8 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   String? _sessionId;
   _ViewState _state = _ViewState.waiting;
   String? _errorMessage;
+  bool _remoteDescriptionSet = false;
+  final List<RTCIceCandidate> _pendingIceCandidates = [];
 
   @override
   void initState() {
@@ -37,37 +39,50 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
 
     final token = await ApiService.instance.accessToken;
     if (token == null) {
-      setState(() {
-        _state = _ViewState.error;
-        _errorMessage = 'Not authenticated';
-      });
+      if (mounted) {
+        setState(() {
+          _state = _ViewState.error;
+          _errorMessage = 'Not authenticated';
+        });
+      }
       return;
     }
 
     _socketService.connect(token);
     _socketService.onScreenShareAccept(_onAccept);
-    _socketService.onScreenShareReject((_) => setState(() => _state = _ViewState.rejected));
-    _socketService.onScreenShareStarted((_) => setState(() => _state = _ViewState.live));
+    _socketService.onScreenShareReject((_) {
+      if (mounted) setState(() => _state = _ViewState.rejected);
+    });
+    _socketService.onScreenShareStarted((_) {
+      if (mounted) setState(() => _state = _ViewState.live);
+    });
     _socketService.onScreenShareStopped((_) => _teardown(notifyBackend: false));
     _socketService.onWebrtcAnswer(_onAnswer);
     _socketService.onIceCandidate(_onRemoteIceCandidate);
 
-    // Pre-initialize peer connection & listeners so we never miss webrtc_offer
-    _setupPeerConnection();
+    await _setupPeerConnection();
 
     try {
       final res = await ApiService.instance.requestScreenShare(widget.childId);
       _sessionId = res['sessionId'] as String;
+      _socketService.joinSession(_sessionId!);
     } catch (e) {
-      setState(() {
-        _state = e.toString().contains('offline') ? _ViewState.offline : _ViewState.error;
-        _errorMessage = e.toString();
-      });
+      if (mounted) {
+        setState(() {
+          _state = e.toString().contains('offline') ? _ViewState.offline : _ViewState.error;
+          _errorMessage = e.toString();
+        });
+      }
     }
   }
 
   Future<void> _onAccept(Map<String, dynamic> data) async {
-    if (data['sessionId'] != _sessionId) return;
+    final incomingSid = data['sessionId']?.toString();
+    if (_sessionId != null && incomingSid != _sessionId) return;
+    _sessionId ??= incomingSid;
+    if (_sessionId != null) {
+      _socketService.joinSession(_sessionId!);
+    }
     if (_pc == null) {
       await _setupPeerConnection();
     }
@@ -88,53 +103,92 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
       }
     } catch (_) {}
 
-    _pc = await createPeerConnection({'iceServers': iceServers});
+    final pc = await createPeerConnection({
+      'iceServers': iceServers,
+      'sdpSemantics': 'unified-plan',
+    });
+    _pc = pc;
 
-    _pc!.onTrack = (RTCTrackEvent event) {
-      if (event.track.kind == 'video' && event.streams.isNotEmpty) {
-        _remoteRenderer.srcObject = event.streams.first;
-        setState(() {});
+    pc.onTrack = (RTCTrackEvent event) {
+      if (event.track.kind == 'video') {
+        if (event.streams.isNotEmpty) {
+          _remoteRenderer.srcObject = event.streams.first;
+        }
+        if (mounted) setState(() => _state = _ViewState.live);
       }
     };
 
-    _pc!.onIceCandidate = (candidate) {
+    pc.onAddStream = (MediaStream stream) {
+      _remoteRenderer.srcObject = stream;
+      if (mounted) setState(() => _state = _ViewState.live);
+    };
+
+    pc.onIceCandidate = (candidate) {
       if (_sessionId == null) return;
       _socketService.sendIceCandidate(_sessionId!, candidate.toMap());
     };
 
     // The child app initiates the offer once it has captured the screen
-    // (see child-app ScreenCaptureService). We just wait for `webrtc_offer`.
     _socketService.socket.on('webrtc_offer', (data) async {
-      final map = Map<String, dynamic>.from(data);
-      if (map['sessionId'] != _sessionId) return;
-      final sdpMap = Map<String, dynamic>.from(map['sdp']);
-      final offer = RTCSessionDescription(sdpMap['sdp'], sdpMap['type']);
-      await _pc!.setRemoteDescription(offer);
+      try {
+        final map = Map<String, dynamic>.from(data);
+        final incomingSid = map['sessionId']?.toString();
+        if (_sessionId != null && incomingSid != _sessionId) return;
+        _sessionId ??= incomingSid;
 
-      final answer = await _pc!.createAnswer();
-      await _pc!.setLocalDescription(answer);
+        if (_pc == null) {
+          await _setupPeerConnection();
+        }
 
-      _socketService.socket.emit('webrtc_answer', {
-        'sessionId': _sessionId,
-        'sdp': {'sdp': answer.sdp, 'type': answer.type},
-      });
+        final sdpMap = Map<String, dynamic>.from(map['sdp']);
+        final offer = RTCSessionDescription(sdpMap['sdp'], sdpMap['type']);
+        await _pc!.setRemoteDescription(offer);
+        _remoteDescriptionSet = true;
+
+        // Drain queued remote ICE candidates
+        for (final candidate in _pendingIceCandidates) {
+          await _pc!.addCandidate(candidate);
+        }
+        _pendingIceCandidates.clear();
+
+        final answer = await _pc!.createAnswer();
+        await _pc!.setLocalDescription(answer);
+
+        _socketService.socket.emit('webrtc_answer', {
+          'sessionId': _sessionId,
+          'sdp': {'sdp': answer.sdp, 'type': answer.type},
+        });
+
+        if (mounted) {
+          setState(() => _state = _ViewState.live);
+        }
+      } catch (e) {
+        debugPrint('Error handling webrtc_offer: $e');
+      }
     });
   }
 
   Future<void> _onAnswer(Map<String, dynamic> data) async {
-    // Parent typically answers rather than receives an answer in this flow,
-    // but kept for symmetry if you flip offer/answer roles.
-    if (_pc == null || data['sessionId'] != _sessionId) return;
+    if (_pc == null || (_sessionId != null && data['sessionId'] != _sessionId)) return;
     final sdpMap = Map<String, dynamic>.from(data['sdp']);
     await _pc!.setRemoteDescription(RTCSessionDescription(sdpMap['sdp'], sdpMap['type']));
+    _remoteDescriptionSet = true;
   }
 
   Future<void> _onRemoteIceCandidate(Map<String, dynamic> data) async {
-    if (_pc == null || data['sessionId'] != _sessionId) return;
+    if (_sessionId != null && data['sessionId'] != _sessionId) return;
     final c = Map<String, dynamic>.from(data['candidate']);
-    await _pc!.addCandidate(
-      RTCIceCandidate(c['candidate'], c['sdpMid'], c['sdpMLineIndex']),
+    final iceCandidate = RTCIceCandidate(
+      c['candidate']?.toString(),
+      c['sdpMid']?.toString(),
+      c['sdpMLineIndex'] is int ? c['sdpMLineIndex'] as int : int.tryParse(c['sdpMLineIndex']?.toString() ?? '0') ?? 0,
     );
+
+    if (_pc != null && _remoteDescriptionSet) {
+      await _pc!.addCandidate(iceCandidate);
+    } else {
+      _pendingIceCandidates.add(iceCandidate);
+    }
   }
 
   Future<void> _stopSharing() async {
@@ -149,6 +203,8 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   }
 
   Future<void> _teardown({required bool notifyBackend}) async {
+    _remoteDescriptionSet = false;
+    _pendingIceCandidates.clear();
     await _pc?.close();
     _pc = null;
     if (mounted) setState(() => _state = _ViewState.ended);
@@ -156,6 +212,8 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
 
   @override
   void dispose() {
+    _remoteDescriptionSet = false;
+    _pendingIceCandidates.clear();
     _pc?.close();
     _remoteRenderer.dispose();
     _socketService.disconnect();

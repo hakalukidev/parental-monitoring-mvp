@@ -50,6 +50,34 @@ export function registerSocketHandlers(io: Server): void {
       addParentSocket(userId, socket.id);
     }
 
+    // Auto-join any active/requested sessions for this user so reconnected sockets stay in sync
+    try {
+      const activeSessions = await ScreenShareSession.find({
+        $or: [
+          { parentId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
+          { childId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
+        ],
+      });
+      for (const s of activeSessions) {
+        socket.join(`session:${s.id}`);
+      }
+    } catch {
+      // ignore lookup error on socket connect
+    }
+
+    // ---- Explicit room joining ----
+    socket.on("join_session", async ({ sessionId }: { sessionId: string }) => {
+      if (!sessionId) return;
+      const session = await ScreenShareSession.findById(sessionId);
+      if (!session) return;
+      const isParticipant =
+        (role === "PARENT" && session.parentId.toString() === userId) ||
+        (role === "CHILD" && session.childId.toString() === userId);
+      if (!isParticipant) return;
+
+      socket.join(`session:${sessionId}`);
+    });
+
     // ---- Screen share consent flow ----
 
     // Child approves a pending request
@@ -57,17 +85,21 @@ export function registerSocketHandlers(io: Server): void {
       if (role !== "CHILD") return;
       const session = await ScreenShareSession.findById(sessionId);
       if (!session || session.childId.toString() !== userId) return;
-      if (session.status !== "REQUESTED") return;
 
-      session.status = "ACCEPTED";
-      await session.save();
-
+      // Always ensure the accepting socket and parent sockets are in the session room
       socket.join(`session:${sessionId}`);
       for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
         io.sockets.sockets.get(parentSocketId)?.join(`session:${sessionId}`);
       }
 
-      io.to(`session:${sessionId}`).emit("screen_share_accept", { sessionId });
+      if (session.status === "REQUESTED") {
+        session.status = "ACCEPTED";
+        await session.save();
+        io.to(`session:${sessionId}`).emit("screen_share_accept", { sessionId });
+      } else if (session.status === "ACCEPTED" || session.status === "ACTIVE") {
+        // If re-accepting or service socket connected, inform room of acceptance
+        io.to(`session:${sessionId}`).emit("screen_share_accept", { sessionId });
+      }
     });
 
     // Child rejects a pending request

@@ -23,6 +23,10 @@ export function removeChildSocket(childId: string, socketId: string): boolean {
   return false;
 }
 
+export function getChildSocketIds(childId: string): string[] {
+  return Array.from(childSockets.get(childId) ?? []);
+}
+
 export function getChildSocketId(childId: string): string | undefined {
   const set = childSockets.get(childId);
   if (!set || set.size === 0) return undefined;

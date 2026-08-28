@@ -58,4 +58,8 @@ class SocketService {
   void sendIceCandidate(String sessionId, Map<String, dynamic> candidate) {
     socket.emit('ice_candidate', {'sessionId': sessionId, 'candidate': candidate});
   }
+
+  void joinSession(String sessionId) {
+    socket.emit('join_session', {'sessionId': sessionId});
+  }
 }
