@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import org.json.JSONObject
 import org.webrtc.*
@@ -28,6 +29,8 @@ class WebRtcManager(
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
     private val eglBase: EglBase = EglBase.create()
+    private var isRemoteDescriptionSet = false
+    private val pendingIceCandidates = mutableListOf<IceCandidate>()
 
     fun init() {
         PeerConnectionFactory.initialize(
@@ -54,13 +57,9 @@ class WebRtcManager(
         resultData: Intent,
         iceServers: List<PeerConnection.IceServer>
     ) {
-        // NOTE: Do NOT call mediaProjectionManager.getMediaProjection(resultCode, resultData) here.
-        // ScreenCapturerAndroid below creates and owns its own MediaProjection internally from
-        // resultData. Creating a second one from the same grant double-consumes it and crashes
-        // right as capture starts (this was the bug causing the crash after accepting).
-
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }
 
         peerConnection = factory.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
@@ -73,12 +72,15 @@ class WebRtcManager(
             }
 
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
+                Log.d("WebRtcManager", "PeerConnection state changed: $newState")
                 onStateChange(newState)
             }
 
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+            override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {
+                Log.d("WebRtcManager", "IceConnection state changed: $p0")
+            }
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
             override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
             override fun onAddStream(p0: MediaStream?) {}
@@ -92,10 +94,27 @@ class WebRtcManager(
         (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
             .defaultDisplay.getRealMetrics(displayMetrics)
 
+        // Downscale capture dimensions safely to prevent encoder overload and buffer exhaust
+        val rawWidth = displayMetrics.widthPixels
+        val rawHeight = displayMetrics.heightPixels
+        val maxDim = 1280
+        val scale = if (maxOf(rawWidth, rawHeight) > maxDim) {
+            maxDim.toFloat() / maxOf(rawWidth, rawHeight)
+        } else {
+            1.0f
+        }
+        var targetWidth = (rawWidth * scale).toInt()
+        var targetHeight = (rawHeight * scale).toInt()
+        if (targetWidth % 2 != 0) targetWidth -= 1
+        if (targetHeight % 2 != 0) targetHeight -= 1
+        if (targetWidth <= 0) targetWidth = 720
+        if (targetHeight <= 0) targetHeight = 1280
+
         videoCapturer = ScreenCapturerAndroid(
             resultData,
             object : MediaProjection.Callback() {
                 override fun onStop() {
+                    Log.d("WebRtcManager", "MediaProjection.Callback.onStop() triggered")
                     stop()
                 }
             }
@@ -104,7 +123,7 @@ class WebRtcManager(
         videoSource = factory.createVideoSource(true)
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
         videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
-        videoCapturer!!.startCapture(displayMetrics.widthPixels, displayMetrics.heightPixels, 30)
+        videoCapturer!!.startCapture(targetWidth, targetHeight, 30)
 
         val videoTrack = factory.createVideoTrack("screen_share_track", videoSource)
         val streamId = "screen_share_stream"
@@ -114,9 +133,21 @@ class WebRtcManager(
         peerConnection!!.createOffer(object : SdpObserverAdapter() {
             override fun onCreateSuccess(desc: SessionDescription?) {
                 if (desc == null) return
-                peerConnection!!.setLocalDescription(SdpObserverAdapter(), desc)
-                val json = JSONObject().put("sdp", desc.description).put("type", desc.type.canonicalForm())
-                onLocalOffer(json)
+                peerConnection?.setLocalDescription(object : SdpObserverAdapter() {
+                    override fun onSetSuccess() {
+                        val json = JSONObject()
+                            .put("sdp", desc.description)
+                            .put("type", desc.type.canonicalForm())
+                        onLocalOffer(json)
+                    }
+                    override fun onSetFailure(p0: String?) {
+                        Log.e("WebRtcManager", "setLocalDescription failure: $p0")
+                    }
+                }, desc)
+            }
+
+            override fun onCreateFailure(p0: String?) {
+                Log.e("WebRtcManager", "createOffer failure: $p0")
             }
         }, constraints)
     }
@@ -126,21 +157,47 @@ class WebRtcManager(
             SessionDescription.Type.fromCanonicalForm(sdp.getString("type")),
             sdp.getString("sdp")
         )
-        peerConnection?.setRemoteDescription(SdpObserverAdapter(), desc)
+        peerConnection?.setRemoteDescription(object : SdpObserverAdapter() {
+            override fun onSetSuccess() {
+                isRemoteDescriptionSet = true
+                Log.d("WebRtcManager", "Remote description set successfully. Draining ${pendingIceCandidates.size} ICE candidates.")
+                synchronized(pendingIceCandidates) {
+                    for (candidate in pendingIceCandidates) {
+                        peerConnection?.addIceCandidate(candidate)
+                    }
+                    pendingIceCandidates.clear()
+                }
+            }
+
+            override fun onSetFailure(p0: String?) {
+                Log.e("WebRtcManager", "setRemoteDescription failure: $p0")
+            }
+        }, desc)
     }
 
     fun addRemoteIceCandidate(candidate: JSONObject) {
-        peerConnection?.addIceCandidate(
-            IceCandidate(
-                candidate.optString("sdpMid"),
-                candidate.optInt("sdpMLineIndex"),
-                candidate.getString("candidate")
-            )
+        val iceCandidate = IceCandidate(
+            candidate.optString("sdpMid", "0"),
+            candidate.optInt("sdpMLineIndex", 0),
+            candidate.getString("candidate")
         )
+        if (isRemoteDescriptionSet && peerConnection != null) {
+            peerConnection?.addIceCandidate(iceCandidate)
+        } else {
+            synchronized(pendingIceCandidates) {
+                pendingIceCandidates.add(iceCandidate)
+            }
+        }
     }
 
     fun stop() {
-        videoCapturer?.stopCapture()
+        isRemoteDescriptionSet = false
+        synchronized(pendingIceCandidates) {
+            pendingIceCandidates.clear()
+        }
+        try {
+            videoCapturer?.stopCapture()
+        } catch (_: Exception) {}
         videoCapturer?.dispose()
         videoCapturer = null
         videoSource?.dispose()
@@ -149,8 +206,6 @@ class WebRtcManager(
         surfaceTextureHelper = null
         peerConnection?.close()
         peerConnection = null
-        // videoCapturer.dispose() above already stops/releases the MediaProjection
-        // that ScreenCapturerAndroid owns internally.
     }
 
     fun release() {

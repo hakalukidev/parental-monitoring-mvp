@@ -3,6 +3,7 @@ package com.example.childapp.screen
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
@@ -45,7 +46,15 @@ class ScreenCaptureService : Service() {
         }
 
         sessionId = sid
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
 
         val socket = SocketManager(token).also { socketManager = it }
         socket.onScreenShareStopped = { stoppedId ->
@@ -58,12 +67,14 @@ class ScreenCaptureService : Service() {
             if (iceSessionId == sessionId) webRtcManager?.addRemoteIceCandidate(candidate)
         }
         socket.onConnected = {
+            socket.joinSession(sid)
             socket.acceptScreenShare(sid)
         }
         socket.connect()
+        socket.joinSession(sid)
         socket.acceptScreenShare(sid)
 
-        val iceServers = listOf(
+        val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
         )
@@ -73,9 +84,7 @@ class ScreenCaptureService : Service() {
             onLocalOffer = { sdp -> socket.sendOffer(sid, sdp) },
             onIceCandidate = { candidate -> socket.sendIceCandidate(sid, candidate) },
             onStateChange = { state ->
-                if (state == PeerConnection.PeerConnectionState.FAILED ||
-                    state == PeerConnection.PeerConnectionState.CLOSED
-                ) {
+                if (state == PeerConnection.PeerConnectionState.CLOSED) {
                     stopSharing()
                 }
             }
@@ -83,11 +92,23 @@ class ScreenCaptureService : Service() {
         webRtc.init()
 
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (webRtcManager != null) {
-                webRtc.startSharing(mgr, resultCode, resultData, iceServers)
+
+        // Fetch server ICE configuration asynchronously in background thread
+        Thread {
+            val iceServers = try {
+                val api = ApiClient(SessionStore(applicationContext))
+                val config = api.getIceServers()
+                parseIceServers(config)
+            } catch (_: Exception) {
+                defaultIceServers
             }
-        }, 300)
+
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                if (webRtcManager != null) {
+                    webRtc.startSharing(mgr, resultCode, resultData, if (iceServers.isNotEmpty()) iceServers else defaultIceServers)
+                }
+            }, 300)
+        }.start()
 
         return START_NOT_STICKY
     }

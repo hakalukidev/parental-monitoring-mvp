@@ -73,6 +73,10 @@ class SocketManager(private val accessToken: String) {
         socket?.emit("screen_share_stopped", JSONObject().put("sessionId", sessionId))
     }
 
+    fun joinSession(sessionId: String) {
+        socket?.emit("join_session", JSONObject().put("sessionId", sessionId))
+    }
+
     fun disconnect() {
         socket?.off()
         socket?.disconnect()
