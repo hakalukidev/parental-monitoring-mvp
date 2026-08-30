@@ -1,7 +1,10 @@
 package com.example.childapp.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.ApiException
@@ -29,6 +33,12 @@ class MainActivity : ComponentActivity() {
     // system MediaProjection permission dialog result.
     private var pendingSessionId: String? = null
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        // Notification permission granted or denied
+    }
+
     private val mediaProjectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -48,8 +58,17 @@ class MainActivity : ComponentActivity() {
 
     private val screenState = mutableStateOf<ChildScreenState>(ChildScreenState.Idle)
 
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        checkNotificationPermission()
         session = SessionStore(applicationContext)
         api = ApiClient(session)
 
@@ -149,6 +168,7 @@ class MainActivity : ComponentActivity() {
 
     /** Child tapped "Accept" in-app -> now trigger Android's own MediaProjection consent dialog. */
     private fun onConsentAccepted(sessionId: String) {
+        checkNotificationPermission()
         pendingSessionId = sessionId
         val projectionManager =
             getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager

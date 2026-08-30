@@ -17,7 +17,7 @@ class ParentApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Parent Monitoring',
+      title: 'Safetly Parent',
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.indigo,

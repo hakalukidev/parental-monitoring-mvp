@@ -14,6 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  bool _obscurePassword = true;
   bool _loading = false;
   String? _error;
 
@@ -49,7 +50,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Parent Login', style: Theme.of(context).textTheme.headlineMedium),
+                  Text('Safetly Parent Login', style: Theme.of(context).textTheme.headlineMedium),
                   const SizedBox(height: 24),
                   TextFormField(
                     controller: _email,
@@ -60,8 +61,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _password,
-                    decoration: const InputDecoration(labelText: 'Password'),
-                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        ),
+                        onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                      ),
+                    ),
+                    obscureText: _obscurePassword,
                     validator: (v) => (v == null || v.isEmpty) ? 'Enter your password' : null,
                   ),
                   const SizedBox(height: 20),

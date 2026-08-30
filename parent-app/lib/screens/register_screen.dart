@@ -15,6 +15,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
   bool _loading = false;
   String? _error;
 
@@ -45,7 +47,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Parent Account')),
+      appBar: AppBar(title: const Text('Create Safetly Parent Account')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -69,15 +71,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _password,
-                  decoration: const InputDecoration(labelText: 'Password'),
-                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                  obscureText: _obscurePassword,
                   validator: (v) => (v == null || v.length < 8) ? 'At least 8 characters' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _confirm,
-                  decoration: const InputDecoration(labelText: 'Confirm Password'),
-                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'Confirm Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureConfirm ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                    ),
+                  ),
+                  obscureText: _obscureConfirm,
                   validator: (v) => v != _password.text ? 'Passwords do not match' : null,
                 ),
                 const SizedBox(height: 20),

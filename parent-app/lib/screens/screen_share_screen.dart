@@ -26,6 +26,8 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   _ViewState _state = _ViewState.waiting;
   String? _errorMessage;
   bool _remoteDescriptionSet = false;
+  bool _isStreamReady = false;
+  bool _isRendererInitialized = false;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
   @override
@@ -36,6 +38,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
 
   Future<void> _start() async {
     await _remoteRenderer.initialize();
+    _isRendererInitialized = true;
 
     final token = await ApiService.instance.accessToken;
     if (token == null) {
@@ -54,7 +57,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
       if (mounted) setState(() => _state = _ViewState.rejected);
     });
     _socketService.onScreenShareStarted((_) {
-      if (mounted) setState(() => _state = _ViewState.live);
+      if (mounted && _isStreamReady) setState(() => _state = _ViewState.live);
     });
     _socketService.onScreenShareStopped((_) => _teardown(notifyBackend: false));
     _socketService.onWebrtcAnswer(_onAnswer);
@@ -112,15 +115,18 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
     pc.onTrack = (RTCTrackEvent event) {
       if (event.track.kind == 'video') {
         if (event.streams.isNotEmpty) {
-          _remoteRenderer.srcObject = event.streams.first;
+          final stream = event.streams.first;
+          if (_remoteRenderer.srcObject != stream) {
+            _remoteRenderer.srcObject = stream;
+          }
         }
-        if (mounted) setState(() => _state = _ViewState.live);
+        if (mounted) {
+          setState(() {
+            _isStreamReady = true;
+            _state = _ViewState.live;
+          });
+        }
       }
-    };
-
-    pc.onAddStream = (MediaStream stream) {
-      _remoteRenderer.srcObject = stream;
-      if (mounted) setState(() => _state = _ViewState.live);
     };
 
     pc.onIceCandidate = (candidate) {
@@ -158,10 +164,6 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
           'sessionId': _sessionId,
           'sdp': {'sdp': answer.sdp, 'type': answer.type},
         });
-
-        if (mounted) {
-          setState(() => _state = _ViewState.live);
-        }
       } catch (e) {
         debugPrint('Error handling webrtc_offer: $e');
       }
@@ -203,20 +205,41 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   }
 
   Future<void> _teardown({required bool notifyBackend}) async {
+    if (mounted) {
+      setState(() {
+        _isStreamReady = false;
+        _state = _ViewState.ended;
+      });
+    }
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
-    await _pc?.close();
+    try {
+      _remoteRenderer.srcObject = null;
+    } catch (_) {}
+    try {
+      await _pc?.close();
+    } catch (_) {}
     _pc = null;
-    if (mounted) setState(() => _state = _ViewState.ended);
   }
 
   @override
   void dispose() {
+    _isStreamReady = false;
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
-    _pc?.close();
-    _remoteRenderer.dispose();
-    _socketService.disconnect();
+    try {
+      _remoteRenderer.srcObject = null;
+    } catch (_) {}
+    try {
+      _remoteRenderer.dispose();
+    } catch (_) {}
+    try {
+      _pc?.close();
+    } catch (_) {}
+    _pc = null;
+    try {
+      _socketService.disconnect();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -258,9 +281,23 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
       case _ViewState.ended:
         return const Text('Screen sharing session ended.');
       case _ViewState.live:
+        if (!_isStreamReady || !_isRendererInitialized || _remoteRenderer.srcObject == null) {
+          return const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Connecting video stream...'),
+            ],
+          );
+        }
         return AspectRatio(
           aspectRatio: 9 / 16,
-          child: RTCVideoView(_remoteRenderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain),
+          child: RTCVideoView(
+            _remoteRenderer,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+            filterQuality: FilterQuality.medium,
+          ),
         );
     }
   }

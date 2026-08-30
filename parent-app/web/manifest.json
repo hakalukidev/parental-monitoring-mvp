@@ -1,11 +1,11 @@
 {
-    "name": "parent_app",
-    "short_name": "parent_app",
+    "name": "Safetly Parent",
+    "short_name": "Safetly",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Safetly parent application for parental monitoring.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

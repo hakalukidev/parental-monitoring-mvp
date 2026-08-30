@@ -8,7 +8,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "https://api.hakaluki.dev",
+      "value": "http://192.168.0.150:4000",
       "type": "string"
     },
     {

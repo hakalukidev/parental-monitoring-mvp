@@ -110,7 +110,7 @@ class ScreenCaptureService : Service() {
             }, 300)
         }.start()
 
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun stopSharing() {
@@ -145,7 +145,10 @@ class ScreenCaptureService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId, "Screen Sharing", NotificationManager.IMPORTANCE_HIGH
-            )
+            ).apply {
+                description = "Notifies child when screen sharing is actively running."
+                setShowBadge(true)
+            }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(channel)
         }
@@ -161,6 +164,9 @@ class ScreenCaptureService : Service() {
             .setContentText("Your parent is viewing your screen.")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(0, "Stop Sharing", stopPendingIntent)
             .build()
     }

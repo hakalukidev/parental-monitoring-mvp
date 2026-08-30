@@ -14,6 +14,8 @@ class _CreateChildScreenState extends State<CreateChildScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
   bool _loading = false;
   String? _error;
 
@@ -65,15 +67,31 @@ class _CreateChildScreenState extends State<CreateChildScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _password,
-                  decoration: const InputDecoration(labelText: 'Password'),
-                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                  obscureText: _obscurePassword,
                   validator: (v) => (v == null || v.length < 8) ? 'At least 8 characters' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _confirm,
-                  decoration: const InputDecoration(labelText: 'Confirm Password'),
-                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'Confirm Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureConfirm ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                    ),
+                  ),
+                  obscureText: _obscureConfirm,
                   validator: (v) => v != _password.text ? 'Passwords do not match' : null,
                 ),
                 const SizedBox(height: 20),

@@ -18,13 +18,13 @@ android {
         buildConfigField(
             "String",
             "API_BASE_URL",
-            "\"https://api.hakaluki.dev\""
+            "\"http://192.168.0.150:4000\""
         )
 
         buildConfigField(
             "String",
             "SOCKET_URL",
-            "\"https://api.hakaluki.dev\""
+            "\"http://192.168.0.150:4000\""
         )
     }
 
