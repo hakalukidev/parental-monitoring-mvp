@@ -126,6 +126,65 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> requestCameraStream(
+    String childId, {
+    String cameraFacing = 'BACK',
+    bool withAudio = true,
+  }) async {
+    final res = await http.post(
+      _u('/api/camera-stream/request'),
+      headers: _authHeaders,
+      body: jsonEncode({
+        'childId': childId,
+        'cameraFacing': cameraFacing,
+        'withAudio': withAudio,
+      }),
+    );
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 201) {
+      throw ApiException(body['error']?.toString() ?? 'Could not request camera stream');
+    }
+    return body;
+  }
+
+  Future<void> stopCameraStream(String sessionId) async {
+    final res = await http.post(_u('/api/camera-stream/$sessionId/stop'), headers: _authHeaders);
+    if (res.statusCode != 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(body['error']?.toString() ?? 'Could not stop camera stream');
+    }
+  }
+
+  Future<Map<String, dynamic>> getLatestLocation(String childId) async {
+    final res = await http.get(_u('/api/location/latest/$childId'), headers: _authHeaders);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not load latest location');
+    }
+    return body;
+  }
+
+  Future<List<dynamic>> getLocationHistory(
+    String childId, {
+    DateTime? startTime,
+    DateTime? endTime,
+    int limit = 500,
+  }) async {
+    final queryParams = <String, String>{
+      'limit': limit.toString(),
+      if (startTime != null) 'startTime': startTime.toUtc().toIso8601String(),
+      if (endTime != null) 'endTime': endTime.toUtc().toIso8601String(),
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/location/history/$childId')
+        .replace(queryParameters: queryParams);
+    final res = await http.get(uri, headers: _authHeaders);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not load location history');
+    }
+    return body['points'] as List<dynamic>;
+  }
+
   Future<List<dynamic>> getIceServers() async {
     final res = await http.get(_u('/api/config'), headers: _authHeaders);
     final body = jsonDecode(res.body) as Map<String, dynamic>;

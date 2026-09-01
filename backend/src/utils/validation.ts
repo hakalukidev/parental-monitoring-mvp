@@ -42,3 +42,32 @@ export const registerDeviceSchema = z.object({
 export const screenShareRequestSchema = z.object({
   childId: z.string().min(1),
 });
+
+export const cameraStreamRequestSchema = z.object({
+  childId: z.string().min(1),
+  cameraFacing: z.enum(["BACK", "FRONT"]).default("BACK"),
+  withAudio: z.boolean().default(true),
+});
+
+export const recordLocationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy: z.number().nonnegative().optional(),
+  altitude: z.number().optional(),
+  speed: z.number().nonnegative().optional(),
+  heading: z.number().min(0).max(360).optional(),
+  batteryLevel: z.number().min(0).max(100).optional(),
+  recordedAt: z.string().or(z.date()).optional(),
+});
+
+export const recordLocationBatchSchema = z.object({
+  points: z.array(recordLocationSchema).min(1).max(500),
+});
+
+export const locationHistoryQuerySchema = z.object({
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(2000).default(500),
+});
+
+

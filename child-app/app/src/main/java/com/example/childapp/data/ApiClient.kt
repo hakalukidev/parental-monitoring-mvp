@@ -67,6 +67,44 @@ class ApiClient(private val session: SessionStore) {
         execute(req)
     }
 
+    /** POST /api/camera-stream/{id}/stop */
+    fun stopCameraStream(sessionId: String) {
+        val req = authedRequest("/api/camera-stream/$sessionId/stop", "POST").build()
+        execute(req)
+    }
+
+    /** POST /api/location/record */
+    fun postLocation(
+        latitude: Double,
+        longitude: Double,
+        accuracy: Float? = null,
+        speed: Float? = null,
+        heading: Float? = null,
+        altitude: Double? = null,
+        batteryLevel: Int? = null,
+        recordedAt: String? = null
+    ): JSONObject {
+        val payload = JSONObject().apply {
+            put("latitude", latitude)
+            put("longitude", longitude)
+            accuracy?.let { put("accuracy", it.toDouble()) }
+            speed?.let { put("speed", it.toDouble()) }
+            heading?.let { put("heading", it.toDouble()) }
+            altitude?.let { put("altitude", it) }
+            batteryLevel?.let { put("batteryLevel", it) }
+            recordedAt?.let { put("recordedAt", it) }
+        }
+        val req = authedRequest("/api/location/record", "POST", payload).build()
+        return execute(req)
+    }
+
+    /** POST /api/location/batch */
+    fun postLocationBatch(points: org.json.JSONArray): JSONObject {
+        val payload = JSONObject().put("points", points)
+        val req = authedRequest("/api/location/batch", "POST", payload).build()
+        return execute(req)
+    }
+
     private fun execute(req: Request): JSONObject {
         client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()

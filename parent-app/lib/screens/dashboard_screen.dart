@@ -3,6 +3,8 @@ import '../models/child.dart';
 import '../services/api_service.dart';
 import 'create_child_screen.dart';
 import 'screen_share_screen.dart';
+import 'camera_stream_screen.dart';
+import 'location_tracking_screen.dart';
 import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -155,17 +157,56 @@ class _ChildCard extends StatelessWidget {
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: online
-                    ? () => Navigator.of(context).push(
+              child: FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => ScreenShareScreen(childId: child.id, childName: child.name),
+                    builder: (_) => LocationTrackingScreen(
+                      childId: child.id,
+                      childName: child.name,
+                    ),
                   ),
-                )
-                    : null,
-                icon: const Icon(Icons.screen_share),
-                label: const Text('Share Screen'),
+                ),
+                icon: const Icon(Icons.location_on),
+                label: const Text('Track Location & Route'),
               ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: online
+                        ? () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => ScreenShareScreen(
+                                  childId: child.id,
+                                  childName: child.name,
+                                ),
+                              ),
+                            )
+                        : null,
+                    icon: const Icon(Icons.screen_share),
+                    label: const Text('Screen Share'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: online
+                        ? () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => CameraStreamScreen(
+                                  childId: child.id,
+                                  childName: child.name,
+                                ),
+                              ),
+                            )
+                        : null,
+                    icon: const Icon(Icons.videocam),
+                    label: const Text('Live Camera'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

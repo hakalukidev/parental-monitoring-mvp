@@ -14,9 +14,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.childapp.camera.CameraStreamService
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.ApiException
 import com.example.childapp.data.SessionStore
+import com.example.childapp.location.LocationService
 import com.example.childapp.screen.ScreenCaptureService
 import com.example.childapp.socket.SocketManager
 import kotlinx.coroutines.Dispatchers
@@ -33,10 +35,36 @@ class MainActivity : ComponentActivity() {
     // system MediaProjection permission dialog result.
     private var pendingSessionId: String? = null
 
+    // Pending camera request in case permission needs to be granted first
+    private var pendingCameraRequest: Triple<String, String, Boolean>? = null
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        // Notification permission granted or denied
+        // Notification permission handled
+    }
+
+    private val permissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val cameraGranted = grants[Manifest.permission.CAMERA] == true
+        val locationGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        val pending = pendingCameraRequest
+        val token = session.accessToken
+        if (locationGranted && token != null) {
+            LocationService.start(this, token)
+        }
+        if (pending != null && token != null) {
+            val (sid, facing, withAudio) = pending
+            if (cameraGranted) {
+                CameraStreamService.start(this, token, sid, facing, withAudio)
+                screenState.value = ChildScreenState.CameraActive(sid, facing)
+            } else {
+                socketManager?.rejectCameraStream(sid, "permission_denied")
+            }
+            pendingCameraRequest = null
+        }
     }
 
     private val mediaProjectionLauncher = registerForActivityResult(
@@ -58,17 +86,33 @@ class MainActivity : ComponentActivity() {
 
     private val screenState = mutableStateOf<ChildScreenState>(ChildScreenState.Idle)
 
-    private fun checkNotificationPermission() {
+    private fun checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+        val needed = mutableListOf<String>()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.CAMERA)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+        if (needed.isNotEmpty()) {
+            permissionsLauncher.launch(needed.toTypedArray())
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        checkNotificationPermission()
+        checkPermissions()
         session = SessionStore(applicationContext)
         api = ApiClient(session)
 
@@ -98,7 +142,11 @@ class MainActivity : ComponentActivity() {
                                         }
                                         loggedIn = true
                                         startSocket()
+                                        session.accessToken?.let { tok ->
+                                            LocationService.start(this@MainActivity, tok)
+                                        }
                                         deviceConnected = true
+                                        checkPermissions()
                                     } catch (e: ApiException) {
                                         error = e.message
                                     } catch (e: Exception) {
@@ -124,11 +172,17 @@ class MainActivity : ComponentActivity() {
                                 ScreenCaptureService.stop(this@MainActivity)
                                 screenState.value = ChildScreenState.Idle
                             },
+                            onStopCamera = {
+                                CameraStreamService.stop(this@MainActivity)
+                                screenState.value = ChildScreenState.Idle
+                            },
                             onLogout = {
-                                // Stop any active/pending screen share first.
                                 if (state is ChildScreenState.Active) {
                                     ScreenCaptureService.stop(this@MainActivity)
+                                } else if (state is ChildScreenState.CameraActive) {
+                                    CameraStreamService.stop(this@MainActivity)
                                 }
+                                LocationService.stop(this@MainActivity)
                                 screenState.value = ChildScreenState.Idle
                                 socketManager?.disconnect()
                                 socketManager = null
@@ -145,6 +199,9 @@ class MainActivity : ComponentActivity() {
 
         if (session.accessToken != null) {
             startSocket()
+            session.accessToken?.let { tok ->
+                LocationService.start(this, tok)
+            }
         }
     }
 
@@ -162,13 +219,33 @@ class MainActivity : ComponentActivity() {
                 screenState.value = ChildScreenState.Idle
             }
         }
+        socket.onCameraStreamRequest = { sessionId, parentId, cameraFacing, withAudio ->
+            runOnUiThread {
+                val hasCamera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                if (hasCamera) {
+                    CameraStreamService.start(this, token, sessionId, cameraFacing, withAudio)
+                    screenState.value = ChildScreenState.CameraActive(sessionId, cameraFacing)
+                } else {
+                    pendingCameraRequest = Triple(sessionId, cameraFacing, withAudio)
+                    permissionsLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                }
+            }
+        }
+        socket.onCameraStreamStopped = { sessionId ->
+            runOnUiThread {
+                if (screenState.value is ChildScreenState.CameraActive) {
+                    CameraStreamService.stop(this)
+                }
+                screenState.value = ChildScreenState.Idle
+            }
+        }
         socket.connect()
         socketManager = socket
     }
 
     /** Child tapped "Accept" in-app -> now trigger Android's own MediaProjection consent dialog. */
     private fun onConsentAccepted(sessionId: String) {
-        checkNotificationPermission()
+        checkPermissions()
         pendingSessionId = sessionId
         val projectionManager =
             getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager

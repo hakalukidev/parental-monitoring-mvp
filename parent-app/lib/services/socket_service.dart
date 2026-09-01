@@ -31,6 +31,14 @@ class SocketService {
     socket.on('child_status_changed', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
+  void onChildLocationUpdate(void Function(Map<String, dynamic>) cb) {
+    socket.on('child_location_update', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void off(String event) {
+    _socket?.off(event);
+  }
+
   void onScreenShareAccept(void Function(Map<String, dynamic>) cb) {
     socket.on('screen_share_accept', (data) => cb(Map<String, dynamic>.from(data)));
   }
@@ -45,6 +53,29 @@ class SocketService {
 
   void onScreenShareStopped(void Function(Map<String, dynamic>) cb) {
     socket.on('screen_share_stopped', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onCameraStreamAccept(void Function(Map<String, dynamic>) cb) {
+    socket.on('camera_stream_accept', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onCameraStreamReject(void Function(Map<String, dynamic>) cb) {
+    socket.on('camera_stream_reject', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onCameraStreamStarted(void Function(Map<String, dynamic>) cb) {
+    socket.on('camera_stream_started', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onCameraStreamStopped(void Function(Map<String, dynamic>) cb) {
+    socket.on('camera_stream_stopped', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void switchCamera(String sessionId, {String? cameraFacing}) {
+    socket.emit('camera_stream_switch_camera', {
+      'sessionId': sessionId,
+      if (cameraFacing != null) 'cameraFacing': cameraFacing,
+    });
   }
 
   void onWebrtcAnswer(void Function(Map<String, dynamic>) cb) {

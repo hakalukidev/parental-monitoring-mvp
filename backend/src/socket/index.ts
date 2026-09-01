@@ -2,6 +2,10 @@ import { Server, Socket } from "socket.io";
 import { verifyAccessToken } from "../utils/jwt";
 import { Device } from "../models/Device";
 import { ScreenShareSession } from "../models/ScreenShareSession";
+import { CameraStreamSession } from "../models/CameraStreamSession";
+import { LocationRecord } from "../models/LocationRecord";
+import { User } from "../models/User";
+
 import {
   setChildSocket,
   removeChildSocket,
@@ -52,13 +56,23 @@ export function registerSocketHandlers(io: Server): void {
 
     // Auto-join any active/requested sessions for this user so reconnected sockets stay in sync
     try {
-      const activeSessions = await ScreenShareSession.find({
+      const activeScreenSessions = await ScreenShareSession.find({
         $or: [
           { parentId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
           { childId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
         ],
       });
-      for (const s of activeSessions) {
+      for (const s of activeScreenSessions) {
+        socket.join(`session:${s.id}`);
+      }
+
+      const activeCameraSessions = await CameraStreamSession.find({
+        $or: [
+          { parentId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
+          { childId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
+        ],
+      });
+      for (const s of activeCameraSessions) {
         socket.join(`session:${s.id}`);
       }
     } catch {
@@ -68,19 +82,27 @@ export function registerSocketHandlers(io: Server): void {
     // ---- Explicit room joining ----
     socket.on("join_session", async ({ sessionId }: { sessionId: string }) => {
       if (!sessionId) return;
-      const session = await ScreenShareSession.findById(sessionId);
-      if (!session) return;
-      const isParticipant =
-        (role === "PARENT" && session.parentId.toString() === userId) ||
-        (role === "CHILD" && session.childId.toString() === userId);
-      if (!isParticipant) return;
+      const screenSession = await ScreenShareSession.findById(sessionId);
+      if (screenSession) {
+        const isParticipant =
+          (role === "PARENT" && screenSession.parentId.toString() === userId) ||
+          (role === "CHILD" && screenSession.childId.toString() === userId);
+        if (isParticipant) socket.join(`session:${sessionId}`);
+        return;
+      }
 
-      socket.join(`session:${sessionId}`);
+      const cameraSession = await CameraStreamSession.findById(sessionId);
+      if (cameraSession) {
+        const isParticipant =
+          (role === "PARENT" && cameraSession.parentId.toString() === userId) ||
+          (role === "CHILD" && cameraSession.childId.toString() === userId);
+        if (isParticipant) socket.join(`session:${sessionId}`);
+      }
     });
 
     // ---- Screen share consent flow ----
 
-    // Child approves a pending request
+    // Child approves a pending screen share request
     socket.on("screen_share_accept", async ({ sessionId }: { sessionId: string }) => {
       if (role !== "CHILD") return;
       const session = await ScreenShareSession.findById(sessionId);
@@ -102,7 +124,7 @@ export function registerSocketHandlers(io: Server): void {
       }
     });
 
-    // Child rejects a pending request
+    // Child rejects a pending screen share request
     socket.on("screen_share_reject", async ({ sessionId }: { sessionId: string }) => {
       if (role !== "CHILD") return;
       const session = await ScreenShareSession.findById(sessionId);
@@ -119,18 +141,106 @@ export function registerSocketHandlers(io: Server): void {
       }
     });
 
+    // ---- Camera stream flow ----
+
+    // Child accepts / starts camera stream
+    socket.on("camera_stream_accept", async ({ sessionId }: { sessionId: string }) => {
+      if (role !== "CHILD") return;
+      const session = await CameraStreamSession.findById(sessionId);
+      if (!session || session.childId.toString() !== userId) return;
+
+      socket.join(`session:${sessionId}`);
+      for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
+        io.sockets.sockets.get(parentSocketId)?.join(`session:${sessionId}`);
+      }
+
+      if (session.status === "REQUESTED") {
+        session.status = "ACCEPTED";
+        await session.save();
+        io.to(`session:${sessionId}`).emit("camera_stream_accept", { sessionId });
+      } else if (session.status === "ACCEPTED" || session.status === "ACTIVE") {
+        io.to(`session:${sessionId}`).emit("camera_stream_accept", { sessionId });
+      }
+    });
+
+    // Child rejects or reports error for camera stream
+    socket.on(
+      "camera_stream_reject",
+      async ({ sessionId, reason }: { sessionId: string; reason?: string }) => {
+        if (role !== "CHILD") return;
+        const session = await CameraStreamSession.findById(sessionId);
+        if (!session || session.childId.toString() !== userId) return;
+        if (session.status !== "REQUESTED") return;
+
+        session.status = "REJECTED";
+        session.endedAt = new Date();
+        session.endedBy = "CHILD";
+        await session.save();
+
+        for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
+          io.to(parentSocketId).emit("camera_stream_reject", { sessionId, reason });
+        }
+      }
+    );
+
+    // Parent requests switching camera lens (front / back)
+    socket.on(
+      "camera_stream_switch_camera",
+      async ({ sessionId, cameraFacing }: { sessionId: string; cameraFacing?: "BACK" | "FRONT" }) => {
+        if (role !== "PARENT") return;
+        const session = await CameraStreamSession.findById(sessionId);
+        if (!session || session.parentId.toString() !== userId) return;
+
+        if (cameraFacing) {
+          session.cameraFacing = cameraFacing;
+          await session.save();
+        }
+
+        socket.to(`session:${sessionId}`).emit("camera_stream_switch_camera", {
+          sessionId,
+          cameraFacing: session.cameraFacing,
+        });
+      }
+    );
+
+    // Camera stream stopped over socket
+    socket.on("camera_stream_stopped", async ({ sessionId }: { sessionId: string }) => {
+      const session = await CameraStreamSession.findById(sessionId);
+      if (!session) return;
+      const isParticipant =
+        (role === "PARENT" && session.parentId.toString() === userId) ||
+        (role === "CHILD" && session.childId.toString() === userId);
+      if (!isParticipant || session.status === "ENDED") return;
+
+      session.status = "ENDED";
+      session.endedAt = new Date();
+      session.endedBy = role;
+      await session.save();
+
+      io.to(`session:${sessionId}`).emit("camera_stream_stopped", { sessionId, endedBy: role });
+    });
+
     // ---- WebRTC signaling relay (backend never touches media, just forwards SDP/ICE) ----
 
     socket.on(
       "webrtc_offer",
       async ({ sessionId, sdp }: { sessionId: string; sdp: unknown }) => {
-        const session = await ScreenShareSession.findById(sessionId);
-        if (!session) return;
-        if (session.status === "ACCEPTED") {
-          session.status = "ACTIVE";
-          session.startedAt = new Date();
-          await session.save();
-          io.to(`session:${sessionId}`).emit("screen_share_started", { sessionId });
+        const screenSession = await ScreenShareSession.findById(sessionId);
+        if (screenSession) {
+          if (screenSession.status === "ACCEPTED") {
+            screenSession.status = "ACTIVE";
+            screenSession.startedAt = new Date();
+            await screenSession.save();
+            io.to(`session:${sessionId}`).emit("screen_share_started", { sessionId });
+          }
+        } else {
+          const cameraSession = await CameraStreamSession.findById(sessionId);
+          if (cameraSession && cameraSession.status === "ACCEPTED") {
+            cameraSession.status = "ACTIVE";
+            cameraSession.startedAt = new Date();
+            await cameraSession.save();
+            io.to(`session:${sessionId}`).emit("camera_stream_started", { sessionId });
+          }
         }
         socket.to(`session:${sessionId}`).emit("webrtc_offer", { sessionId, sdp });
       }
@@ -164,6 +274,67 @@ export function registerSocketHandlers(io: Server): void {
       io.to(`session:${sessionId}`).emit("screen_share_stopped", { sessionId, endedBy: role });
     });
 
+    // ---- Live GPS Location Tracking ----
+    socket.on(
+      "location_update",
+      async (data: {
+        latitude: number;
+        longitude: number;
+        accuracy?: number;
+        altitude?: number;
+        speed?: number;
+        heading?: number;
+        batteryLevel?: number;
+        recordedAt?: string | Date;
+      }) => {
+        if (role !== "CHILD" || !data || typeof data.latitude !== "number" || typeof data.longitude !== "number") {
+          return;
+        }
+
+        try {
+          const recordedDate = data.recordedAt ? new Date(data.recordedAt) : new Date();
+          const device = await Device.findOne({ childId: userId }).sort({ updatedAt: -1 });
+
+          const locationPayload = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            accuracy: data.accuracy,
+            altitude: data.altitude,
+            speed: data.speed,
+            heading: data.heading,
+            batteryLevel: data.batteryLevel,
+            recordedAt: recordedDate,
+          };
+
+          await LocationRecord.create({
+            childId: userId,
+            deviceId: device?._id || null,
+            ...locationPayload,
+          });
+
+          if (device) {
+            device.lastLocation = locationPayload;
+            device.lastSeen = new Date();
+            await device.save();
+          }
+
+          const child = await User.findById(userId);
+          if (child?.parentId) {
+            const parentSocketIds = getParentSocketIds(child.parentId.toString());
+            for (const pSocketId of parentSocketIds) {
+              io.to(pSocketId).emit("child_location_update", {
+                childId: userId,
+                ...locationPayload,
+              });
+            }
+          }
+        } catch (err) {
+          // Keep socket resilient on DB write error
+          console.error("Failed to process location_update socket event:", err);
+        }
+      }
+    );
+
     socket.on("disconnect", async () => {
       if (role === "CHILD") {
         const childId = findChildIdBySocket(socket.id);
@@ -177,17 +348,34 @@ export function registerSocketHandlers(io: Server): void {
             );
             socket.broadcast.emit("child_status_changed", { childId, status: "OFFLINE" });
 
-            // Auto-end any still-active session for this child so the parent UI doesn't hang.
-            const activeSessions = await ScreenShareSession.find({
+            // Auto-end any still-active screen sessions for this child so the parent UI doesn't hang.
+            const activeScreenSessions = await ScreenShareSession.find({
               childId,
               status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
             });
-            for (const s of activeSessions) {
+            for (const s of activeScreenSessions) {
               s.status = "ENDED";
               s.endedAt = new Date();
               s.endedBy = "SYSTEM";
               await s.save();
               io.to(`session:${s.id}`).emit("screen_share_stopped", {
+                sessionId: s.id,
+                endedBy: "SYSTEM",
+                reason: "child_disconnected",
+              });
+            }
+
+            // Auto-end any still-active camera sessions for this child
+            const activeCameraSessions = await CameraStreamSession.find({
+              childId,
+              status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
+            });
+            for (const s of activeCameraSessions) {
+              s.status = "ENDED";
+              s.endedAt = new Date();
+              s.endedBy = "SYSTEM";
+              await s.save();
+              io.to(`session:${s.id}`).emit("camera_stream_stopped", {
                 sessionId: s.id,
                 endedBy: "SYSTEM",
                 reason: "child_disconnected",
