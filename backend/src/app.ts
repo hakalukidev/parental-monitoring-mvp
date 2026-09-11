@@ -32,10 +32,10 @@ export function createApp(): Express {
   app.get("/health", (_req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 
   app.use("/api/auth", authRoutes);
-  app.use("/api/children", childrenRoutes);
   app.use("/api/children", appPolicyRoutes);
   app.use("/api/children", webRulesRoutes);
   app.use("/api/children", browsingHistoryRoutes);
+  app.use("/api/children", childrenRoutes);
   app.use("/api/devices", deviceRoutes);
   app.use("/api/screen-share", screenShareRoutes);
   app.use("/api/camera-stream", cameraStreamRoutes);

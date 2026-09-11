@@ -4,10 +4,10 @@ import { requireAuth, requireRole } from "../middleware/auth";
 
 const router = Router();
 
-router.use(requireAuth, requireRole("PARENT"));
+const parentAuth = [requireAuth, requireRole("PARENT")];
 
-router.post("/", createChild);
-router.get("/", listChildren);
-router.get("/:id", getChild);
+router.post("/", ...parentAuth, createChild);
+router.get("/", ...parentAuth, listChildren);
+router.get("/:id", ...parentAuth, getChild);
 
 export default router;

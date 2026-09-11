@@ -134,40 +134,62 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
               ),
               const SizedBox(height: 16),
               const Text('Rule Type:', style: TextStyle(fontWeight: FontWeight.bold)),
-              Row(
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
                 children: [
-                  Radio<String>(
-                    value: 'DOMAIN',
-                    groupValue: ruleType,
-                    onChanged: (val) => setDialogState(() => ruleType = val!),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Radio<String>(
+                        value: 'DOMAIN',
+                        groupValue: ruleType,
+                        onChanged: (val) => setDialogState(() => ruleType = val!),
+                      ),
+                      const Text('Domain / Host'),
+                    ],
                   ),
-                  const Text('Domain'),
-                  const SizedBox(width: 16),
-                  Radio<String>(
-                    value: 'KEYWORD',
-                    groupValue: ruleType,
-                    onChanged: (val) => setDialogState(() => ruleType = val!),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Radio<String>(
+                        value: 'KEYWORD',
+                        groupValue: ruleType,
+                        onChanged: (val) => setDialogState(() => ruleType = val!),
+                      ),
+                      const Text('Keyword'),
+                    ],
                   ),
-                  const Text('Keyword'),
                 ],
               ),
               const SizedBox(height: 8),
               const Text('Action:', style: TextStyle(fontWeight: FontWeight.bold)),
-              Row(
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
                 children: [
-                  Radio<String>(
-                    value: 'BLOCK',
-                    groupValue: action,
-                    onChanged: (val) => setDialogState(() => action = val!),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Radio<String>(
+                        value: 'BLOCK',
+                        groupValue: action,
+                        onChanged: (val) => setDialogState(() => action = val!),
+                      ),
+                      const Text('Block (Blacklist)'),
+                    ],
                   ),
-                  const Text('Block (Blacklist)'),
-                  const SizedBox(width: 16),
-                  Radio<String>(
-                    value: 'ALLOW',
-                    groupValue: action,
-                    onChanged: (val) => setDialogState(() => action = val!),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Radio<String>(
+                        value: 'ALLOW',
+                        groupValue: action,
+                        onChanged: (val) => setDialogState(() => action = val!),
+                      ),
+                      const Text('Allow (Whitelist)'),
+                    ],
                   ),
-                  const Text('Allow (Whitelist)'),
                 ],
               ),
             ],
