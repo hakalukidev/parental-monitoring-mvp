@@ -47,6 +47,7 @@ child-app/captures/
 child-app/.cxx/
 child-app/*.apk
 child-app/*.aab
+child-app/.android/
 
 # Keep the Gradle wrapper scripts themselves (needed to build without a pre-installed Gradle)
 !child-app/gradlew

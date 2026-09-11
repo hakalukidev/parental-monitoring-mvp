@@ -70,4 +70,92 @@ export const locationHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(2000).default(500),
 });
 
+// App Policy Validation Schemas
+export const syncInstalledAppsSchema = z.object({
+  apps: z.array(
+    z.object({
+      packageName: z.string().min(1),
+      appName: z.string().min(1),
+      category: z.string().default("OTHER"),
+      versionName: z.string().optional(),
+      isSystemApp: z.boolean().default(false),
+    })
+  ),
+});
+
+export const updateAppPolicySchema = z.object({
+  appName: z.string().optional(),
+  category: z
+    .enum(["GAME", "SOCIAL", "ENTERTAINMENT", "EDUCATION", "PRODUCTIVITY", "OTHER"])
+    .optional(),
+  status: z.enum(["ALWAYS_ALLOWED", "BLOCKED", "TIME_LIMITED", "SCHEDULED"]),
+  dailyLimitMinutes: z.number().min(0).max(1440).optional(),
+  schedules: z
+    .array(
+      z.object({
+        daysOfWeek: z.array(z.number().min(0).max(6)),
+        startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+      })
+    )
+    .optional(),
+  isSystemWhitelisted: z.boolean().optional(),
+});
+
+export const bulkUpdatePolicySchema = z.object({
+  category: z.enum(["GAME", "SOCIAL", "ENTERTAINMENT", "EDUCATION", "PRODUCTIVITY", "OTHER"]),
+  status: z.enum(["ALWAYS_ALLOWED", "BLOCKED", "TIME_LIMITED", "SCHEDULED"]),
+  dailyLimitMinutes: z.number().min(0).max(1440).optional(),
+});
+
+export const toggleDevicePauseSchema = z.object({
+  isPaused: z.boolean(),
+});
+
+// Web Block Rules Validation Schemas
+export const createWebRuleSchema = z.object({
+  ruleType: z.enum(["DOMAIN", "KEYWORD", "CATEGORY"]),
+  target: z.string().min(1),
+  action: z.enum(["BLOCK", "ALLOW"]).default("BLOCK"),
+  isEnabled: z.boolean().default(true),
+});
+
+export const updateWebRuleSchema = z.object({
+  action: z.enum(["BLOCK", "ALLOW"]).optional(),
+  isEnabled: z.boolean().optional(),
+});
+
+// Browsing History Validation Schemas
+export const recordBrowsingHistorySchema = z.object({
+  url: z.string().min(1),
+  domain: z.string().min(1),
+  title: z.string().default(""),
+  browser: z
+    .enum(["CHROME", "FIREFOX", "SAMSUNG_BROWSER", "EDGE", "OPERA", "BRAVE", "OTHER"])
+    .default("OTHER"),
+  isIncognito: z.boolean().default(false),
+  category: z
+    .enum(["EDUCATION", "ENTERTAINMENT", "GAMING", "SOCIAL", "ADULT", "SUSPICIOUS", "GENERAL"])
+    .optional(),
+  isBlockedAttempt: z.boolean().default(false),
+  blockedReason: z.string().optional(),
+  visitedAt: z.string().or(z.date()).optional(),
+});
+
+export const recordBrowsingBatchSchema = z.object({
+  records: z.array(recordBrowsingHistorySchema).min(1).max(500),
+});
+
+export const browsingHistoryQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  search: z.string().optional(),
+  browser: z.string().optional(),
+  isFlagged: z.string().optional(),
+  isBlockedAttempt: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+
 

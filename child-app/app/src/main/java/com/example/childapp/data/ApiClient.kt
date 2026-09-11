@@ -49,7 +49,36 @@ class ApiClient(private val session: SessionStore) {
         session.accessToken = body.getString("accessToken")
         val user = body.getJSONObject("user")
         session.childName = user.getString("name")
+        session.childId = user.getString("id")
         return body
+    }
+
+    /** POST /api/children/:childId/apps/sync */
+    fun syncInstalledApps(apps: org.json.JSONArray): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val payload = JSONObject().put("apps", apps)
+        val req = authedRequest("/api/children/$childId/apps/sync", "POST", payload).build()
+        return execute(req)
+    }
+
+    /** GET /api/children/my-policies */
+    fun getMyPolicies(): JSONObject {
+        val req = authedRequest("/api/children/my-policies", "GET").build()
+        return execute(req)
+    }
+
+    /** GET /api/children/my-web-rules */
+    fun getMyWebRules(): JSONObject {
+        val req = authedRequest("/api/children/my-web-rules", "GET").build()
+        return execute(req)
+    }
+
+    /** POST /api/children/:childId/browsing-history/batch */
+    fun postBrowsingHistoryBatch(records: org.json.JSONArray): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val payload = JSONObject().put("records", records)
+        val req = authedRequest("/api/children/$childId/browsing-history/batch", "POST", payload).build()
+        return execute(req)
     }
 
     /** POST /api/devices/register */

@@ -5,10 +5,12 @@ import { ScreenShareSession } from "../models/ScreenShareSession";
 import { CameraStreamSession } from "../models/CameraStreamSession";
 import { LocationRecord } from "../models/LocationRecord";
 import { User } from "../models/User";
+import { BrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
 
 import {
   setChildSocket,
   removeChildSocket,
+  getChildSocketIds,
   addParentSocket,
   removeParentSocket,
   getParentSocketIds,
@@ -331,6 +333,141 @@ export function registerSocketHandlers(io: Server): void {
         } catch (err) {
           // Keep socket resilient on DB write error
           console.error("Failed to process location_update socket event:", err);
+        }
+      }
+    );
+
+    // ---- App & Game Blocker: Unblock Request flow ----
+    socket.on(
+      "unblock_request",
+      async (data: {
+        requestId?: string;
+        childId?: string;
+        packageName: string;
+        appName: string;
+        reason?: string;
+      }) => {
+        if (role !== "CHILD" || !data.packageName) return;
+        try {
+          const child = await User.findById(userId);
+          if (child?.parentId) {
+            const parentSockets = getParentSocketIds(child.parentId.toString());
+            const payload = {
+              requestId: data.requestId || new Date().getTime().toString(),
+              childId: userId,
+              childName: child.name,
+              packageName: data.packageName,
+              appName: data.appName,
+              reason: data.reason || "Need extra time",
+              requestedAt: new Date().toISOString(),
+            };
+            for (const pSocketId of parentSockets) {
+              io.to(pSocketId).emit("unblock_request", payload);
+            }
+          }
+        } catch (err) {
+          console.error("Error processing unblock_request socket event:", err);
+        }
+      }
+    );
+
+    // Parent responds to child's unblock request
+    socket.on(
+      "unblock_response",
+      async (data: {
+        requestId: string;
+        childId: string;
+        packageName: string;
+        approved: boolean;
+        temporaryDurationMinutes?: number;
+      }) => {
+        if (role !== "PARENT" || !data.childId || !data.packageName) return;
+        try {
+          const childSockets = getChildSocketIds(data.childId);
+          for (const cSocketId of childSockets) {
+            io.to(cSocketId).emit("unblock_response", {
+              requestId: data.requestId,
+              packageName: data.packageName,
+              approved: data.approved,
+              temporaryDurationMinutes: data.temporaryDurationMinutes ?? (data.approved ? 15 : 0),
+            });
+          }
+        } catch (err) {
+          console.error("Error processing unblock_response socket event:", err);
+        }
+      }
+    );
+
+    // Parent toggles instant lockdown over socket
+    socket.on(
+      "instant_lockdown_toggle",
+      async (data: { childId: string; isPaused: boolean }) => {
+        if (role !== "PARENT" || !data.childId) return;
+        try {
+          await Device.updateMany({ childId: data.childId }, { isPaused: data.isPaused });
+          const childSockets = getChildSocketIds(data.childId);
+          for (const cSocketId of childSockets) {
+            io.to(cSocketId).emit("instant_lockdown_toggle", {
+              isPaused: data.isPaused,
+            });
+          }
+        } catch (err) {
+          console.error("Error processing instant_lockdown_toggle socket event:", err);
+        }
+      }
+    );
+
+    // ---- Browsing History Monitoring: Real-time event ----
+    socket.on(
+      "new_browsing_activity",
+      async (data: {
+        url: string;
+        domain: string;
+        title?: string;
+        browser?: string;
+        isIncognito?: boolean;
+        category?: string;
+        isBlockedAttempt?: boolean;
+        blockedReason?: string;
+        visitedAt?: string | Date;
+      }) => {
+        if (role !== "CHILD" || !data.url || !data.domain) return;
+        try {
+          const device = await Device.findOne({ childId: userId }).sort({ updatedAt: -1 }).lean();
+          const record = await BrowsingHistoryRecord.create({
+            childId: userId,
+            deviceId: device?._id ?? null,
+            url: data.url,
+            domain: data.domain,
+            title: data.title || "",
+            browser: (data.browser as any) || "OTHER",
+            isIncognito: data.isIncognito ?? false,
+            category: (data.category as any) || "GENERAL",
+            isBlockedAttempt: data.isBlockedAttempt ?? false,
+            blockedReason: data.blockedReason,
+            visitedAt: data.visitedAt ? new Date(data.visitedAt) : new Date(),
+          });
+
+          const child = await User.findById(userId);
+          if (child?.parentId) {
+            const parentSockets = getParentSocketIds(child.parentId.toString());
+            for (const pSocketId of parentSockets) {
+              io.to(pSocketId).emit("new_browsing_activity", {
+                childId: userId,
+                record,
+              });
+
+              if (record.isBlockedAttempt || record.category === "ADULT" || record.category === "SUSPICIOUS") {
+                io.to(pSocketId).emit("suspicious_web_alert", {
+                  childId: userId,
+                  childName: child.name,
+                  record,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error processing new_browsing_activity socket event:", err);
         }
       }
     );

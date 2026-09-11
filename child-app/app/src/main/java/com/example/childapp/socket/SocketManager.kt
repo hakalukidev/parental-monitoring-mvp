@@ -1,6 +1,8 @@
 package com.example.childapp.socket
 
 import com.example.childapp.BuildConfig
+import com.example.childapp.data.CachedBrowsingHistory
+import com.example.childapp.data.LocalDatabase
 import io.socket.client.IO
 import io.socket.client.Socket
 import org.json.JSONObject
@@ -11,6 +13,8 @@ import org.json.JSONObject
  *  - receiving `screen_share_request` from a parent
  *  - sending accept/reject
  *  - relaying WebRTC offer/answer/ICE candidates
+ *  - real-time policy updates, instant lockdown, and unblock approvals
+ *  - real-time browsing history reporting
  */
 class SocketManager(private val accessToken: String) {
 
@@ -25,6 +29,11 @@ class SocketManager(private val accessToken: String) {
     var onIceCandidate: ((sessionId: String, candidate: JSONObject) -> Unit)? = null
     var onConnected: (() -> Unit)? = null
     var onDisconnected: (() -> Unit)? = null
+
+    // Blocker & Browsing History callbacks
+    var onPolicyUpdated: ((data: JSONObject) -> Unit)? = null
+    var onInstantLockdownToggle: ((isPaused: Boolean) -> Unit)? = null
+    var onUnblockResponse: ((requestId: String, packageName: String, approved: Boolean, durationMinutes: Int) -> Unit)? = null
 
     fun connect() {
         val uri = java.net.URI.create(BuildConfig.SOCKET_URL)
@@ -92,6 +101,24 @@ class SocketManager(private val accessToken: String) {
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
                 onIceCandidate?.invoke(data.getString("sessionId"), data.getJSONObject("candidate"))
             }
+            s.on("policy_updated") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                onPolicyUpdated?.invoke(data)
+            }
+            s.on("instant_lockdown_toggle") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                val isPaused = data.optBoolean("isPaused", false)
+                onInstantLockdownToggle?.invoke(isPaused)
+            }
+            s.on("unblock_response") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                onUnblockResponse?.invoke(
+                    data.optString("requestId", ""),
+                    data.optString("packageName", ""),
+                    data.optBoolean("approved", false),
+                    data.optInt("temporaryDurationMinutes", 15)
+                )
+            }
             s.connect()
         }
     }
@@ -158,6 +185,36 @@ class SocketManager(private val accessToken: String) {
             recordedAt?.let { put("recordedAt", it) }
         }
         socket?.emit("location_update", payload)
+    }
+
+    fun sendUnblockRequest(
+        requestId: String,
+        packageName: String,
+        appName: String,
+        reason: String
+    ) {
+        val payload = JSONObject().apply {
+            put("requestId", requestId)
+            put("packageName", packageName)
+            put("appName", appName)
+            put("reason", reason)
+        }
+        socket?.emit("unblock_request", payload)
+    }
+
+    fun sendBrowsingActivity(entry: CachedBrowsingHistory) {
+        val payload = JSONObject().apply {
+            put("url", entry.url)
+            put("domain", entry.domain)
+            put("title", entry.title)
+            put("browser", entry.browser)
+            put("isIncognito", entry.isIncognito)
+            put("category", entry.category)
+            put("isBlockedAttempt", entry.isBlockedAttempt)
+            entry.blockedReason?.let { put("blockedReason", it) }
+            put("visitedAt", entry.visitedAt)
+        }
+        socket?.emit("new_browsing_activity", payload)
     }
 
     fun disconnect() {

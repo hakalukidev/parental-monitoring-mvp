@@ -32,10 +32,15 @@ class SessionStore(context: Context) {
         get() = prefs.getString(KEY_PARENT_NAME, null)
         set(value) = prefs.edit().putString(KEY_PARENT_NAME, value).apply()
 
+    var childId: String?
+        get() = prefs.getString(KEY_CHILD_ID, null)
+        set(value) = prefs.edit().putString(KEY_CHILD_ID, value).apply()
+
     fun clear() = prefs.edit().clear().apply()
 
     companion object {
         private const val KEY_ACCESS_TOKEN = "access_token"
+        private const val KEY_CHILD_ID = "child_id"
         private const val KEY_CHILD_NAME = "child_name"
         private const val KEY_PARENT_NAME = "parent_name"
     }

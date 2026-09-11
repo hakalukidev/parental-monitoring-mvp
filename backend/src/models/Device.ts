@@ -22,6 +22,7 @@ export interface IDevice extends Document {
   lastSeen: Date;
   socketId?: string | null; // current active socket connection id, if online
   lastLocation?: IDeviceLocation | null;
+  isPaused?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +35,7 @@ const deviceSchema = new Schema<IDevice>(
     status: { type: String, enum: ["ONLINE", "OFFLINE"], default: "OFFLINE" },
     lastSeen: { type: Date, default: Date.now },
     socketId: { type: String, default: null },
+    isPaused: { type: Boolean, default: false },
     lastLocation: {
       latitude: { type: Number },
       longitude: { type: Number },

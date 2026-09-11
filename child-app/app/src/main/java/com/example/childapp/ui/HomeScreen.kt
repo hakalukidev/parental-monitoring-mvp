@@ -1,6 +1,9 @@
 package com.example.childapp.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import android.content.Intent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material3.*
@@ -46,6 +49,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp)
         ) {
             Text("Welcome, $childName", style = MaterialTheme.typography.headlineSmall)
@@ -72,6 +76,112 @@ fun HomeScreen(
             Spacer(Modifier.height(16.dp))
             val isLocationTracking by com.example.childapp.location.LocationService.isTracking.collectAsState()
             val latestLocation by com.example.childapp.location.LocationService.latestLocation.collectAsState()
+
+            // ---- Safety Protection & Permissions ----
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val hasUsageAccess = remember(state) {
+                com.example.childapp.blocker.AppUsageTracker.hasUsageStatsPermission(context)
+            }
+            val hasOverlay = remember(state) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    android.provider.Settings.canDrawOverlays(context)
+                } else true
+            }
+            val isAccessibilityActive = remember(state) {
+                com.example.childapp.accessibility.ChildAccessibilityService.isRunning
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Protection & Blocker Setup", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+
+                    // Accessibility
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text("Accessibility Service", style = MaterialTheme.typography.bodyMedium)
+                        if (isAccessibilityActive) {
+                            Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                Text("ACTIVE", modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Enable")
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    // Usage Access
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text("Usage Access (Screen Time)", style = MaterialTheme.typography.bodyMedium)
+                        if (hasUsageAccess) {
+                            Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                Text("GRANTED", modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    context.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Grant")
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    // Overlay
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text("Display Over Apps", style = MaterialTheme.typography.bodyMedium)
+                        if (hasOverlay) {
+                            Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                Text("GRANTED", modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                                        context.startActivity(
+                                            Intent(
+                                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                android.net.Uri.parse("package:${context.packageName}")
+                                            )
+                                        )
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Grant")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
 
             Card(
                 modifier = Modifier.fillMaxWidth(),

@@ -93,4 +93,50 @@ class SocketService {
   void joinSession(String sessionId) {
     socket.emit('join_session', {'sessionId': sessionId});
   }
+
+  // ==========================================
+  // App Blocker & Unblock Requests
+  // ==========================================
+
+  void onUnblockRequest(void Function(Map<String, dynamic>) cb) {
+    socket.on('unblock_request', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void sendUnblockResponse({
+    required String requestId,
+    required String childId,
+    required String packageName,
+    required bool approved,
+    int temporaryDurationMinutes = 15,
+  }) {
+    socket.emit('unblock_response', {
+      'requestId': requestId,
+      'childId': childId,
+      'packageName': packageName,
+      'approved': approved,
+      'temporaryDurationMinutes': temporaryDurationMinutes,
+    });
+  }
+
+  void toggleInstantLockdown({
+    required String childId,
+    required bool isPaused,
+  }) {
+    socket.emit('instant_lockdown_toggle', {
+      'childId': childId,
+      'isPaused': isPaused,
+    });
+  }
+
+  // ==========================================
+  // Browsing History & Alerts
+  // ==========================================
+
+  void onNewBrowsingActivity(void Function(Map<String, dynamic>) cb) {
+    socket.on('new_browsing_activity', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onSuspiciousWebAlert(void Function(Map<String, dynamic>) cb) {
+    socket.on('suspicious_web_alert', (data) => cb(Map<String, dynamic>.from(data)));
+  }
 }

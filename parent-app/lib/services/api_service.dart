@@ -208,6 +208,188 @@ class ApiService {
     return body['iceServers'] as List<dynamic>;
   }
 
+  // ==========================================
+  // App Blocker & Policies
+  // ==========================================
+
+  Future<Map<String, dynamic>> listChildApps(String childId) async {
+    final res = await http.get(_u('/api/children/$childId/apps'), headers: _authHeaders);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not load installed apps');
+    }
+    return body;
+  }
+
+  Future<Map<String, dynamic>> updateAppPolicy(
+    String childId,
+    String packageName,
+    Map<String, dynamic> policy,
+  ) async {
+    final res = await http.put(
+      _u('/api/children/$childId/apps/$packageName/policy'),
+      headers: _authHeaders,
+      body: jsonEncode(policy),
+    );
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not update app policy');
+    }
+    return body;
+  }
+
+  Future<void> bulkUpdatePolicy(
+    String childId, {
+    required String category,
+    required String status,
+    int? dailyLimitMinutes,
+  }) async {
+    final res = await http.post(
+      _u('/api/children/$childId/apps/bulk-policy'),
+      headers: _authHeaders,
+      body: jsonEncode({
+        'category': category,
+        'status': status,
+        if (dailyLimitMinutes != null) 'dailyLimitMinutes': dailyLimitMinutes,
+      }),
+    );
+    if (res.statusCode != 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(body['error']?.toString() ?? 'Could not bulk update policies');
+    }
+  }
+
+  Future<bool> toggleDevicePause(String childId, bool isPaused) async {
+    final res = await http.post(
+      _u('/api/children/$childId/pause'),
+      headers: _authHeaders,
+      body: jsonEncode({'isPaused': isPaused}),
+    );
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not update device pause state');
+    }
+    return body['isPaused'] as bool? ?? isPaused;
+  }
+
+  // ==========================================
+  // Web Filter Rules
+  // ==========================================
+
+  Future<List<dynamic>> listWebRules(String childId) async {
+    final res = await http.get(_u('/api/children/$childId/web-rules'), headers: _authHeaders);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not load web rules');
+    }
+    return body['rules'] as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createWebRule(
+    String childId, {
+    required String ruleType,
+    required String target,
+    String action = 'BLOCK',
+    bool isEnabled = true,
+  }) async {
+    final res = await http.post(
+      _u('/api/children/$childId/web-rules'),
+      headers: _authHeaders,
+      body: jsonEncode({
+        'ruleType': ruleType,
+        'target': target,
+        'action': action,
+        'isEnabled': isEnabled,
+      }),
+    );
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 201 && res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not create web rule');
+    }
+    return body['rule'] as Map<String, dynamic>;
+  }
+
+  Future<void> updateWebRule(
+    String childId,
+    String ruleId, {
+    String? action,
+    bool? isEnabled,
+  }) async {
+    final res = await http.put(
+      _u('/api/children/$childId/web-rules/$ruleId'),
+      headers: _authHeaders,
+      body: jsonEncode({
+        if (action != null) 'action': action,
+        if (isEnabled != null) 'isEnabled': isEnabled,
+      }),
+    );
+    if (res.statusCode != 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(body['error']?.toString() ?? 'Could not update web rule');
+    }
+  }
+
+  Future<void> deleteWebRule(String childId, String ruleId) async {
+    final res = await http.delete(_u('/api/children/$childId/web-rules/$ruleId'), headers: _authHeaders);
+    if (res.statusCode != 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(body['error']?.toString() ?? 'Could not delete web rule');
+    }
+  }
+
+  // ==========================================
+  // Browsing History & Analytics
+  // ==========================================
+
+  Future<Map<String, dynamic>> listBrowsingHistory(
+    String childId, {
+    String? startDate,
+    String? endDate,
+    String? search,
+    String? browser,
+    bool? isFlagged,
+    bool? isBlockedAttempt,
+    int page = 1,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+      if (startDate != null) 'startDate': startDate,
+      if (endDate != null) 'endDate': endDate,
+      if (search != null && search.isNotEmpty) 'search': search,
+      if (browser != null && browser.isNotEmpty) 'browser': browser,
+      if (isFlagged == true) 'isFlagged': 'true',
+      if (isBlockedAttempt == true) 'isBlockedAttempt': 'true',
+    };
+
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/browsing-history')
+        .replace(queryParameters: query);
+    final res = await http.get(uri, headers: _authHeaders);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not load browsing history');
+    }
+    return body;
+  }
+
+  Future<Map<String, dynamic>> getBrowsingAnalytics(String childId) async {
+    final res = await http.get(_u('/api/children/$childId/browsing-history/analytics'), headers: _authHeaders);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Could not load browsing analytics');
+    }
+    return body;
+  }
+
+  Future<void> clearBrowsingHistory(String childId) async {
+    final res = await http.delete(_u('/api/children/$childId/browsing-history'), headers: _authHeaders);
+    if (res.statusCode != 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(body['error']?.toString() ?? 'Could not clear browsing history');
+    }
+  }
+
   Future<void> _saveToken(String token) async {
     _accessToken = token;
     await _storage.write(key: 'access_token', value: token);

@@ -12,6 +12,9 @@ import screenShareRoutes from "./routes/screenShareRoutes";
 import cameraStreamRoutes from "./routes/cameraStreamRoutes";
 import configRoutes from "./routes/configRoutes";
 import locationRoutes from "./routes/locationRoutes";
+import appPolicyRoutes from "./routes/appPolicyRoutes";
+import webRulesRoutes from "./routes/webRulesRoutes";
+import browsingHistoryRoutes from "./routes/browsingHistoryRoutes";
 
 export function createApp(): Express {
   const app = express();
@@ -30,6 +33,9 @@ export function createApp(): Express {
 
   app.use("/api/auth", authRoutes);
   app.use("/api/children", childrenRoutes);
+  app.use("/api/children", appPolicyRoutes);
+  app.use("/api/children", webRulesRoutes);
+  app.use("/api/children", browsingHistoryRoutes);
   app.use("/api/devices", deviceRoutes);
   app.use("/api/screen-share", screenShareRoutes);
   app.use("/api/camera-stream", cameraStreamRoutes);

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import '../models/child.dart';
+import '../models/app_policy.dart';
 import '../services/api_service.dart';
+import '../services/socket_service.dart';
 import 'create_child_screen.dart';
 import 'screen_share_screen.dart';
 import 'camera_stream_screen.dart';
 import 'location_tracking_screen.dart';
+import 'app_blocker_screen.dart';
+import 'web_filter_screen.dart';
+import 'browsing_history_screen.dart';
 import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -18,11 +23,141 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Child> _children = [];
   bool _loading = true;
   String? _error;
+  SocketService? _socketService;
 
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _initSocketAndLoad();
+  }
+
+  @override
+  void dispose() {
+    _socketService?.disconnect();
+    super.dispose();
+  }
+
+  Future<void> _initSocketAndLoad() async {
+    await _refresh();
+    try {
+      final token = await ApiService.instance.accessToken;
+      if (token != null) {
+        final sock = SocketService();
+        sock.connect(token);
+
+        sock.onChildStatusChanged((data) {
+          if (!mounted) return;
+          final cid = data['childId'] as String?;
+          final status = data['status'] as String?;
+          if (cid != null && status != null) {
+            setState(() {
+              final idx = _children.indexWhere((c) => c.id == cid);
+              if (idx != -1) {
+                final current = _children[idx];
+                final dev = current.device;
+                if (dev != null) {
+                  _children[idx] = Child(
+                    id: current.id,
+                    name: current.name,
+                    username: current.username,
+                    device: ChildDevice(
+                      id: dev.id,
+                      deviceName: dev.deviceName,
+                      platform: dev.platform,
+                      status: status,
+                      lastSeen: DateTime.now(),
+                    ),
+                  );
+                }
+              }
+            });
+          }
+        });
+
+        sock.onUnblockRequest((data) {
+          if (!mounted) return;
+          final req = UnblockRequest.fromJson(data);
+          _showUnblockRequestDialog(req);
+        });
+
+        _socketService = sock;
+      }
+    } catch (_) {}
+  }
+
+  void _showUnblockRequestDialog(UnblockRequest req) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.shield, color: Colors.orange),
+            const SizedBox(width: 8),
+            Expanded(child: Text('${req.childName} Requests Access')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('App: ${req.appName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(req.packageName, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text('Reason: "${req.reason}"', style: const TextStyle(fontStyle: FontStyle.italic)),
+            ),
+            const SizedBox(height: 12),
+            const Text('Grant temporary extra time?'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _socketService?.sendUnblockResponse(
+                requestId: req.requestId,
+                childId: req.childId,
+                packageName: req.packageName,
+                approved: false,
+              );
+            },
+            child: const Text('Decline', style: TextStyle(color: Colors.red)),
+          ),
+          FilledButton.tonal(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _socketService?.sendUnblockResponse(
+                requestId: req.requestId,
+                childId: req.childId,
+                packageName: req.packageName,
+                approved: true,
+                temporaryDurationMinutes: 15,
+              );
+            },
+            child: const Text('Allow 15 min'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _socketService?.sendUnblockResponse(
+                requestId: req.requestId,
+                childId: req.childId,
+                packageName: req.packageName,
+                approved: true,
+                temporaryDurationMinutes: 60,
+              );
+            },
+            child: const Text('Allow 1 Hour'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _refresh() async {
@@ -62,11 +197,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
     if (confirmed != true) return;
 
+    _socketService?.disconnect();
     await ApiService.instance.logout();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -89,20 +225,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
-            ? Center(child: Text(_error!))
-            : ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text('My Children', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (_children.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Text('No children yet.'),
-              ),
-            for (final child in _children) _ChildCard(child: child),
-          ],
-        ),
+                ? Center(child: Text(_error!))
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Text('My Children', style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      if (_children.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Text('No children registered yet.'),
+                        ),
+                      for (final child in _children)
+                        _ChildCard(
+                          child: child,
+                          socketService: _socketService,
+                        ),
+                    ],
+                  ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -120,13 +260,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 class _ChildCard extends StatelessWidget {
   final Child child;
-  const _ChildCard({required this.child});
+  final SocketService? socketService;
+
+  const _ChildCard({required this.child, this.socketService});
 
   @override
   Widget build(BuildContext context) {
     final online = child.isOnline;
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -154,7 +296,10 @@ class _ChildCard extends StatelessWidget {
               Text('Device: ${child.device!.deviceName} (${child.device!.platform})'),
               Text('Last seen: ${child.device!.lastSeen.toLocal()}'),
             ],
-            const SizedBox(height: 12),
+
+            const Divider(height: 20),
+
+            // Live Supervision Features
             SizedBox(
               width: double.infinity,
               child: FilledButton.tonalIcon(
@@ -207,6 +352,66 @@ class _ChildCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+
+            const Divider(height: 20),
+
+            // Requirement 3 & 4: Blocker & Web Filtering & Browsing History
+            Text('Digital Wellbeing & Safety', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.indigo),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => AppBlockerScreen(
+                          childId: child.id,
+                          childName: child.name,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.block, size: 18),
+                    label: const Text('App Blocker'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.teal),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => WebFilterScreen(
+                          childId: child.id,
+                          childName: child.name,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.language, size: 18),
+                    label: const Text('Web Filter'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => BrowsingHistoryScreen(
+                      childId: child.id,
+                      childName: child.name,
+                      socketService: socketService,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.history),
+                label: const Text('Browsing History & Activity'),
+              ),
             ),
           ],
         ),

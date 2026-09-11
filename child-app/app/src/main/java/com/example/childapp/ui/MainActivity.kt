@@ -14,9 +14,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.childapp.accessibility.ChildAccessibilityService
+import com.example.childapp.blocker.AppScanner
 import com.example.childapp.camera.CameraStreamService
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.ApiException
+import com.example.childapp.data.LocalDatabase
 import com.example.childapp.data.SessionStore
 import com.example.childapp.location.LocationService
 import com.example.childapp.screen.ScreenCaptureService
@@ -24,6 +27,8 @@ import com.example.childapp.socket.SocketManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
 
@@ -148,6 +153,7 @@ class MainActivity : ComponentActivity() {
                                             LocationService.start(this@MainActivity, tok)
                                         }
                                         deviceConnected = true
+                                        syncAppData()
                                         checkPermissions()
                                     } catch (e: ApiException) {
                                         android.util.Log.e("MainActivity", "Login ApiException: ${e.message}", e)
@@ -190,6 +196,8 @@ class MainActivity : ComponentActivity() {
                                 screenState.value = ChildScreenState.Idle
                                 socketManager?.disconnect()
                                 socketManager = null
+                                BlockedAppActivity.activeSocketManager = null
+                                ChildAccessibilityService.activeSocketCallback = null
                                 session.clear()
                                 loggedIn = false
                                 deviceConnected = false
@@ -206,12 +214,95 @@ class MainActivity : ComponentActivity() {
             session.accessToken?.let { tok ->
                 LocationService.start(this, tok)
             }
+            syncAppData()
+        }
+    }
+
+    private fun syncAppData() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // 1. Scan and sync installed apps
+                val apps = AppScanner.scanInstalledApps(this@MainActivity)
+                api.syncInstalledApps(AppScanner.toJsonArray(apps))
+
+                // 2. Fetch and save active policies
+                val polResp = api.getMyPolicies()
+                if (polResp.has("policies")) {
+                    LocalDatabase.getInstance(this@MainActivity)
+                        .saveAppPolicies(polResp.getJSONArray("policies"))
+                }
+                if (polResp.has("isPaused")) {
+                    LocalDatabase.getInstance(this@MainActivity)
+                        .setDevicePaused(polResp.getBoolean("isPaused"))
+                }
+
+                // 3. Fetch and save active web rules
+                val webResp = api.getMyWebRules()
+                if (webResp.has("rules")) {
+                    LocalDatabase.getInstance(this@MainActivity)
+                        .saveWebRules(webResp.getJSONArray("rules"))
+                }
+
+                // 4. Batch flush any unsynced offline browsing records
+                val unsynced = LocalDatabase.getInstance(this@MainActivity).getUnsyncedBrowsingHistory()
+                if (unsynced.isNotEmpty()) {
+                    val batchArray = JSONArray()
+                    for (entry in unsynced) {
+                        batchArray.put(JSONObject().apply {
+                            put("url", entry.url)
+                            put("domain", entry.domain)
+                            put("title", entry.title)
+                            put("browser", entry.browser)
+                            put("isIncognito", entry.isIncognito)
+                            put("category", entry.category)
+                            put("isBlockedAttempt", entry.isBlockedAttempt)
+                            entry.blockedReason?.let { put("blockedReason", it) }
+                            put("visitedAt", entry.visitedAt)
+                        })
+                    }
+                    api.postBrowsingHistoryBatch(batchArray)
+                    LocalDatabase.getInstance(this@MainActivity)
+                        .markBrowsingHistorySynced(unsynced.map { it.id })
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error syncing app data: ${e.message}", e)
+            }
         }
     }
 
     private fun startSocket() {
         val token = session.accessToken ?: return
         val socket = SocketManager(token)
+        BlockedAppActivity.activeSocketManager = socket
+        ChildAccessibilityService.activeSocketCallback = { entry ->
+            socket.sendBrowsingActivity(entry)
+        }
+
+        socket.onConnected = {
+            syncAppData()
+        }
+
+        socket.onPolicyUpdated = { data ->
+            val type = data.optString("type")
+            val db = LocalDatabase.getInstance(this)
+            if (type == "APP_POLICY") {
+                val policy = data.optJSONObject("policy")
+                if (policy != null) db.upsertAppPolicy(policy)
+            } else if (type == "WEB_RULE_ADDED" || type == "WEB_RULE_UPDATED") {
+                val rule = data.optJSONObject("rule")
+                if (rule != null) db.upsertWebRule(rule)
+            } else if (type == "WEB_RULE_DELETED") {
+                val ruleId = data.optString("ruleId")
+                if (ruleId.isNotBlank()) db.deleteWebRule(ruleId)
+            } else if (type == "BULK_UPDATE") {
+                syncAppData()
+            }
+        }
+
+        socket.onInstantLockdownToggle = { isPaused ->
+            LocalDatabase.getInstance(this).setDevicePaused(isPaused)
+        }
+
         socket.onScreenShareRequest = { sessionId, _ ->
             runOnUiThread { screenState.value = ChildScreenState.ConsentRequested(sessionId) }
         }
