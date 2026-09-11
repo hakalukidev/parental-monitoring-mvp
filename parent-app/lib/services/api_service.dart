@@ -26,6 +26,26 @@ class ApiService {
 
   Future<String?> get accessToken async => _accessToken;
 
+  dynamic _parseResponse(http.Response res) {
+    dynamic jsonBody;
+    try {
+      if (res.body.trim().isNotEmpty) {
+        jsonBody = jsonDecode(res.body);
+      }
+    } catch (_) {
+      throw ApiException('Server error (${res.statusCode}): Backend service unreachable or returned HTML.');
+    }
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      if (jsonBody is Map<String, dynamic>) {
+        throw ApiException(jsonBody['error']?.toString() ?? 'Request failed (${res.statusCode})');
+      }
+      throw ApiException('Request failed (${res.statusCode})');
+    }
+
+    return jsonBody;
+  }
+
   Future<Map<String, dynamic>> register({
     required String name,
     required String email,
@@ -42,10 +62,7 @@ class ApiService {
         'confirmPassword': confirmPassword,
       }),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 201) {
-      throw ApiException(body['error']?.toString() ?? 'Registration failed');
-    }
+    final body = _parseResponse(res) as Map<String, dynamic>;
     await _saveToken(body['accessToken'] as String);
     return body;
   }
@@ -59,10 +76,7 @@ class ApiService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Login failed');
-    }
+    final body = _parseResponse(res) as Map<String, dynamic>;
     await _saveToken(body['accessToken'] as String);
     return body;
   }

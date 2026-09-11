@@ -18,13 +18,13 @@ android {
         buildConfigField(
             "String",
             "API_BASE_URL",
-            "\"http://192.168.0.150:4000\""
+            "\"https://163.227.239.88\""
         )
 
         buildConfigField(
             "String",
             "SOCKET_URL",
-            "\"http://192.168.0.150:4000\""
+            "\"https://163.227.239.88\""
         )
     }
 

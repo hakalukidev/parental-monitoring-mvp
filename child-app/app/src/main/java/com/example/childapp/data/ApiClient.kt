@@ -17,6 +17,10 @@ class ApiClient(private val session: SessionStore) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        .hostnameVerifier { hostname, session ->
+            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev") true
+            else javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
+        }
         .build()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
@@ -106,13 +110,20 @@ class ApiClient(private val session: SessionStore) {
     }
 
     private fun execute(req: Request): JSONObject {
-        client.newCall(req).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            val json = if (text.isNotBlank()) JSONObject(text) else JSONObject()
-            if (!resp.isSuccessful) {
-                throw ApiException(json.optString("error", "Request failed (${resp.code})"))
+        android.util.Log.d("ApiClient", "HTTP ${req.method} -> ${req.url}")
+        try {
+            client.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                android.util.Log.d("ApiClient", "Response (${resp.code}) for ${req.url}: $text")
+                val json = if (text.isNotBlank()) JSONObject(text) else JSONObject()
+                if (!resp.isSuccessful) {
+                    throw ApiException(json.optString("error", "Request failed (${resp.code})"))
+                }
+                return json
             }
-            return json
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "Error during request ${req.url}: ${e.message}", e)
+            throw e
         }
     }
 }

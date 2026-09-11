@@ -27,14 +27,34 @@ class SocketManager(private val accessToken: String) {
     var onDisconnected: (() -> Unit)? = null
 
     fun connect() {
+        val uri = java.net.URI.create(BuildConfig.SOCKET_URL)
+        android.util.Log.i("SocketManager", "Connecting socket to $uri")
+        val okClient = okhttp3.OkHttpClient.Builder()
+            .hostnameVerifier { hostname, _ -> hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" }
+            .build()
+        IO.setDefaultOkHttpCallFactory(okClient)
+        IO.setDefaultOkHttpWebSocketFactory(okClient)
+
         val options = IO.Options.builder()
             .setTransports(arrayOf("websocket"))
             .setAuth(mapOf("token" to accessToken))
-            .build()
+            .build().apply {
+                callFactory = okClient
+                webSocketFactory = okClient
+            }
 
-        socket = IO.socket(java.net.URI.create(BuildConfig.SOCKET_URL), options).also { s ->
-            s.on(Socket.EVENT_CONNECT) { onConnected?.invoke() }
-            s.on(Socket.EVENT_DISCONNECT) { onDisconnected?.invoke() }
+        socket = IO.socket(uri, options).also { s ->
+            s.on(Socket.EVENT_CONNECT) { 
+                android.util.Log.i("SocketManager", "Socket connected successfully")
+                onConnected?.invoke() 
+            }
+            s.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                android.util.Log.e("SocketManager", "Socket connect error: ${args.getOrNull(0)}")
+            }
+            s.on(Socket.EVENT_DISCONNECT) { 
+                android.util.Log.w("SocketManager", "Socket disconnected")
+                onDisconnected?.invoke() 
+            }
 
             s.on("screen_share_request") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on

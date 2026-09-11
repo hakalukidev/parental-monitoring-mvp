@@ -112,6 +112,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        android.util.Log.i("MainActivity", "Using API_BASE_URL: ${com.example.childapp.BuildConfig.API_BASE_URL}")
+        android.util.Log.i("MainActivity", "Using SOCKET_URL: ${com.example.childapp.BuildConfig.SOCKET_URL}")
         checkPermissions()
         session = SessionStore(applicationContext)
         api = ApiClient(session)
@@ -148,9 +150,11 @@ class MainActivity : ComponentActivity() {
                                         deviceConnected = true
                                         checkPermissions()
                                     } catch (e: ApiException) {
+                                        android.util.Log.e("MainActivity", "Login ApiException: ${e.message}", e)
                                         error = e.message
                                     } catch (e: Exception) {
-                                        error = "Could not connect. Check your network."
+                                        android.util.Log.e("MainActivity", "Login Exception: ${e.message}", e)
+                                        error = "Could not connect: ${e.message ?: "Check your network."}"
                                     } finally {
                                         loading = false
                                     }
