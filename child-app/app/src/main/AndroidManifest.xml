@@ -78,6 +78,7 @@
         <activity
             android:name=".ui.BlockedAppActivity"
             android:exported="false"
+            android:taskAffinity="com.example.childapp.blocker"
             android:launchMode="singleTask"
             android:excludeFromRecents="true"
             android:theme="@style/Theme.ChildApp" />

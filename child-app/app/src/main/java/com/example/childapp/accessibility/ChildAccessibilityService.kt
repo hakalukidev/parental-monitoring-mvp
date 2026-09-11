@@ -93,8 +93,6 @@ class ChildAccessibilityService : AccessibilityService() {
         // 2. Evaluate App Policy (Blocked, Schedule, Time Limit, Device Pause)
         val check = AppUsageTracker.evaluatePackage(this, packageName)
         if (check.isBlocked) {
-            performGlobalAction(GLOBAL_ACTION_HOME)
-
             val intent = Intent(this, BlockedAppActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or
