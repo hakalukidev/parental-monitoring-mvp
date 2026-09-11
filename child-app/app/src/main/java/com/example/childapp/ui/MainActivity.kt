@@ -115,6 +115,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         android.util.Log.i("MainActivity", "Using API_BASE_URL: ${com.example.childapp.BuildConfig.API_BASE_URL}")
@@ -150,7 +155,9 @@ class MainActivity : ComponentActivity() {
                                         loggedIn = true
                                         startSocket()
                                         session.accessToken?.let { tok ->
-                                            LocationService.start(this@MainActivity, tok)
+                                            if (hasLocationPermission()) {
+                                                LocationService.start(this@MainActivity, tok)
+                                            }
                                         }
                                         deviceConnected = true
                                         syncAppData()
@@ -212,7 +219,9 @@ class MainActivity : ComponentActivity() {
         if (session.accessToken != null) {
             startSocket()
             session.accessToken?.let { tok ->
-                LocationService.start(this, tok)
+                if (hasLocationPermission()) {
+                    LocationService.start(this, tok)
+                }
             }
             syncAppData()
         }

@@ -116,10 +116,29 @@ class ChildAccessibilityService : AccessibilityService() {
     private fun isAttemptingToTamperSettings(): Boolean {
         val root = rootInActiveWindow ?: return false
         try {
-            val list = root.findAccessibilityNodeInfosByText("Child Monitoring")
-            if (list.isNotEmpty()) return true
-            val pkgList = root.findAccessibilityNodeInfosByText("com.example.childapp")
-            if (pkgList.isNotEmpty()) return true
+            // Do NOT block if the user is in accessibility setup or special app access menus
+            val isSetupScreen = root.findAccessibilityNodeInfosByText("Accessibility").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("Installed services").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("Installed apps").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("Downloaded apps").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("Special app access").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("Usage access").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("Appear on top").isNotEmpty()
+            if (isSetupScreen) {
+                return false
+            }
+
+            // Only block if user is trying to Uninstall or Force Stop the child app in App Info
+            val hasAppName = root.findAccessibilityNodeInfosByText("Child Monitoring").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("com.example.childapp").isNotEmpty()
+            if (hasAppName) {
+                val hasUninstall = root.findAccessibilityNodeInfosByText("Uninstall").isNotEmpty()
+                val hasForceStop = root.findAccessibilityNodeInfosByText("Force stop").isNotEmpty()
+                val hasDisable = root.findAccessibilityNodeInfosByText("Disable").isNotEmpty()
+                if (hasUninstall || hasForceStop || hasDisable) {
+                    return true
+                }
+            }
         } catch (_: Exception) {}
         return false
     }

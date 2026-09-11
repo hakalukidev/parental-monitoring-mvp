@@ -66,22 +66,35 @@ class LocationService : Service() {
             return START_NOT_STICKY
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!fineGranted && !coarseGranted) {
+            Log.w(TAG, "Cannot start LocationService: Location permission not granted")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
                     buildNotification("Location tracking active"),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 )
             } else {
-                startForeground(
-                    NOTIFICATION_ID,
-                    buildNotification("Location tracking active"),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-                )
+                startForeground(NOTIFICATION_ID, buildNotification("Location tracking active"))
             }
-        } else {
-            startForeground(NOTIFICATION_ID, buildNotification("Location tracking active"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground service: ${e.message}", e)
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         socketManager = SocketManager(token).apply { connect() }
@@ -273,10 +286,26 @@ class LocationService : Service() {
         val latestLocation: StateFlow<LocationInfo?> = _latestLocation.asStateFlow()
 
         fun start(context: Context, token: String) {
-            val intent = Intent(context, LocationService::class.java).apply {
-                putExtra(EXTRA_ACCESS_TOKEN, token)
+            val fineGranted = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val coarseGranted = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!fineGranted && !coarseGranted) {
+                android.util.Log.w(TAG, "Cannot start LocationService: Location permission not granted")
+                return
             }
-            ContextCompat.startForegroundService(context, intent)
+            try {
+                val intent = Intent(context, LocationService::class.java).apply {
+                    putExtra(EXTRA_ACCESS_TOKEN, token)
+                }
+                ContextCompat.startForegroundService(context, intent)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to start LocationService: ${e.message}", e)
+            }
         }
 
         fun stop(context: Context) {

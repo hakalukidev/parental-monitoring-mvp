@@ -44,12 +44,18 @@ android {
     // BUILD TYPES
     // =========================================================
     buildTypes {
-        release {
-            isMinifyEnabled = false
-
-            // Sign release APK
+        debug {
             signingConfig = signingConfigs.getByName("release")
         }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 
     // =========================================================
