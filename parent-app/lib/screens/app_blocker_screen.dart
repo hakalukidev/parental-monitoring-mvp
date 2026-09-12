@@ -558,8 +558,8 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
             onChanged: (val) => setState(() => _status = val!),
           ),
           RadioListTile<String>(
-            title: const Text('Permanently Blocked'),
-            subtitle: const Text('App cannot be launched at any time'),
+            title: const Text('Blocked (Stealth)'),
+            subtitle: const Text('Shows fake loading spinner so child assumes app is unresponsive'),
             value: 'BLOCKED',
             groupValue: _status,
             onChanged: (val) => setState(() => _status = val!),
