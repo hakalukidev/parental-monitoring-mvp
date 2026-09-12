@@ -95,11 +95,15 @@ class SocketManager(private val accessToken: String) {
             }
             s.on("webrtc_answer") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
-                onWebrtcAnswer?.invoke(data.getString("sessionId"), data.getJSONObject("sdp"))
+                val sid = data.getString("sessionId")
+                android.util.Log.i("SocketManager", "Received webrtc_answer for session $sid")
+                onWebrtcAnswer?.invoke(sid, data.getJSONObject("sdp"))
             }
             s.on("ice_candidate") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
-                onIceCandidate?.invoke(data.getString("sessionId"), data.getJSONObject("candidate"))
+                val sid = data.getString("sessionId")
+                android.util.Log.i("SocketManager", "Received remote ice_candidate for session $sid")
+                onIceCandidate?.invoke(sid, data.getJSONObject("candidate"))
             }
             s.on("policy_updated") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
@@ -124,40 +128,49 @@ class SocketManager(private val accessToken: String) {
     }
 
     fun acceptScreenShare(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting screen_share_accept for session $sessionId")
         socket?.emit("screen_share_accept", JSONObject().put("sessionId", sessionId))
     }
 
     fun rejectScreenShare(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting screen_share_reject for session $sessionId")
         socket?.emit("screen_share_reject", JSONObject().put("sessionId", sessionId))
     }
 
     fun acceptCameraStream(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting camera_stream_accept for session $sessionId")
         socket?.emit("camera_stream_accept", JSONObject().put("sessionId", sessionId))
     }
 
     fun rejectCameraStream(sessionId: String, reason: String? = null) {
         val payload = JSONObject().put("sessionId", sessionId)
         if (reason != null) payload.put("reason", reason)
+        android.util.Log.i("SocketManager", "Emitting camera_stream_reject for session $sessionId")
         socket?.emit("camera_stream_reject", payload)
     }
 
     fun sendOffer(sessionId: String, sdp: JSONObject) {
+        android.util.Log.i("SocketManager", "Emitting webrtc_offer for session $sessionId, socket connected=${socket?.connected()}")
         socket?.emit("webrtc_offer", JSONObject().put("sessionId", sessionId).put("sdp", sdp))
     }
 
     fun sendIceCandidate(sessionId: String, candidate: JSONObject) {
+        android.util.Log.i("SocketManager", "Emitting ice_candidate for session $sessionId")
         socket?.emit("ice_candidate", JSONObject().put("sessionId", sessionId).put("candidate", candidate))
     }
 
     fun notifyStopped(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting screen_share_stopped for session $sessionId")
         socket?.emit("screen_share_stopped", JSONObject().put("sessionId", sessionId))
     }
 
     fun notifyCameraStopped(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting camera_stream_stopped for session $sessionId")
         socket?.emit("camera_stream_stopped", JSONObject().put("sessionId", sessionId))
     }
 
     fun joinSession(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting join_session for session $sessionId, connected=${socket?.connected()}")
         socket?.emit("join_session", JSONObject().put("sessionId", sessionId))
     }
 

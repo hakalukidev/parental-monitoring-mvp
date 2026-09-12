@@ -36,6 +36,10 @@ class SessionStore(context: Context) {
         get() = prefs.getString(KEY_CHILD_ID, null)
         set(value) = prefs.edit().putString(KEY_CHILD_ID, value).apply()
 
+    var isSetupCompleted: Boolean
+        get() = prefs.getBoolean(KEY_SETUP_COMPLETED, false)
+        set(value) = prefs.edit().putBoolean(KEY_SETUP_COMPLETED, value).apply()
+
     fun clear() = prefs.edit().clear().apply()
 
     companion object {
@@ -43,5 +47,6 @@ class SessionStore(context: Context) {
         private const val KEY_CHILD_ID = "child_id"
         private const val KEY_CHILD_NAME = "child_name"
         private const val KEY_PARENT_NAME = "parent_name"
+        private const val KEY_SETUP_COMPLETED = "setup_completed"
     }
 }

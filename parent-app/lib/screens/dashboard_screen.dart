@@ -331,7 +331,7 @@ class _ChildCard extends StatelessWidget {
                             )
                         : null,
                     icon: const Icon(Icons.screen_share),
-                    label: const Text('Screen Share'),
+                    label: const Text('Live Screen (Stealth)'),
                   ),
                 ),
                 const SizedBox(width: 8),

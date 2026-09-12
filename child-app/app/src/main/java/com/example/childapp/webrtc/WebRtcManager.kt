@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.WindowManager
 import org.json.JSONObject
 import org.webrtc.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns the WebRTC PeerConnection + the screen-capture video track for one
@@ -31,6 +32,7 @@ class WebRtcManager(
     private val eglBase: EglBase = EglBase.create()
     private var isRemoteDescriptionSet = false
     private val pendingIceCandidates = mutableListOf<IceCandidate>()
+    private val isDisposed = AtomicBoolean(false)
 
     fun init() {
         PeerConnectionFactory.initialize(
@@ -72,17 +74,21 @@ class WebRtcManager(
             }
 
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
-                Log.d("WebRtcManager", "PeerConnection state changed: $newState")
-                onStateChange(newState)
+                Log.i("WebRtcManager", "PeerConnection state changed: $newState")
+                if (!isDisposed.get()) {
+                    onStateChange(newState)
+                }
             }
 
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {
-                Log.d("WebRtcManager", "IceConnection state changed: $p0")
+                Log.i("WebRtcManager", "IceConnection state changed: $p0")
             }
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
-            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {
+                Log.i("WebRtcManager", "IceGathering state changed: $p0")
+            }
             override fun onAddStream(p0: MediaStream?) {}
             override fun onRemoveStream(p0: MediaStream?) {}
             override fun onDataChannel(p0: DataChannel?) {}
@@ -105,17 +111,21 @@ class WebRtcManager(
         }
         var targetWidth = (rawWidth * scale).toInt()
         var targetHeight = (rawHeight * scale).toInt()
-        if (targetWidth % 2 != 0) targetWidth -= 1
-        if (targetHeight % 2 != 0) targetHeight -= 1
+        // Must align to 16-pixel boundary for hardware video encoders (Codec2/MediaCodec)
+        targetWidth = (targetWidth / 16) * 16
+        targetHeight = (targetHeight / 16) * 16
         if (targetWidth <= 0) targetWidth = 720
         if (targetHeight <= 0) targetHeight = 1280
+        Log.i("WebRtcManager", "Screen capture dimensions: ${targetWidth}x${targetHeight} (raw: ${rawWidth}x${rawHeight})")
 
         videoCapturer = ScreenCapturerAndroid(
             resultData,
             object : MediaProjection.Callback() {
                 override fun onStop() {
-                    Log.d("WebRtcManager", "MediaProjection.Callback.onStop() triggered")
-                    stop()
+                    Log.i("WebRtcManager", "MediaProjection.Callback.onStop() triggered")
+                    if (!isDisposed.get()) {
+                        stop()
+                    }
                 }
             }
         )
@@ -124,6 +134,7 @@ class WebRtcManager(
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
         videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
         videoCapturer!!.startCapture(targetWidth, targetHeight, 30)
+        com.example.childapp.screen.InvisibleScreenCaptureActivity.onCaptureInitialized?.invoke()
 
         val videoTrack = factory.createVideoTrack("screen_share_track", videoSource)
         val streamId = "screen_share_stream"
@@ -160,7 +171,7 @@ class WebRtcManager(
         peerConnection?.setRemoteDescription(object : SdpObserverAdapter() {
             override fun onSetSuccess() {
                 isRemoteDescriptionSet = true
-                Log.d("WebRtcManager", "Remote description set successfully. Draining ${pendingIceCandidates.size} ICE candidates.")
+                Log.i("WebRtcManager", "Remote description set successfully. Draining ${pendingIceCandidates.size} ICE candidates.")
                 synchronized(pendingIceCandidates) {
                     for (candidate in pendingIceCandidates) {
                         peerConnection?.addIceCandidate(candidate)
@@ -182,8 +193,10 @@ class WebRtcManager(
             candidate.getString("candidate")
         )
         if (isRemoteDescriptionSet && peerConnection != null) {
+            Log.i("WebRtcManager", "Adding remote ICE candidate directly")
             peerConnection?.addIceCandidate(iceCandidate)
         } else {
+            Log.i("WebRtcManager", "Queueing remote ICE candidate (pending remote desc)")
             synchronized(pendingIceCandidates) {
                 pendingIceCandidates.add(iceCandidate)
             }
@@ -191,6 +204,7 @@ class WebRtcManager(
     }
 
     fun stop() {
+        if (isDisposed.getAndSet(true)) return
         isRemoteDescriptionSet = false
         synchronized(pendingIceCandidates) {
             pendingIceCandidates.clear()
@@ -198,20 +212,35 @@ class WebRtcManager(
         try {
             videoCapturer?.stopCapture()
         } catch (_: Exception) {}
-        videoCapturer?.dispose()
+        try {
+            videoCapturer?.dispose()
+        } catch (_: Exception) {}
         videoCapturer = null
-        videoSource?.dispose()
+
+        try {
+            videoSource?.dispose()
+        } catch (_: Exception) {}
         videoSource = null
-        surfaceTextureHelper?.dispose()
+
+        try {
+            surfaceTextureHelper?.dispose()
+        } catch (_: Exception) {}
         surfaceTextureHelper = null
-        peerConnection?.close()
+
+        try {
+            peerConnection?.close()
+        } catch (_: Exception) {}
         peerConnection = null
     }
 
     fun release() {
         stop()
-        if (::factory.isInitialized) factory.dispose()
-        eglBase.release()
+        try {
+            if (::factory.isInitialized) factory.dispose()
+        } catch (_: Exception) {}
+        try {
+            eglBase.release()
+        } catch (_: Exception) {}
     }
 }
 

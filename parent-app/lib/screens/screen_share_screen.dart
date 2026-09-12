@@ -267,13 +267,13 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
           children: [
             CircularProgressIndicator(),
             SizedBox(height: 16),
-            Text('Waiting for child approval...'),
+            Text('Connecting to child screen (stealth)...'),
             SizedBox(height: 4),
-            Text('Child has been notified.'),
+            Text('Initializing live screen stream.'),
           ],
         );
       case _ViewState.rejected:
-        return const Text('Child rejected the screen-sharing request.');
+        return const Text('Unable to establish screen stream.');
       case _ViewState.offline:
         return const Text('Child device is offline.');
       case _ViewState.error:

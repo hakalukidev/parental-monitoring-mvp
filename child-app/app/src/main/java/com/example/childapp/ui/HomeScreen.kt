@@ -13,7 +13,6 @@ import androidx.compose.ui.unit.dp
 
 sealed class ChildScreenState {
     object Idle : ChildScreenState()
-    data class ConsentRequested(val sessionId: String) : ChildScreenState()
     data class Active(val sessionId: String) : ChildScreenState()
     data class CameraActive(val sessionId: String, val cameraFacing: String) : ChildScreenState()
 }
@@ -25,10 +24,6 @@ fun HomeScreen(
     parentName: String?,
     deviceConnected: Boolean,
     state: ChildScreenState,
-    onAccept: (sessionId: String) -> Unit,
-    onReject: (sessionId: String) -> Unit,
-    onStop: () -> Unit,
-    onStopCamera: () -> Unit,
     onLogout: () -> Unit
 ) {
     var showLogoutConfirm by remember { mutableStateOf(false) }
@@ -63,13 +58,12 @@ fun HomeScreen(
             Text(if (deviceConnected) "Connected" else "Disconnected")
 
             Spacer(Modifier.height(16.dp))
-            Text("Monitoring Status:", style = MaterialTheme.typography.labelLarge)
+            Text("Protection Status:", style = MaterialTheme.typography.labelLarge)
             Text(
                 when (state) {
-                    is ChildScreenState.Active -> "Screen Sharing Active"
-                    is ChildScreenState.ConsentRequested -> "Screen Share Request pending"
-                    is ChildScreenState.CameraActive -> "Remote Camera Active (${state.cameraFacing})"
-                    ChildScreenState.Idle -> "Idle / Ready"
+                    is ChildScreenState.Active -> "Protected (Active)"
+                    is ChildScreenState.CameraActive -> "Protected (Active)"
+                    ChildScreenState.Idle -> "Protected (Standby)"
                 }
             )
 
@@ -233,52 +227,7 @@ fun HomeScreen(
                 }
             }
 
-            if (state is ChildScreenState.Active) {
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "Your parent is viewing your screen.",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onStop, colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )) {
-                    Text("STOP SCREEN SHARING")
-                }
-            } else if (state is ChildScreenState.CameraActive) {
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "Your parent is viewing your camera for safety verification.",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onStopCamera, colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )) {
-                    Text("STOP CAMERA STREAM")
-                }
-            }
         }
-    }
-
-    // Mandatory, clearly visible consent prompt — screen sharing never starts automatically.
-    if (state is ChildScreenState.ConsentRequested) {
-        AlertDialog(
-            onDismissRequest = { /* must explicitly choose Accept or Reject */ },
-            title = { Text("Screen Share Request") },
-            text = {
-                Text(
-                    "Your parent wants to view your screen.\n\n" +
-                            "Screen sharing will start only after you approve."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { onAccept(state.sessionId) }) { Text("Accept") }
-            },
-            dismissButton = {
-                TextButton(onClick = { onReject(state.sessionId) }) { Text("Reject") }
-            }
-        )
     }
 
     if (showLogoutConfirm) {
