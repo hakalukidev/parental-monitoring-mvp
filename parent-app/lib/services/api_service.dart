@@ -70,16 +70,21 @@ class ApiService {
       if (headers != null) ...headers,
     };
 
+    final Object? encodedBody = (body is Map || body is List) ? jsonEncode(body) : body;
+
     http.Response res;
     switch (method.toUpperCase()) {
       case 'GET':
         res = await http.get(uri, headers: reqHeaders);
         break;
       case 'POST':
-        res = await http.post(uri, headers: reqHeaders, body: body);
+        res = await http.post(uri, headers: reqHeaders, body: encodedBody);
         break;
       case 'PUT':
-        res = await http.put(uri, headers: reqHeaders, body: body);
+        res = await http.put(uri, headers: reqHeaders, body: encodedBody);
+        break;
+      case 'PATCH':
+        res = await http.patch(uri, headers: reqHeaders, body: encodedBody);
         break;
       case 'DELETE':
         res = await http.delete(uri, headers: reqHeaders);
