@@ -422,21 +422,43 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: List.generate(7, (i) {
                 final isSelected = _selectedDays.contains(i);
-                return FilterChip(
-                  label: Text(dayNames[i]),
-                  selected: isSelected,
-                  onSelected: (val) {
+                final theme = Theme.of(context);
+                return InkWell(
+                  onTap: () {
                     setState(() {
-                      if (val) {
-                        _selectedDays.add(i);
-                      } else {
+                      if (isSelected) {
                         if (_selectedDays.length > 1) {
                           _selectedDays.remove(i);
                         }
+                      } else {
+                        _selectedDays.add(i);
                       }
                       _selectedDays.sort();
                     });
                   },
+                  borderRadius: BorderRadius.circular(20),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected ? theme.colorScheme.primary : theme.colorScheme.surfaceContainerHighest,
+                      border: Border.all(
+                        color: isSelected ? theme.colorScheme.primary : theme.colorScheme.outlineVariant,
+                        width: 1.5,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      dayNames[i],
+                      style: TextStyle(
+                        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurfaceVariant,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
                 );
               }),
             ),
