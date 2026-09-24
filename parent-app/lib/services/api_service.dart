@@ -3,15 +3,14 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app_config.dart';
 
-/// Thin wrapper around the backend REST API.
-/// Access tokens are kept in memory + secure storage; refresh happens via
-/// the httpOnly cookie set by the backend on /api/auth/login|register.
+/// Robust wrapper around the backend REST API with silent auto-refresh support.
 class ApiService {
   ApiService._internal();
   static final ApiService instance = ApiService._internal();
 
   final _storage = const FlutterSecureStorage();
   String? _accessToken;
+  String? _refreshToken;
 
   Uri _u(String path) => Uri.parse('${AppConfig.apiBaseUrl}$path');
 
@@ -22,9 +21,82 @@ class ApiService {
 
   Future<void> loadPersistedToken() async {
     _accessToken = await _storage.read(key: 'access_token');
+    _refreshToken = await _storage.read(key: 'refresh_token');
   }
 
   Future<String?> get accessToken async => _accessToken;
+
+  Future<void> _saveTokens({required String accessToken, String? refreshToken}) async {
+    _accessToken = accessToken;
+    await _storage.write(key: 'access_token', value: accessToken);
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      _refreshToken = refreshToken;
+      await _storage.write(key: 'refresh_token', value: refreshToken);
+    }
+  }
+
+  Future<bool> refreshToken() async {
+    final rToken = _refreshToken ?? await _storage.read(key: 'refresh_token');
+    if (rToken == null || rToken.isEmpty) return false;
+
+    try {
+      final res = await http.post(
+        _u('/api/auth/refresh'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': rToken}),
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final newAccess = body['accessToken'] as String?;
+        final newRefresh = body['refreshToken'] as String?;
+        if (newAccess != null && newAccess.isNotEmpty) {
+          await _saveTokens(accessToken: newAccess, refreshToken: newRefresh);
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  Future<http.Response> _send(
+    String method,
+    Uri uri, {
+    Map<String, String>? headers,
+    Object? body,
+    bool retryOn401 = true,
+  }) async {
+    final reqHeaders = {
+      ..._authHeaders,
+      if (headers != null) ...headers,
+    };
+
+    http.Response res;
+    switch (method.toUpperCase()) {
+      case 'GET':
+        res = await http.get(uri, headers: reqHeaders);
+        break;
+      case 'POST':
+        res = await http.post(uri, headers: reqHeaders, body: body);
+        break;
+      case 'PUT':
+        res = await http.put(uri, headers: reqHeaders, body: body);
+        break;
+      case 'DELETE':
+        res = await http.delete(uri, headers: reqHeaders);
+        break;
+      default:
+        throw ApiException('Unsupported HTTP method $method');
+    }
+
+    if (res.statusCode == 401 && retryOn401 && !uri.path.contains('/api/auth/')) {
+      final refreshed = await refreshToken();
+      if (refreshed) {
+        return _send(method, uri, headers: headers, body: body, retryOn401: false);
+      }
+    }
+
+    return res;
+  }
 
   dynamic _parseResponse(http.Response res) {
     dynamic jsonBody;
@@ -63,7 +135,10 @@ class ApiService {
       }),
     );
     final body = _parseResponse(res) as Map<String, dynamic>;
-    await _saveToken(body['accessToken'] as String);
+    await _saveTokens(
+      accessToken: body['accessToken'] as String,
+      refreshToken: body['refreshToken'] as String?,
+    );
     return body;
   }
 
@@ -77,14 +152,21 @@ class ApiService {
       body: jsonEncode({'email': email, 'password': password}),
     );
     final body = _parseResponse(res) as Map<String, dynamic>;
-    await _saveToken(body['accessToken'] as String);
+    await _saveTokens(
+      accessToken: body['accessToken'] as String,
+      refreshToken: body['refreshToken'] as String?,
+    );
     return body;
   }
 
   Future<void> logout() async {
-    await http.post(_u('/api/auth/logout'), headers: _authHeaders);
+    try {
+      await http.post(_u('/api/auth/logout'), headers: _authHeaders);
+    } catch (_) {}
     _accessToken = null;
+    _refreshToken = null;
     await _storage.delete(key: 'access_token');
+    await _storage.delete(key: 'refresh_token');
   }
 
   Future<Map<String, dynamic>> createChild({
@@ -93,9 +175,9 @@ class ApiService {
     required String password,
     required String confirmPassword,
   }) async {
-    final res = await http.post(
+    final res = await _send(
+      'POST',
       _u('/api/children'),
-      headers: _authHeaders,
       body: jsonEncode({
         'name': name,
         'username': username,
@@ -103,41 +185,27 @@ class ApiService {
         'confirmPassword': confirmPassword,
       }),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 201) {
-      throw ApiException(body['error']?.toString() ?? 'Could not create child');
-    }
-    return body;
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<List<dynamic>> listChildren() async {
-    final res = await http.get(_u('/api/children'), headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load children');
-    }
+    final res = await _send('GET', _u('/api/children'));
+    final body = _parseResponse(res) as Map<String, dynamic>;
     return body['children'] as List<dynamic>;
   }
 
   Future<Map<String, dynamic>> requestScreenShare(String childId) async {
-    final res = await http.post(
+    final res = await _send(
+      'POST',
       _u('/api/screen-share/request'),
-      headers: _authHeaders,
       body: jsonEncode({'childId': childId}),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 201) {
-      throw ApiException(body['error']?.toString() ?? 'Could not request screen share');
-    }
-    return body;
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> stopScreenShare(String sessionId) async {
-    final res = await http.post(_u('/api/screen-share/$sessionId/stop'), headers: _authHeaders);
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(body['error']?.toString() ?? 'Could not stop screen share');
-    }
+    final res = await _send('POST', _u('/api/screen-share/$sessionId/stop'));
+    _parseResponse(res);
   }
 
   Future<Map<String, dynamic>> requestCameraStream(
@@ -145,37 +213,26 @@ class ApiService {
     String cameraFacing = 'BACK',
     bool withAudio = true,
   }) async {
-    final res = await http.post(
+    final res = await _send(
+      'POST',
       _u('/api/camera-stream/request'),
-      headers: _authHeaders,
       body: jsonEncode({
         'childId': childId,
         'cameraFacing': cameraFacing,
         'withAudio': withAudio,
       }),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 201) {
-      throw ApiException(body['error']?.toString() ?? 'Could not request camera stream');
-    }
-    return body;
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> stopCameraStream(String sessionId) async {
-    final res = await http.post(_u('/api/camera-stream/$sessionId/stop'), headers: _authHeaders);
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(body['error']?.toString() ?? 'Could not stop camera stream');
-    }
+    final res = await _send('POST', _u('/api/camera-stream/$sessionId/stop'));
+    _parseResponse(res);
   }
 
   Future<Map<String, dynamic>> getLatestLocation(String childId) async {
-    final res = await http.get(_u('/api/location/latest/$childId'), headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load latest location');
-    }
-    return body;
+    final res = await _send('GET', _u('/api/location/latest/$childId'));
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<List<dynamic>> getLocationHistory(
@@ -191,20 +248,14 @@ class ApiService {
     };
     final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/location/history/$childId')
         .replace(queryParameters: queryParams);
-    final res = await http.get(uri, headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load location history');
-    }
+    final res = await _send('GET', uri);
+    final body = _parseResponse(res) as Map<String, dynamic>;
     return body['points'] as List<dynamic>;
   }
 
   Future<List<dynamic>> getIceServers() async {
-    final res = await http.get(_u('/api/config'), headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load ICE config');
-    }
+    final res = await _send('GET', _u('/api/config'));
+    final body = _parseResponse(res) as Map<String, dynamic>;
     return body['iceServers'] as List<dynamic>;
   }
 
@@ -213,12 +264,8 @@ class ApiService {
   // ==========================================
 
   Future<Map<String, dynamic>> listChildApps(String childId) async {
-    final res = await http.get(_u('/api/children/$childId/apps'), headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load installed apps');
-    }
-    return body;
+    final res = await _send('GET', _u('/api/children/$childId/apps'));
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> updateAppPolicy(
@@ -226,16 +273,12 @@ class ApiService {
     String packageName,
     Map<String, dynamic> policy,
   ) async {
-    final res = await http.put(
+    final res = await _send(
+      'PUT',
       _u('/api/children/$childId/apps/$packageName/policy'),
-      headers: _authHeaders,
       body: jsonEncode(policy),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not update app policy');
-    }
-    return body;
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> bulkUpdatePolicy(
@@ -244,31 +287,25 @@ class ApiService {
     required String status,
     int? dailyLimitMinutes,
   }) async {
-    final res = await http.post(
+    final res = await _send(
+      'POST',
       _u('/api/children/$childId/apps/bulk-policy'),
-      headers: _authHeaders,
       body: jsonEncode({
         'category': category,
         'status': status,
         if (dailyLimitMinutes != null) 'dailyLimitMinutes': dailyLimitMinutes,
       }),
     );
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(body['error']?.toString() ?? 'Could not bulk update policies');
-    }
+    _parseResponse(res);
   }
 
   Future<bool> toggleDevicePause(String childId, bool isPaused) async {
-    final res = await http.post(
+    final res = await _send(
+      'POST',
       _u('/api/children/$childId/pause'),
-      headers: _authHeaders,
       body: jsonEncode({'isPaused': isPaused}),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not update device pause state');
-    }
+    final body = _parseResponse(res) as Map<String, dynamic>;
     return body['isPaused'] as bool? ?? isPaused;
   }
 
@@ -277,11 +314,8 @@ class ApiService {
   // ==========================================
 
   Future<List<dynamic>> listWebRules(String childId) async {
-    final res = await http.get(_u('/api/children/$childId/web-rules'), headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load web rules');
-    }
+    final res = await _send('GET', _u('/api/children/$childId/web-rules'));
+    final body = _parseResponse(res) as Map<String, dynamic>;
     return body['rules'] as List<dynamic>;
   }
 
@@ -292,9 +326,9 @@ class ApiService {
     String action = 'BLOCK',
     bool isEnabled = true,
   }) async {
-    final res = await http.post(
+    final res = await _send(
+      'POST',
       _u('/api/children/$childId/web-rules'),
-      headers: _authHeaders,
       body: jsonEncode({
         'ruleType': ruleType,
         'target': target,
@@ -302,10 +336,7 @@ class ApiService {
         'isEnabled': isEnabled,
       }),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 201 && res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not create web rule');
-    }
+    final body = _parseResponse(res) as Map<String, dynamic>;
     return body['rule'] as Map<String, dynamic>;
   }
 
@@ -315,26 +346,20 @@ class ApiService {
     String? action,
     bool? isEnabled,
   }) async {
-    final res = await http.put(
+    final res = await _send(
+      'PUT',
       _u('/api/children/$childId/web-rules/$ruleId'),
-      headers: _authHeaders,
       body: jsonEncode({
         if (action != null) 'action': action,
         if (isEnabled != null) 'isEnabled': isEnabled,
       }),
     );
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(body['error']?.toString() ?? 'Could not update web rule');
-    }
+    _parseResponse(res);
   }
 
   Future<void> deleteWebRule(String childId, String ruleId) async {
-    final res = await http.delete(_u('/api/children/$childId/web-rules/$ruleId'), headers: _authHeaders);
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(body['error']?.toString() ?? 'Could not delete web rule');
-    }
+    final res = await _send('DELETE', _u('/api/children/$childId/web-rules/$ruleId'));
+    _parseResponse(res);
   }
 
   // ==========================================
@@ -365,34 +390,18 @@ class ApiService {
 
     final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/browsing-history')
         .replace(queryParameters: query);
-    final res = await http.get(uri, headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load browsing history');
-    }
-    return body;
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> getBrowsingAnalytics(String childId) async {
-    final res = await http.get(_u('/api/children/$childId/browsing-history/analytics'), headers: _authHeaders);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw ApiException(body['error']?.toString() ?? 'Could not load browsing analytics');
-    }
-    return body;
+    final res = await _send('GET', _u('/api/children/$childId/browsing-history/analytics'));
+    return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> clearBrowsingHistory(String childId) async {
-    final res = await http.delete(_u('/api/children/$childId/browsing-history'), headers: _authHeaders);
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(body['error']?.toString() ?? 'Could not clear browsing history');
-    }
-  }
-
-  Future<void> _saveToken(String token) async {
-    _accessToken = token;
-    await _storage.write(key: 'access_token', value: token);
+    final res = await _send('DELETE', _u('/api/children/$childId/browsing-history'));
+    _parseResponse(res);
   }
 }
 

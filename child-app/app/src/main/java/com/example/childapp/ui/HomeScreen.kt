@@ -11,6 +11,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+
 sealed class ChildScreenState {
     object Idle : ChildScreenState()
     data class Active(val sessionId: String) : ChildScreenState()
@@ -27,6 +32,21 @@ fun HomeScreen(
     onLogout: () -> Unit
 ) {
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var refreshTrigger by remember { mutableStateOf(0) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTrigger++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -72,17 +92,16 @@ fun HomeScreen(
             val latestLocation by com.example.childapp.location.LocationService.latestLocation.collectAsState()
 
             // ---- Safety Protection & Permissions ----
-            val context = androidx.compose.ui.platform.LocalContext.current
-            val hasUsageAccess = remember(state) {
+            val hasUsageAccess = remember(state, refreshTrigger) {
                 com.example.childapp.blocker.AppUsageTracker.hasUsageStatsPermission(context)
             }
-            val hasOverlay = remember(state) {
+            val hasOverlay = remember(state, refreshTrigger) {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                     android.provider.Settings.canDrawOverlays(context)
                 } else true
             }
-            val isAccessibilityActive = remember(state) {
-                com.example.childapp.accessibility.ChildAccessibilityService.isRunning
+            val isAccessibilityActive = remember(state, refreshTrigger) {
+                com.example.childapp.accessibility.ChildAccessibilityService.isAccessibilityServiceEnabled(context)
             }
 
             Card(

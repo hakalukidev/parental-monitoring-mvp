@@ -39,6 +39,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 
   res.status(201).json({
     accessToken,
+    refreshToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
@@ -62,12 +63,16 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   res.json({
     accessToken,
+    refreshToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
 
 export const refresh = asyncHandler(async (req: Request, res: Response) => {
-  const token = req.cookies?.[REFRESH_COOKIE];
+  const token =
+    (typeof req.body?.refreshToken === "string" && req.body.refreshToken.trim().length > 0
+      ? req.body.refreshToken.trim()
+      : undefined) || req.cookies?.[REFRESH_COOKIE];
   if (!token) throw new AppError("Missing refresh token", 401);
 
   let payload;
@@ -83,7 +88,14 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const accessToken = signAccessToken({ sub: user.id, role: user.role });
-  res.json({ accessToken });
+  const newRefreshToken = signRefreshToken({
+    sub: user.id,
+    role: user.role,
+    tokenVersion: user.refreshTokenVersion,
+  });
+  setRefreshCookie(res, newRefreshToken);
+
+  res.json({ accessToken, refreshToken: newRefreshToken });
 });
 
 export const logout = asyncHandler(async (req: AuthedRequest, res: Response) => {
@@ -114,6 +126,7 @@ export const childLogin = asyncHandler(async (req: Request, res: Response) => {
 
   res.json({
     accessToken,
+    refreshToken,
     user: { id: user.id, name: user.name, username: user.email, role: user.role, parentId: user.parentId },
   });
 });

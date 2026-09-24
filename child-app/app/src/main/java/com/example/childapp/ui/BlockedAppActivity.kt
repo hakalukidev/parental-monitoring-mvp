@@ -9,6 +9,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,10 +19,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.childapp.socket.SocketManager
 
 class BlockedAppActivity : ComponentActivity() {
@@ -33,7 +36,7 @@ class BlockedAppActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Disable standard back press to prevent dropping back into the blocked foreground app,
+        // Disable standard back press to prevent dropping back into the blocked foreground app/browser,
         // and instead return cleanly to the Android launcher/home screen.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -48,13 +51,22 @@ class BlockedAppActivity : ComponentActivity() {
             val name = pm.getApplicationLabel(appInfo).toString()
             val iconDrawable = pm.getApplicationIcon(appInfo)
             Pair(name, drawableToImageBitmap(iconDrawable))
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val fallbackName = intent.getStringExtra("APP_NAME") ?: "App"
             Pair(fallbackName, null)
         }
 
         setContent {
-            MaterialTheme {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    background = Color(0xFF121212),
+                    surface = Color(0xFF1E1E1E),
+                    primary = Color(0xFF3B82F6),
+                    onBackground = Color(0xFFEDEDED),
+                    onSurface = Color(0xFFEDEDED),
+                    onSurfaceVariant = Color(0xFFAAAAAA)
+                )
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -89,7 +101,7 @@ class BlockedAppActivity : ComponentActivity() {
                 drawable.draw(canvas)
                 bitmap.asImageBitmap()
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -97,7 +109,7 @@ class BlockedAppActivity : ComponentActivity() {
     private fun goToHomeScreen() {
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         startActivity(homeIntent)
         finish()
@@ -174,7 +186,8 @@ fun StealthLoadingScreen(
             Text(
                 text = "Connecting...",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                fontSize = 14.sp
             )
         }
     }

@@ -27,6 +27,7 @@ class CameraWebRtcManager(
     private val eglBase: EglBase = EglBase.create()
     private var isRemoteDescriptionSet = false
     private val pendingIceCandidates = mutableListOf<IceCandidate>()
+    private val isDisposed = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun init() {
         PeerConnectionFactory.initialize(
@@ -53,6 +54,7 @@ class CameraWebRtcManager(
         withAudio: Boolean = true,
         iceServers: List<PeerConnection.IceServer>
     ) {
+        isDisposed.set(false)
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -76,6 +78,11 @@ class CameraWebRtcManager(
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {
                 Log.d(TAG, "IceConnection state changed: $p0")
+                if (p0 == PeerConnection.IceConnectionState.FAILED || p0 == PeerConnection.IceConnectionState.CLOSED) {
+                    if (!isDisposed.get()) {
+                        onStateChange(PeerConnection.PeerConnectionState.FAILED)
+                    }
+                }
             }
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
             override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
@@ -186,14 +193,25 @@ class CameraWebRtcManager(
         }
     }
 
-    fun switchCamera(onDone: ((isFrontCamera: Boolean) -> Unit)? = null) {
-        cameraCapturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+    /**
+     * Toggles between front and back camera dynamically during an active stream.
+     */
+    fun switchCamera(onComplete: ((Boolean) -> Unit)? = null) {
+        val capturer = cameraCapturer
+        if (capturer == null) {
+            Log.w(TAG, "Cannot switch camera: capturer is null")
+            onComplete?.invoke(false)
+            return
+        }
+        capturer.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
             override fun onCameraSwitchDone(isFrontCamera: Boolean) {
-                Log.d(TAG, "Camera switched successfully. isFrontCamera=$isFrontCamera")
-                onDone?.invoke(isFrontCamera)
+                Log.i(TAG, "Camera switched successfully. isFrontCamera: $isFrontCamera")
+                onComplete?.invoke(true)
             }
-            override fun onCameraSwitchError(errMsg: String?) {
-                Log.e(TAG, "Camera switch error: $errMsg")
+
+            override fun onCameraSwitchError(errorDescription: String?) {
+                Log.e(TAG, "Failed to switch camera: $errorDescription")
+                onComplete?.invoke(false)
             }
         })
     }
@@ -206,7 +224,7 @@ class CameraWebRtcManager(
         peerConnection?.setRemoteDescription(object : SdpObserverAdapter() {
             override fun onSetSuccess() {
                 isRemoteDescriptionSet = true
-                Log.d(TAG, "Remote description set successfully. Draining ${pendingIceCandidates.size} ICE candidates.")
+                Log.i(TAG, "Remote description set successfully. Draining ${pendingIceCandidates.size} ICE candidates.")
                 synchronized(pendingIceCandidates) {
                     for (candidate in pendingIceCandidates) {
                         peerConnection?.addIceCandidate(candidate)
@@ -237,6 +255,7 @@ class CameraWebRtcManager(
     }
 
     fun stop() {
+        if (isDisposed.getAndSet(true)) return
         isRemoteDescriptionSet = false
         synchronized(pendingIceCandidates) {
             pendingIceCandidates.clear()
@@ -244,32 +263,53 @@ class CameraWebRtcManager(
         try {
             cameraCapturer?.stopCapture()
         } catch (_: Exception) {}
-        cameraCapturer?.dispose()
+        try {
+            cameraCapturer?.dispose()
+        } catch (_: Exception) {}
         cameraCapturer = null
 
-        videoTrack?.dispose()
+        try {
+            videoTrack?.dispose()
+        } catch (_: Exception) {}
         videoTrack = null
 
-        audioTrack?.dispose()
+        try {
+            audioTrack?.dispose()
+        } catch (_: Exception) {}
         audioTrack = null
 
-        videoSource?.dispose()
+        try {
+            videoSource?.dispose()
+        } catch (_: Exception) {}
         videoSource = null
 
-        audioSource?.dispose()
+        try {
+            audioSource?.dispose()
+        } catch (_: Exception) {}
         audioSource = null
 
-        surfaceTextureHelper?.dispose()
-        surfaceTextureHelper = null
-
-        peerConnection?.close()
+        try {
+            peerConnection?.close()
+        } catch (_: Exception) {}
+        try {
+            peerConnection?.dispose()
+        } catch (_: Exception) {}
         peerConnection = null
+
+        try {
+            surfaceTextureHelper?.dispose()
+        } catch (_: Exception) {}
+        surfaceTextureHelper = null
     }
 
     fun release() {
         stop()
-        if (::factory.isInitialized) factory.dispose()
-        eglBase.release()
+        try {
+            if (::factory.isInitialized) factory.dispose()
+        } catch (_: Exception) {}
+        try {
+            eglBase.release()
+        } catch (_: Exception) {}
     }
 
     companion object {

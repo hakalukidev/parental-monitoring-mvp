@@ -27,6 +27,7 @@ class WebRtcManager(
     private var peerConnection: PeerConnection? = null
     private var videoCapturer: VideoCapturer? = null
     private var videoSource: VideoSource? = null
+    private var videoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
     private val eglBase: EglBase = EglBase.create()
@@ -59,6 +60,7 @@ class WebRtcManager(
         resultData: Intent,
         iceServers: List<PeerConnection.IceServer>
     ) {
+        isDisposed.set(false)
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -84,6 +86,11 @@ class WebRtcManager(
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {
                 Log.i("WebRtcManager", "IceConnection state changed: $p0")
+                if (p0 == PeerConnection.IceConnectionState.FAILED || p0 == PeerConnection.IceConnectionState.CLOSED) {
+                    if (!isDisposed.get()) {
+                        onStateChange(PeerConnection.PeerConnectionState.FAILED)
+                    }
+                }
             }
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
             override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {
@@ -136,9 +143,10 @@ class WebRtcManager(
         videoCapturer!!.startCapture(targetWidth, targetHeight, 30)
         com.example.childapp.screen.InvisibleScreenCaptureActivity.onCaptureInitialized?.invoke()
 
-        val videoTrack = factory.createVideoTrack("screen_share_track", videoSource)
+        val vTrack = factory.createVideoTrack("screen_share_track", videoSource)
+        videoTrack = vTrack
         val streamId = "screen_share_stream"
-        peerConnection!!.addTrack(videoTrack, listOf(streamId))
+        peerConnection!!.addTrack(vTrack, listOf(streamId))
 
         val constraints = MediaConstraints()
         peerConnection!!.createOffer(object : SdpObserverAdapter() {
@@ -209,6 +217,7 @@ class WebRtcManager(
         synchronized(pendingIceCandidates) {
             pendingIceCandidates.clear()
         }
+
         try {
             videoCapturer?.stopCapture()
         } catch (_: Exception) {}
@@ -218,19 +227,27 @@ class WebRtcManager(
         videoCapturer = null
 
         try {
+            videoTrack?.dispose()
+        } catch (_: Exception) {}
+        videoTrack = null
+
+        try {
             videoSource?.dispose()
         } catch (_: Exception) {}
         videoSource = null
 
         try {
+            peerConnection?.close()
+        } catch (_: Exception) {}
+        try {
+            peerConnection?.dispose()
+        } catch (_: Exception) {}
+        peerConnection = null
+
+        try {
             surfaceTextureHelper?.dispose()
         } catch (_: Exception) {}
         surfaceTextureHelper = null
-
-        try {
-            peerConnection?.close()
-        } catch (_: Exception) {}
-        peerConnection = null
     }
 
     fun release() {

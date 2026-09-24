@@ -85,7 +85,7 @@ fun PermissionsSetupScreen(
     }
 
     val isAccessibilityActive = remember(refreshTrigger) {
-        ChildAccessibilityService.isRunning
+        ChildAccessibilityService.isAccessibilityServiceEnabled(context)
     }
 
     val hasOverlay = remember(refreshTrigger) {

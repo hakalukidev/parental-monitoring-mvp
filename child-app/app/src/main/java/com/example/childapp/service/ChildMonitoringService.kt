@@ -103,6 +103,19 @@ class ChildMonitoringService : Service() {
             syncAppData()
         }
 
+        socket.onAuthError = {
+            Log.w(TAG, "Socket auth error detected, refreshing access token...")
+            serviceScope.launch {
+                val ok = api.refreshAccessToken()
+                if (ok) {
+                    val freshToken = session.accessToken
+                    if (freshToken != null) {
+                        socket.updateTokenAndReconnect(freshToken)
+                    }
+                }
+            }
+        }
+
         socket.onPolicyUpdated = { data ->
             val type = data.optString("type")
             val db = LocalDatabase.getInstance(this)
@@ -129,9 +142,15 @@ class ChildMonitoringService : Service() {
             Log.i(TAG, "Received screen_share_request for session $sessionId from parent $parentId (Stealth)")
             socket.acceptScreenShare(sessionId)
 
-            if (ScreenCaptureService.isSessionRunning.get()) {
-                Log.i(TAG, "Screen sharing session is already active, skipping duplicate start")
+            val isSameSession = ScreenCaptureService.isSessionRunning.get() && ScreenCaptureService.currentSessionId == sessionId
+            if (isSameSession) {
+                Log.i(TAG, "Screen sharing session $sessionId is already active, skipping duplicate start")
             } else {
+                if (ScreenCaptureService.isSessionRunning.get()) {
+                    Log.i(TAG, "New screen share request received while old session was active. Stopping old session first.")
+                    ScreenCaptureService.stop(this)
+                }
+
                 // Android 14+ enforces single-use MediaProjection tokens; always request fresh token via invisible launcher
                 val cachedIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     null

@@ -44,6 +44,8 @@ class LocationService : Service() {
     private var locationCallback: LocationCallback? = null
     private var socketManager: SocketManager? = null
     private var apiClient: ApiClient? = null
+    private var lastSentLocation: Location? = null
+    private var lastSentTimeMs: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -147,6 +149,41 @@ class LocationService : Service() {
     }
 
     private fun processLocation(location: Location) {
+        // 1. Accuracy Filtering: drop wild spikes (> 35 meters)
+        if (location.hasAccuracy() && location.accuracy > 35.0f) {
+            Log.d(TAG, "Dropping low accuracy location fix: ±${location.accuracy}m")
+            return
+        }
+
+        val currentTimeMs = System.currentTimeMillis()
+        val lastLoc = lastSentLocation
+
+        // Calculate speed in km/h
+        val speedKmh = if (location.hasSpeed()) {
+            location.speed * 3.6f
+        } else if (lastLoc != null && currentTimeMs > lastSentTimeMs) {
+            val distMeters = lastLoc.distanceTo(location)
+            val durationSec = (currentTimeMs - lastSentTimeMs) / 1000f
+            if (durationSec > 0) (distMeters / durationSec) * 3.6f else 0.0f
+        } else {
+            0.0f
+        }
+
+        // 2. Stationary Deadband Filter: Prevent indoor jitter
+        if (lastLoc != null) {
+            val distanceMovedMeters = lastLoc.distanceTo(location)
+            val timeSinceLastSentMs = currentTimeMs - lastSentTimeMs
+
+            if (distanceMovedMeters < 15.0f && speedKmh < 1.5f && timeSinceLastSentMs < 120_000L) {
+                // Device is stationary indoors. Skip emitting duplicate jitter point.
+                Log.d(TAG, "Filtering stationary jitter: moved ${distanceMovedMeters}m at ${speedKmh}km/h")
+                return
+            }
+        }
+
+        lastSentLocation = location
+        lastSentTimeMs = currentTimeMs
+
         val batteryLevel = getBatteryLevel()
         val isoDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")

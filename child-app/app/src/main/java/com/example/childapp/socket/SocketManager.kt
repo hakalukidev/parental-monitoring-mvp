@@ -16,7 +16,7 @@ import org.json.JSONObject
  *  - real-time policy updates, instant lockdown, and unblock approvals
  *  - real-time browsing history reporting
  */
-class SocketManager(private val accessToken: String) {
+class SocketManager(private var accessToken: String) {
 
     private var socket: Socket? = null
 
@@ -29,11 +29,18 @@ class SocketManager(private val accessToken: String) {
     var onIceCandidate: ((sessionId: String, candidate: JSONObject) -> Unit)? = null
     var onConnected: (() -> Unit)? = null
     var onDisconnected: (() -> Unit)? = null
+    var onAuthError: (() -> Unit)? = null
 
     // Blocker & Browsing History callbacks
     var onPolicyUpdated: ((data: JSONObject) -> Unit)? = null
     var onInstantLockdownToggle: ((isPaused: Boolean) -> Unit)? = null
     var onUnblockResponse: ((requestId: String, packageName: String, approved: Boolean, durationMinutes: Int) -> Unit)? = null
+
+    fun updateTokenAndReconnect(newToken: String) {
+        this.accessToken = newToken
+        disconnect()
+        connect()
+    }
 
     fun connect() {
         val uri = java.net.URI.create(BuildConfig.SOCKET_URL)
@@ -58,7 +65,11 @@ class SocketManager(private val accessToken: String) {
                 onConnected?.invoke() 
             }
             s.on(Socket.EVENT_CONNECT_ERROR) { args ->
-                android.util.Log.e("SocketManager", "Socket connect error: ${args.getOrNull(0)}")
+                val err = args.getOrNull(0)?.toString() ?: ""
+                android.util.Log.e("SocketManager", "Socket connect error: $err")
+                if (err.contains("Unauthorized", ignoreCase = true) || err.contains("token", ignoreCase = true)) {
+                    onAuthError?.invoke()
+                }
             }
             s.on(Socket.EVENT_DISCONNECT) { 
                 android.util.Log.w("SocketManager", "Socket disconnected")

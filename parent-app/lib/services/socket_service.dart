@@ -5,7 +5,7 @@ import 'app_config.dart';
 class SocketService {
   io.Socket? _socket;
 
-  void connect(String accessToken) {
+  void connect(String accessToken, {void Function()? onAuthError}) {
     _socket = io.io(
       AppConfig.socketUrl,
       io.OptionBuilder()
@@ -14,7 +14,18 @@ class SocketService {
           .disableAutoConnect()
           .build(),
     );
+    _socket!.onConnectError((err) {
+      if (err.toString().toLowerCase().contains('unauthorized') ||
+          err.toString().toLowerCase().contains('token')) {
+        onAuthError?.call();
+      }
+    });
     _socket!.connect();
+  }
+
+  void updateTokenAndReconnect(String newToken, {void Function()? onAuthError}) {
+    disconnect();
+    connect(newToken, onAuthError: onAuthError);
   }
 
   io.Socket get socket {

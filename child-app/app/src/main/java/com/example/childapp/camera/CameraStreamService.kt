@@ -81,14 +81,16 @@ class CameraStreamService : Service() {
         val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        )
+        ) + getFallbackTurnServers()
 
         val webRtc = CameraWebRtcManager(
             context = applicationContext,
             onLocalOffer = { sdp -> socket.sendOffer(sid, sdp) },
             onIceCandidate = { candidate -> socket.sendIceCandidate(sid, candidate) },
             onStateChange = { state ->
-                if (state == PeerConnection.PeerConnectionState.CLOSED) {
+                if (state == PeerConnection.PeerConnectionState.CLOSED ||
+                    state == PeerConnection.PeerConnectionState.FAILED
+                ) {
                     stopStreaming()
                 }
             }
@@ -177,15 +179,44 @@ class CameraStreamService : Service() {
             .build()
     }
 
+    private fun getFallbackTurnServers(): List<PeerConnection.IceServer> {
+        return listOf(
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer()
+        )
+    }
+
     private fun parseIceServers(config: JSONObject): List<PeerConnection.IceServer> {
-        val arr = config.getJSONArray("iceServers")
+        val arr = config.optJSONArray("iceServers") ?: org.json.JSONArray()
         val list = mutableListOf<PeerConnection.IceServer>()
+        var hasTurn = false
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
-            val builder = PeerConnection.IceServer.builder(obj.getString("urls"))
+            val urlStr = obj.optString("urls")
+            if (urlStr.startsWith("turn:") || urlStr.startsWith("turns:")) {
+                hasTurn = true
+            }
+            val builder = PeerConnection.IceServer.builder(urlStr)
             if (obj.has("username")) builder.setUsername(obj.optString("username"))
             if (obj.has("credential")) builder.setPassword(obj.optString("credential"))
             list.add(builder.createIceServer())
+        }
+        if (!hasTurn) {
+            list.addAll(getFallbackTurnServers())
         }
         return list
     }

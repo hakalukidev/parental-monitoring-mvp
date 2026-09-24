@@ -43,7 +43,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final token = await ApiService.instance.accessToken;
       if (token != null) {
         final sock = SocketService();
-        sock.connect(token);
+        void connectWithAuth() {
+          sock.connect(
+            token,
+            onAuthError: () async {
+              final ok = await ApiService.instance.refreshToken();
+              if (ok) {
+                final freshToken = await ApiService.instance.accessToken;
+                if (freshToken != null && mounted) {
+                  sock.updateTokenAndReconnect(freshToken, onAuthError: connectWithAuth);
+                }
+              }
+            },
+          );
+        }
+        connectWithAuth();
 
         sock.onChildStatusChanged((data) {
           if (!mounted) return;
@@ -312,7 +326,7 @@ class _ChildCard extends StatelessWidget {
                   ),
                 ),
                 icon: const Icon(Icons.location_on),
-                label: const Text('Track Location & Route'),
+                label: const Text('Child Location & Directions'),
               ),
             ),
             const SizedBox(height: 8),

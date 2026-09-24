@@ -45,12 +45,47 @@ class ApiClient(private val session: SessionStore) {
             .url(url("/api/auth/child-login"))
             .post(payload.toString().toRequestBody(jsonMedia))
             .build()
-        val body = execute(req)
+        val body = execute(req, retryOn401 = false)
         session.accessToken = body.getString("accessToken")
+        if (body.has("refreshToken")) {
+            session.refreshToken = body.getString("refreshToken")
+        }
         val user = body.getJSONObject("user")
         session.childName = user.getString("name")
         session.childId = user.getString("id")
         return body
+    }
+
+    /** POST /api/auth/refresh */
+    @Synchronized
+    fun refreshAccessToken(): Boolean {
+        val refreshToken = session.refreshToken ?: return false
+        try {
+            val payload = JSONObject().put("refreshToken", refreshToken)
+            val req = Request.Builder()
+                .url(url("/api/auth/refresh"))
+                .post(payload.toString().toRequestBody(jsonMedia))
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    android.util.Log.e("ApiClient", "Token refresh failed (${resp.code}): $text")
+                    return false
+                }
+                val json = JSONObject(text)
+                val newAccess = json.getString("accessToken")
+                session.accessToken = newAccess
+                if (json.has("refreshToken")) {
+                    session.refreshToken = json.getString("refreshToken")
+                }
+                android.util.Log.i("ApiClient", "Access token refreshed successfully")
+                return true
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "Error refreshing token: ${e.message}", e)
+            return false
+        }
     }
 
     /** POST /api/children/:childId/apps/sync */
@@ -138,12 +173,25 @@ class ApiClient(private val session: SessionStore) {
         return execute(req)
     }
 
-    private fun execute(req: Request): JSONObject {
+    private fun execute(req: Request, retryOn401: Boolean = true): JSONObject {
         android.util.Log.d("ApiClient", "HTTP ${req.method} -> ${req.url}")
         try {
             client.newCall(req).execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
                 android.util.Log.d("ApiClient", "Response (${resp.code}) for ${req.url}: $text")
+
+                if (resp.code == 401 && retryOn401 && !req.url.encodedPath.contains("/api/auth/")) {
+                    android.util.Log.w("ApiClient", "Received 401 for ${req.url}, attempting token refresh...")
+                    val refreshed = refreshAccessToken()
+                    if (refreshed) {
+                        val newToken = session.accessToken
+                        val retryReq = req.newBuilder()
+                            .header("Authorization", "Bearer $newToken")
+                            .build()
+                        return execute(retryReq, retryOn401 = false)
+                    }
+                }
+
                 val json = if (text.isNotBlank()) JSONObject(text) else JSONObject()
                 if (!resp.isSuccessful) {
                     throw ApiException(json.optString("error", "Request failed (${resp.code})"))

@@ -119,16 +119,37 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
 
   Future<void> _setupPeerConnection() async {
     if (_pc != null) return;
+    final fallbackTurnServers = [
+      {
+        'urls': [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:443',
+          'turns:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+        ],
+        'username': 'openrelayproject',
+        'credential': 'openrelayproject',
+      },
+    ];
     List<Map<String, dynamic>> iceServers = [
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
+      ...fallbackTurnServers,
     ];
     try {
       final iceServersRaw = await ApiService.instance.getIceServers();
       if (iceServersRaw.isNotEmpty) {
-        iceServers = iceServersRaw
+        final fetched = iceServersRaw
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
+        final hasTurn = fetched.any((s) {
+          final u = s['urls'];
+          if (u is String) return u.startsWith('turn:') || u.startsWith('turns:');
+          if (u is List) return u.any((x) => x.toString().startsWith('turn:') || x.toString().startsWith('turns:'));
+          return false;
+        });
+        iceServers = hasTurn ? fetched : [...fetched, ...fallbackTurnServers];
       }
     } catch (_) {}
 
@@ -145,12 +166,37 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
           if (_remoteRenderer.srcObject != stream) {
             _remoteRenderer.srcObject = stream;
           }
+        } else {
+          createLocalMediaStream('remote_camera_stream').then((stream) {
+            stream.addTrack(event.track);
+            _remoteRenderer.srcObject = stream;
+          });
         }
         if (mounted) {
           setState(() {
             _isStreamReady = true;
             _state = _CameraViewState.live;
           });
+        }
+      }
+    };
+
+    pc.onConnectionState = (state) {
+      debugPrint('WebRTC Connection state: $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        if (mounted && _state == _CameraViewState.live) {
+          _teardown(notifyBackend: false);
+        }
+      }
+    };
+
+    pc.onIceConnectionState = (state) {
+      debugPrint('WebRTC ICE Connection state: $state');
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+          state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
+        if (mounted && _state == _CameraViewState.live) {
+          _teardown(notifyBackend: false);
         }
       }
     };

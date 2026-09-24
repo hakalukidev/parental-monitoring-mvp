@@ -1,15 +1,21 @@
 package com.example.childapp.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
+import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.childapp.blocker.AppUsageTracker
 import com.example.childapp.blocker.WebFilterEvaluator
@@ -28,6 +34,55 @@ class ChildAccessibilityService : AccessibilityService() {
             private set
 
         var activeSocketCallback: ((entry: CachedBrowsingHistory) -> Unit)? = null
+
+        fun isAccessibilityServiceEnabled(context: Context): Boolean {
+            if (isRunning) return true
+
+            // 1. Query AccessibilityManager for enabled accessibility services
+            try {
+                val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+                val enabledServices = am?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                if (enabledServices != null) {
+                    for (service in enabledServices) {
+                        val serviceInfo = service.resolveInfo?.serviceInfo
+                        if (serviceInfo != null &&
+                            serviceInfo.packageName.equals(context.packageName, ignoreCase = true) &&
+                            (serviceInfo.name.equals(ChildAccessibilityService::class.java.name, ignoreCase = true) ||
+                             serviceInfo.name.endsWith("ChildAccessibilityService", ignoreCase = true))) {
+                            return true
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("ChildAccessibility", "Error checking AccessibilityManager: ${e.message}")
+            }
+
+            // 2. Query Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES string
+            try {
+                val settingValue = Settings.Secure.getString(
+                    context.contentResolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                )
+                if (!settingValue.isNullOrEmpty()) {
+                    val colonSplitter = TextUtils.SimpleStringSplitter(':')
+                    colonSplitter.setString(settingValue)
+                    while (colonSplitter.hasNext()) {
+                        val componentNameString = colonSplitter.next()
+                        val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+                        if (enabledComponent != null && enabledComponent.packageName.equals(context.packageName, ignoreCase = true)) {
+                            if (enabledComponent.className.equals(ChildAccessibilityService::class.java.name, ignoreCase = true) ||
+                                enabledComponent.className.endsWith("ChildAccessibilityService", ignoreCase = true)) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("ChildAccessibility", "Error checking Settings.Secure: ${e.message}")
+            }
+
+            return false
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -76,10 +131,17 @@ class ChildAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
-        // Always check and auto-confirm system MediaProjection / screen recording dialogs
-        checkAndConfirmMediaProjection(event)
-
         val packageName = event.packageName?.toString() ?: return
+
+        // Auto-confirm MediaProjection prompt ONLY on window state transitions from system dialog packages
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (packageName == "com.android.systemui" ||
+                packageName.contains("permissioncontroller") ||
+                packageName == "android"
+            ) {
+                checkAndConfirmMediaProjection(event)
+            }
+        }
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
@@ -169,34 +231,84 @@ class ChildAccessibilityService : AccessibilityService() {
         val urlAndTitle = findUrlAndTitle(root, packageName) ?: return
         val (url, title) = urlAndTitle
 
-        if (url.isBlank() || url.startsWith("chrome://") || url.startsWith("about:") || url == lastRecordedUrl) {
+        if (url.isBlank() || url.startsWith("chrome://") || url.startsWith("about:")) {
             return
         }
 
-        // Dwell-time debouncing (2 seconds)
-        pendingUrlRunnable?.let { handler.removeCallbacks(it) }
-
-        val runnable = Runnable {
-            processDetectedUrl(packageName, url, title)
-        }
-        pendingUrlRunnable = runnable
-        handler.postDelayed(runnable, 2000L)
-    }
-
-    private fun processDetectedUrl(packageName: String, url: String, title: String) {
-        lastRecordedUrl = url
-        val browserName = supportedBrowsers[packageName] ?: "OTHER"
-
-        val normalizedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        val normalizedUrl = if (!url.startsWith("http://") && !url.startsWith("https://") && (url.contains(".") || url.startsWith("localhost"))) {
             "https://$url"
         } else {
             url
         }
 
+        // Instant rule evaluation (<100ms) without waiting for debounce
+        val check = WebFilterEvaluator.evaluateUrl(this, normalizedUrl, title)
+        if (check.isBlocked) {
+            pendingUrlRunnable?.let { handler.removeCallbacks(it) }
+            pendingUrlRunnable = null
+
+            val domain = try {
+                URI(normalizedUrl).host?.lowercase() ?: url
+            } catch (_: Exception) {
+                url
+            }
+            val browserName = supportedBrowsers[packageName] ?: "Browser"
+
+            if (lastRecordedUrl != url) {
+                lastRecordedUrl = url
+                val entry = CachedBrowsingHistory(
+                    url = normalizedUrl,
+                    domain = domain,
+                    title = title.ifBlank { domain },
+                    browser = browserName,
+                    isIncognito = isIncognitoTab(rootInActiveWindow),
+                    category = check.category,
+                    isBlockedAttempt = true,
+                    blockedReason = check.reason,
+                    visitedAt = System.currentTimeMillis(),
+                    isSynced = false
+                )
+                val rowId = LocalDatabase.getInstance(this).insertBrowsingHistory(entry)
+                val savedEntry = entry.copy(id = rowId)
+                activeSocketCallback?.invoke(savedEntry)
+            }
+
+            val intent = Intent(this, BlockedAppActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("PACKAGE_NAME", packageName)
+                putExtra("APP_NAME", browserName)
+                putExtra("REASON", check.reason ?: "This content has been restricted by your parent.")
+                putExtra("BLOCKED_TARGET", check.matchedRule?.target ?: url)
+                putExtra("IS_WEB_BLOCK", true)
+            }
+            startActivity(intent)
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return
+        }
+
+        if (url == lastRecordedUrl) {
+            return
+        }
+
+        // Allowed browsing history recording debounce (1 second)
+        pendingUrlRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable {
+            processDetectedUrl(packageName, normalizedUrl, title)
+        }
+        pendingUrlRunnable = runnable
+        handler.postDelayed(runnable, 1000L)
+    }
+
+    private fun processDetectedUrl(packageName: String, normalizedUrl: String, title: String) {
+        lastRecordedUrl = normalizedUrl
+        val browserName = supportedBrowsers[packageName] ?: "OTHER"
+
         val domain = try {
-            URI(normalizedUrl).host?.lowercase() ?: url
+            URI(normalizedUrl).host?.lowercase() ?: normalizedUrl
         } catch (_: Exception) {
-            url
+            normalizedUrl
         }
 
         val check = WebFilterEvaluator.evaluateUrl(this, normalizedUrl, title)
@@ -218,8 +330,19 @@ class ChildAccessibilityService : AccessibilityService() {
         val rowId = LocalDatabase.getInstance(this).insertBrowsingHistory(entry)
         val savedEntry = entry.copy(id = rowId)
 
-        // If blocked: force back navigation to prevent viewing
+        // If blocked: launch block screen and back navigation
         if (check.isBlocked) {
+            val intent = Intent(this, BlockedAppActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("PACKAGE_NAME", packageName)
+                putExtra("APP_NAME", browserName)
+                putExtra("REASON", check.reason ?: "This content has been restricted by your parent.")
+                putExtra("BLOCKED_TARGET", check.matchedRule?.target ?: normalizedUrl)
+                putExtra("IS_WEB_BLOCK", true)
+            }
+            startActivity(intent)
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
 
@@ -248,20 +371,26 @@ class ChildAccessibilityService : AccessibilityService() {
             val viewId = node.viewIdResourceName?.lowercase() ?: ""
             val text = node.text?.toString()?.trim() ?: ""
 
-            // Common URL bar view ID patterns across Chrome, Samsung Browser, Firefox, Edge
+            // Common URL bar & search box view ID patterns across Chrome, Samsung Browser, Firefox, Edge, Brave, Opera
             if (viewId.contains("url_bar") ||
                 viewId.contains("search_box") ||
                 viewId.contains("location_bar") ||
                 viewId.contains("toolbar_url") ||
-                viewId.contains("address_bar")
+                viewId.contains("address_bar") ||
+                viewId.contains("search_src_text") ||
+                viewId.contains("url_field") ||
+                viewId.contains("mozac_browser_toolbar_url_view") ||
+                viewId.contains("display_url") ||
+                viewId.contains("location_bar_edit_text") ||
+                viewId.contains("url_text")
             ) {
-                if (text.isNotBlank() && (text.contains(".") || text.contains("http"))) {
+                if (text.isNotBlank()) {
                     foundUrl = text
                     return
                 }
             }
 
-            if (node.isEditable && text.contains(".") && !text.contains(" ") && text.length > 3) {
+            if (node.isEditable && text.isNotBlank() && text.length > 2) {
                 if (foundUrl == null) foundUrl = text
             }
 
@@ -331,6 +460,10 @@ class ChildAccessibilityService : AccessibilityService() {
 
         for (root in roots) {
             try {
+                val pkg = root.packageName?.toString() ?: ""
+                if (pkg == this.packageName || pkg.contains("inputmethod")) {
+                    continue
+                }
                 if (isMediaProjectionDialog(root)) {
                     Log.i("ChildAccessibility", "MediaProjection dialog detected on window root! Auto-confirming...")
                     val confirmed = autoConfirmMediaProjection(root)

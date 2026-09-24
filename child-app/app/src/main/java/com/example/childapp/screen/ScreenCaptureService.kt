@@ -87,7 +87,7 @@ class ScreenCaptureService : Service() {
         val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        )
+        ) + getFallbackTurnServers()
 
         val webRtc = WebRtcManager(
             context = applicationContext,
@@ -101,8 +101,11 @@ class ScreenCaptureService : Service() {
             },
             onStateChange = { state ->
                 Log.i("ScreenCaptureService", "PeerConnection state changed: $state")
-                if (state == PeerConnection.PeerConnectionState.CLOSED || state == PeerConnection.PeerConnectionState.FAILED) {
+                if (state == PeerConnection.PeerConnectionState.CLOSED ||
+                    state == PeerConnection.PeerConnectionState.FAILED
+                ) {
                     if (!isStopping.get()) {
+                        Log.i("ScreenCaptureService", "Stopping session due to connection state: $state")
                         stopSharing()
                     }
                 }
@@ -155,7 +158,9 @@ class ScreenCaptureService : Service() {
     private fun stopSharing() {
         if (isStopping.getAndSet(true)) return
         isSessionRunning.set(false)
+        currentSessionId = null
         val sid = sessionId
+        sessionId = null
         val rtc = webRtcManager
         webRtcManager = null
         rtc?.release()
@@ -177,6 +182,7 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         isSessionRunning.set(false)
+        currentSessionId = null
         stopSharing()
         super.onDestroy()
     }
@@ -206,21 +212,51 @@ class ScreenCaptureService : Service() {
             .build()
     }
 
+    private fun getFallbackTurnServers(): List<PeerConnection.IceServer> {
+        return listOf(
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer()
+        )
+    }
+
     private fun parseIceServers(config: JSONObject): List<PeerConnection.IceServer> {
-        val arr = config.getJSONArray("iceServers")
+        val arr = config.optJSONArray("iceServers") ?: org.json.JSONArray()
         val list = mutableListOf<PeerConnection.IceServer>()
+        var hasTurn = false
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
-            val builder = PeerConnection.IceServer.builder(obj.getString("urls"))
+            val urlStr = obj.optString("urls")
+            if (urlStr.startsWith("turn:") || urlStr.startsWith("turns:")) {
+                hasTurn = true
+            }
+            val builder = PeerConnection.IceServer.builder(urlStr)
             if (obj.has("username")) builder.setUsername(obj.optString("username"))
             if (obj.has("credential")) builder.setPassword(obj.optString("credential"))
             list.add(builder.createIceServer())
+        }
+        if (!hasTurn) {
+            list.addAll(getFallbackTurnServers())
         }
         return list
     }
 
     companion object {
         val isSessionRunning = AtomicBoolean(false)
+        @Volatile var currentSessionId: String? = null
         var pendingProjectionIntent: Intent? = null
         const val ACTION_STOP = "com.example.childapp.action.STOP_SHARING"
         const val EXTRA_RESULT_CODE = "extra_result_code"
@@ -231,6 +267,7 @@ class ScreenCaptureService : Service() {
         private const val Activity_RESULT_CANCELED = Activity.RESULT_CANCELED
 
         fun start(context: Context, resultCode: Int, resultData: Intent, accessToken: String, sessionId: String) {
+            currentSessionId = sessionId
             val intent = Intent(context, ScreenCaptureService::class.java).apply {
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_RESULT_DATA, resultData)
@@ -245,6 +282,8 @@ class ScreenCaptureService : Service() {
         }
 
         fun stop(context: Context) {
+            isSessionRunning.set(false)
+            currentSessionId = null
             val intent = Intent(context, ScreenCaptureService::class.java).apply { action = ACTION_STOP }
             context.startService(intent)
         }

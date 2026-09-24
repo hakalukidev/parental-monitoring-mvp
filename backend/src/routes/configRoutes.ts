@@ -10,11 +10,14 @@ router.get("/", requireAuth, (_req, res) => {
     (url) => ({ urls: url })
   );
   if (env.turnUrl) {
-    iceServers.push({
-      urls: env.turnUrl,
-      username: env.turnUsername,
-      credential: env.turnCredential,
-    });
+    const turnUrls = env.turnUrl.split(",").map((u) => u.trim()).filter(Boolean);
+    for (const url of turnUrls) {
+      iceServers.push({
+        urls: url,
+        username: env.turnUsername,
+        credential: env.turnCredential,
+      });
+    }
   }
   res.json({ iceServers });
 });
