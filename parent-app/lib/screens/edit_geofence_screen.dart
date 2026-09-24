@@ -39,6 +39,7 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
   List<int> _selectedDays = [0, 1, 2, 3, 4, 5, 6];
 
   String? _resolvedAddress;
+  bool _isSatelliteView = false;
   bool _saving = false;
   String? _error;
 
@@ -288,7 +289,7 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     color: Colors.grey.shade100,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -297,10 +298,23 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                           'Tap map to place boundary center',
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.my_location, size: 20),
-                          tooltip: 'Center on my location',
-                          onPressed: _centerOnParentLocation,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                _isSatelliteView ? Icons.map_outlined : Icons.satellite_alt_outlined,
+                                size: 20,
+                              ),
+                              tooltip: _isSatelliteView ? 'Switch to Street Map' : 'Switch to Satellite View',
+                              onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.my_location, size: 20),
+                              tooltip: 'Center on my location',
+                              onPressed: _centerOnParentLocation,
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -312,6 +326,7 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                       options: MapOptions(
                         initialCenter: _center,
                         initialZoom: 15,
+                        maxZoom: 20.0,
                         onTap: (tapPos, point) {
                           setState(() {
                             _center = point;
@@ -320,10 +335,27 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                         },
                       ),
                       children: [
-                        TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'dev.hakaluki.seftly.parent',
-                        ),
+                        // High-resolution Google Maps Tile Layer
+                        if (_isSatelliteView)
+                          TileLayer(
+                            // Google Hybrid: High-res satellite imagery + roads + labels
+                            urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                            subdomains: const ['0', '1', '2', '3'],
+                            userAgentPackageName: 'com.example.parent_app',
+                            maxZoom: 20.0,
+                            maxNativeZoom: 20,
+                            fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                          )
+                        else
+                          TileLayer(
+                            // Google Street: Full street map with local POIs (mosques, shops, schools, markets, Bengali/English labels)
+                            urlTemplate: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                            subdomains: const ['0', '1', '2', '3'],
+                            userAgentPackageName: 'com.example.parent_app',
+                            maxZoom: 20.0,
+                            maxNativeZoom: 20,
+                            fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          ),
                         CircleLayer(
                           circles: [
                             CircleMarker(
