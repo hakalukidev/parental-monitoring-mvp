@@ -1,4 +1,4 @@
-# Safetly - Parent App
+# Seftly - Parent App
 
 A new Flutter project.
 

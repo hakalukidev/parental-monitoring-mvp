@@ -15,7 +15,7 @@ import locationRoutes from "./routes/locationRoutes";
 import appPolicyRoutes from "./routes/appPolicyRoutes";
 import webRulesRoutes from "./routes/webRulesRoutes";
 import browsingHistoryRoutes from "./routes/browsingHistoryRoutes";
-import safetlyRoutes from "./routes/safetlyRoutes";
+import seftlyRoutes from "./routes/seftlyRoutes";
 
 export function createApp(): Express {
   const app = express();
@@ -42,7 +42,7 @@ export function createApp(): Express {
   app.use("/api/camera-stream", cameraStreamRoutes);
   app.use("/api/location", locationRoutes);
   app.use("/api/config", configRoutes);
-  app.use("/api", safetlyRoutes);
+  app.use("/api", seftlyRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });

@@ -50,7 +50,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Safetly Parent Login', style: Theme.of(context).textTheme.headlineMedium),
+                  Text('Seftly Parent Login', style: Theme.of(context).textTheme.headlineMedium),
                   const SizedBox(height: 24),
                   TextFormField(
                     controller: _email,

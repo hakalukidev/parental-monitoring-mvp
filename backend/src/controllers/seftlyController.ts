@@ -28,8 +28,8 @@ function profile(user: { _id: unknown; name: string; email: string; role: string
   };
 }
 
-// POST /api/parent/login - Safetly website compatibility route.
-export const safetlyParentLogin = asyncHandler(async (req: Request, res: Response) => {
+// POST /api/parent/login - Seftly website compatibility route.
+export const seftlyParentLogin = asyncHandler(async (req: Request, res: Response) => {
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
   const user = await User.findOne({ email, role: "PARENT" });
@@ -41,8 +41,8 @@ export const safetlyParentLogin = asyncHandler(async (req: Request, res: Respons
   res.json({ token, refreshToken, profile: profile(user) });
 });
 
-// POST /api/child/login - Safetly website compatibility route.
-export const safetlyChildLogin = asyncHandler(async (req: Request, res: Response) => {
+// POST /api/child/login - Seftly website compatibility route.
+export const seftlyChildLogin = asyncHandler(async (req: Request, res: Response) => {
   const identifier = String(req.body?.identifier ?? req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
   const user = await User.findOne({ email: identifier, role: "CHILD" });
@@ -67,8 +67,8 @@ function childResponse(child: any, device: any) {
   };
 }
 
-// GET /api/parent/childs - Safetly parent dashboard route.
-export const safetlyParentChildren = asyncHandler(async (req: AuthedRequest, res: Response) => {
+// GET /api/parent/childs - Seftly parent dashboard route.
+export const seftlyParentChildren = asyncHandler(async (req: AuthedRequest, res: Response) => {
   const parent = await User.findOne({ _id: req.user!.id, role: "PARENT" }).lean();
   if (!parent) throw new AppError("Parent not found", 404);
   const requestedEmail = String(req.query.email ?? "").trim().toLowerCase();
@@ -82,7 +82,7 @@ export const safetlyParentChildren = asyncHandler(async (req: AuthedRequest, res
 });
 
 // GET /api/child - Parent-only child lookup with ownership enforcement.
-export const safetlyGetChild = asyncHandler(async (req: AuthedRequest, res: Response) => {
+export const seftlyGetChild = asyncHandler(async (req: AuthedRequest, res: Response) => {
   const identifier = String(req.query.identifier ?? "").trim().toLowerCase();
   const child = await User.findOne({ role: "CHILD", email: identifier, parentId: req.user!.id }).lean();
   if (!child) throw new AppError("Child not found", 404);
@@ -91,23 +91,23 @@ export const safetlyGetChild = asyncHandler(async (req: AuthedRequest, res: Resp
 });
 
 // GET /api/child/lookup - Public identifier validation used before checkout.
-export const safetlyLookupChild = asyncHandler(async (req: Request, res: Response) => {
+export const seftlyLookupChild = asyncHandler(async (req: Request, res: Response) => {
   const identifier = String(req.query.identifier ?? "").trim().toLowerCase();
   const child = await User.findOne({ role: "CHILD", email: identifier }).lean();
   if (!child) throw new AppError("Child not found", 404);
   res.json({ valid: true, user: { id: child._id, name: child.name, username: child.email, email: child.email, ...premium(child.expireDate) } });
 });
 
-// GET /api/child/dashboard - Child dashboard route for the Safetly website.
-export const safetlyChildDashboard = asyncHandler(async (req: AuthedRequest, res: Response) => {
+// GET /api/child/dashboard - Child dashboard route for the Seftly website.
+export const seftlyChildDashboard = asyncHandler(async (req: AuthedRequest, res: Response) => {
   const child = await User.findOne({ _id: req.user!.id, role: "CHILD" }).lean();
   if (!child) throw new AppError("Child not found", 404);
   const device = await Device.findOne({ childId: child._id }).sort({ updatedAt: -1 }).lean();
   res.json({ profile: { id: child._id, name: child.name, username: child.email, email: child.email }, device: { active: device?.status === "ONLINE", status: device?.status ?? "INACTIVE", message: device ? `${device.platform} device` : "No device registered." }, premium: premium(child.expireDate) });
 });
 
-// PATCH /api/account/email - Account settings used by the Safetly dashboard.
-export const safetlyChangeEmail = asyncHandler(async (req: AuthedRequest, res: Response) => {
+// PATCH /api/account/email - Account settings used by the Seftly dashboard.
+export const seftlyChangeEmail = asyncHandler(async (req: AuthedRequest, res: Response) => {
   const newEmail = String(req.body?.newEmail ?? "").trim().toLowerCase();
   const currentPassword = String(req.body?.currentPassword ?? "");
   if (!newEmail || !newEmail.includes("@") || !currentPassword) throw new AppError("A valid email and current password are required", 400);
@@ -120,8 +120,8 @@ export const safetlyChangeEmail = asyncHandler(async (req: AuthedRequest, res: R
   res.json({ message: "Email changed successfully.", email: user.email });
 });
 
-// PATCH /api/account/password - Account settings used by the Safetly dashboard.
-export const safetlyChangePassword = asyncHandler(async (req: AuthedRequest, res: Response) => {
+// PATCH /api/account/password - Account settings used by the Seftly dashboard.
+export const seftlyChangePassword = asyncHandler(async (req: AuthedRequest, res: Response) => {
   const currentPassword = String(req.body?.currentPassword ?? "");
   const newPassword = String(req.body?.newPassword ?? "");
   const confirmPassword = String(req.body?.confirmPassword ?? "");
@@ -135,14 +135,14 @@ export const safetlyChangePassword = asyncHandler(async (req: AuthedRequest, res
 });
 
 // Shared guard for private admin-dashboard synchronization routes.
-export function requireSafetlyServiceToken(req: Request, _res: Response, next: () => void) {
+export function requireSeftlyServiceToken(req: Request, _res: Response, next: () => void) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (!env.serviceToken || token !== env.serviceToken) throw new AppError("Invalid service token", 401);
   next();
 }
 
-// GET /api/admin/parent-child - Data source for the Safetly admin Users page.
-export const safetlyAdminParentChildren = asyncHandler(async (_req: Request, res: Response) => {
+// GET /api/admin/parent-child - Data source for the Seftly admin Users page.
+export const seftlyAdminParentChildren = asyncHandler(async (_req: Request, res: Response) => {
   const parents = await User.find({ role: "PARENT" }).lean();
   const result = await Promise.all(parents.map(async (parent) => {
     const children = await User.find({ role: "CHILD", parentId: parent._id }).lean();
@@ -164,7 +164,7 @@ export const safetlyAdminParentChildren = asyncHandler(async (_req: Request, res
 });
 
 // PATCH /api/child/:id/premium - Dashboard sync after local payment approval.
-export const safetlySyncPremium = asyncHandler(async (req: Request, res: Response) => {
+export const seftlySyncPremium = asyncHandler(async (req: Request, res: Response) => {
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const expireDate = new Date(String(req.body?.expireDate ?? ""));
   if (!email || Number.isNaN(expireDate.getTime())) throw new AppError("email and a valid expireDate are required", 400);

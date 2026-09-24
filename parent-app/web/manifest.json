@@ -1,11 +1,11 @@
 {
-    "name": "Safetly Parent",
-    "short_name": "Safetly",
+    "name": "Seftly Parent",
+    "short_name": "Seftly",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Safetly parent application for parental monitoring.",
+    "description": "Seftly parent application for parental monitoring.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

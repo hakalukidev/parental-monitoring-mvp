@@ -263,7 +263,7 @@ class LocationService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Safetly Location Tracking")
+            .setContentTitle("Seftly Location Tracking")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
@@ -276,7 +276,7 @@ class LocationService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Safetly Location Tracking",
+                "Seftly Location Tracking",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Notifies when background GPS location tracking is active"

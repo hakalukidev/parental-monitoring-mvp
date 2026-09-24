@@ -32,7 +32,7 @@ class RoutingService {
       final response = await http.get(
         uri,
         headers: {
-          'User-Agent': 'SafetlyParentApp/1.0 (support@safetly.app)',
+          'User-Agent': 'SeftlyParentApp/1.0 (support@seftly.app)',
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 10));
