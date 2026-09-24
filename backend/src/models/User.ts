@@ -10,6 +10,7 @@ export interface IUser extends Document {
   role: UserRole;
   // Only set for CHILD users:
   parentId?: Types.ObjectId;
+  expireDate?: Date | null;
   refreshTokenVersion: number; // bump to invalidate all existing refresh tokens
   createdAt: Date;
   updatedAt: Date;
@@ -29,6 +30,7 @@ const userSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ["PARENT", "CHILD"], required: true },
     parentId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    expireDate: { type: Date, default: null },
     refreshTokenVersion: { type: Number, default: 0 },
   },
   { timestamps: true }

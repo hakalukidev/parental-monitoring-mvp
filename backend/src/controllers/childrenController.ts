@@ -6,6 +6,12 @@ import { asyncHandler, AppError } from "../utils/http";
 import { createChildSchema } from "../utils/validation";
 import { AuthedRequest } from "../middleware/auth";
 
+function trialExpiry() {
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + 3);
+  return expiry;
+}
+
 // POST /api/children  (parent only)
 export const createChild = asyncHandler(async (req: AuthedRequest, res: Response) => {
   const data = createChildSchema.parse(req.body);
@@ -22,6 +28,7 @@ export const createChild = asyncHandler(async (req: AuthedRequest, res: Response
     passwordHash,
     role: "CHILD",
     parentId,
+    expireDate: trialExpiry(),
   });
 
   res.status(201).json({

@@ -26,6 +26,7 @@ export const env = {
 
   sessionTokenSecret: required("SESSION_TOKEN_SECRET"),
   sessionTokenExpiresIn: process.env.SESSION_TOKEN_EXPIRES_IN || "10m",
+  serviceToken: process.env.PARENT_CHILD_API_TOKEN || "",
 
   stunServers: (process.env.STUN_SERVERS || "stun:stun.l.google.com:19302")
     .split(",")
