@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.childapp.data.ApiClient
+import com.example.childapp.data.LocalDatabase
 import com.example.childapp.data.SessionStore
 import com.example.childapp.socket.SocketManager
 import com.google.android.gms.location.*
@@ -169,12 +170,13 @@ class LocationService : Service() {
             0.0f
         }
 
-        // 2. Stationary Deadband Filter: Prevent indoor jitter
+        // 2. Stationary Deadband Filter: Prevent indoor jitter unless near a geofence boundary
         if (lastLoc != null) {
             val distanceMovedMeters = lastLoc.distanceTo(location)
             val timeSinceLastSentMs = currentTimeMs - lastSentTimeMs
+            val nearBoundary = isNearGeofenceBoundary(location)
 
-            if (distanceMovedMeters < 15.0f && speedKmh < 1.5f && timeSinceLastSentMs < 120_000L) {
+            if (!nearBoundary && distanceMovedMeters < 15.0f && speedKmh < 1.5f && timeSinceLastSentMs < 120_000L) {
                 // Device is stationary indoors. Skip emitting duplicate jitter point.
                 Log.d(TAG, "Filtering stationary jitter: moved ${distanceMovedMeters}m at ${speedKmh}km/h")
                 return
@@ -230,6 +232,25 @@ class LocationService : Service() {
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to post location via REST: ${e.message}")
             }
+        }
+    }
+
+    private fun isNearGeofenceBoundary(location: Location): Boolean {
+        return try {
+            val activeGeofences = LocalDatabase.getInstance(this).getAllActiveGeofences()
+            if (activeGeofences.isEmpty()) return false
+            val results = FloatArray(1)
+            for (g in activeGeofences) {
+                Location.distanceBetween(location.latitude, location.longitude, g.latitude, g.longitude, results)
+                val distance = results[0]
+                val diff = kotlin.math.abs(distance - g.radius)
+                if (diff <= 35.0f) {
+                    return true
+                }
+            }
+            false
+        } catch (e: Exception) {
+            false
         }
     }
 

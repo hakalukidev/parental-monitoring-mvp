@@ -6,10 +6,12 @@ import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/location_point.dart';
+import '../models/geofence.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/routing_service.dart';
+import 'geofences_screen.dart';
 
 enum MapTrackingMode {
   directionsToChild,
@@ -71,11 +73,27 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   bool _showBreadcrumbs = true;
   bool _isFollowingChild = true;
 
+  // Geofences layer state
+  List<Geofence> _geofences = [];
+  bool _showGeofences = true;
+
   @override
   void initState() {
     super.initState();
     _loadLocationData();
+    _loadGeofences();
     _setupSocketListener();
+  }
+
+  Future<void> _loadGeofences() async {
+    try {
+      final raw = await ApiService.instance.listGeofences(widget.childId);
+      if (mounted) {
+        setState(() {
+          _geofences = raw.map((e) => Geofence.fromJson(e as Map<String, dynamic>)).toList();
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -618,6 +636,24 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         ),
         actions: [
           IconButton(
+            icon: Icon(_showGeofences ? Icons.shield : Icons.shield_outlined,
+                color: _showGeofences ? Colors.teal : null),
+            tooltip: 'Safety Boundaries & Geofences',
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => GeofencesScreen(
+                    childId: widget.childId,
+                    childName: widget.childName,
+                    latestChildLocation: _latestLocation?.latLng,
+                    socketService: _socketService,
+                  ),
+                ),
+              );
+              _loadGeofences();
+            },
+          ),
+          IconButton(
             icon: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
             tooltip: _isSatelliteView ? 'Switch to Street Map' : 'Switch to Satellite Map',
             onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
@@ -693,6 +729,71 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       borderColor: Colors.white,
                     ),
                   ],
+                ),
+
+              // Active Geofence Boundary Circles
+              if (_showGeofences && _geofences.isNotEmpty)
+                CircleLayer(
+                  circles: _geofences.where((g) => g.isEnabled).map((g) {
+                    final isSafe = g.zoneType == GeofenceZoneType.safeZone;
+                    final col = isSafe ? Colors.teal : Colors.red;
+                    return CircleMarker(
+                      point: g.latLng,
+                      radius: g.radius,
+                      useRadiusInMeter: true,
+                      color: col.withValues(alpha: 0.18),
+                      borderColor: col,
+                      borderStrokeWidth: 2.0,
+                    );
+                  }).toList(),
+                ),
+
+              // Geofence Center Badges & Labels
+              if (_showGeofences && _geofences.isNotEmpty)
+                MarkerLayer(
+                  markers: _geofences.where((g) => g.isEnabled).map((g) {
+                    final isSafe = g.zoneType == GeofenceZoneType.safeZone;
+                    final col = isSafe ? Colors.teal : Colors.red;
+                    return Marker(
+                      point: g.latLng,
+                      width: 130,
+                      height: 36,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: col,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isSafe ? Icons.shield : Icons.dangerous,
+                                color: Colors.white,
+                                size: 12,
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  g.name,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
 
               // Accuracy Circle around Child Position

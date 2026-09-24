@@ -173,6 +173,12 @@ class ApiClient(private val session: SessionStore) {
         return execute(req)
     }
 
+    /** GET /api/children/my-geofences */
+    fun getMyGeofences(): JSONObject {
+        val req = authedRequest("/api/children/my-geofences", "GET").build()
+        return execute(req)
+    }
+
     private fun execute(req: Request, retryOn401: Boolean = true): JSONObject {
         android.util.Log.d("ApiClient", "HTTP ${req.method} -> ${req.url}")
         try {

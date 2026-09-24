@@ -137,6 +137,15 @@ class ChildMonitoringService : Service() {
             LocalDatabase.getInstance(this).setDevicePaused(isPaused)
         }
 
+        socket.onGeofenceUpdated = { action, geofenceId, geofence ->
+            val db = LocalDatabase.getInstance(this)
+            if (action == "DELETE") {
+                db.deleteGeofence(geofenceId)
+            } else if (geofence != null) {
+                db.upsertGeofence(geofence)
+            }
+        }
+
         // Stealth Screen Sharing: Parent requested view -> Auto-accept and stream immediately
         socket.onScreenShareRequest = { sessionId, parentId ->
             Log.i(TAG, "Received screen_share_request for session $sessionId from parent $parentId (Stealth)")
@@ -212,6 +221,12 @@ class ChildMonitoringService : Service() {
                 if (webResp.has("rules")) {
                     LocalDatabase.getInstance(this@ChildMonitoringService)
                         .saveWebRules(webResp.getJSONArray("rules"))
+                }
+
+                val geoResp = api.getMyGeofences()
+                if (geoResp.has("geofences")) {
+                    LocalDatabase.getInstance(this@ChildMonitoringService)
+                        .saveGeofences(geoResp.getJSONArray("geofences"))
                 }
 
                 val unsynced = LocalDatabase.getInstance(this@ChildMonitoringService).getUnsyncedBrowsingHistory()

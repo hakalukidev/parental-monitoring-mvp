@@ -12,6 +12,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { assertParentOwnsChild } from "./childrenController";
 import { getIO } from "../socket/io";
 import { getParentSocketIds } from "../socket/presence";
+import { evaluateChildGeofences } from "../services/geofenceService";
 
 // Helper function to broadcast live location to connected parent sockets
 export function broadcastChildLocation(
@@ -85,6 +86,9 @@ export const recordLocation = asyncHandler(async (req: AuthedRequest, res: Respo
 
   if (child.parentId) {
     broadcastChildLocation(childId, child.parentId.toString(), locationPayload);
+    evaluateChildGeofences(childId, child.parentId.toString(), locationPayload).catch((err) =>
+      console.error("Error in evaluateChildGeofences (recordLocation):", err)
+    );
   }
 
   res.status(201).json({
@@ -133,6 +137,9 @@ export const recordLocationBatch = asyncHandler(async (req: AuthedRequest, res: 
 
     if (child.parentId) {
       broadcastChildLocation(childId, child.parentId.toString(), latestDoc);
+      evaluateChildGeofences(childId, child.parentId.toString(), latestDoc).catch((err) =>
+        console.error("Error in evaluateChildGeofences (recordLocationBatch):", err)
+      );
     }
   }
 

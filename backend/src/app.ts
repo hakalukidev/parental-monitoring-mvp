@@ -15,6 +15,7 @@ import locationRoutes from "./routes/locationRoutes";
 import appPolicyRoutes from "./routes/appPolicyRoutes";
 import webRulesRoutes from "./routes/webRulesRoutes";
 import browsingHistoryRoutes from "./routes/browsingHistoryRoutes";
+import geofenceRoutes from "./routes/geofenceRoutes";
 import seftlyRoutes from "./routes/seftlyRoutes";
 
 export function createApp(): Express {
@@ -36,6 +37,7 @@ export function createApp(): Express {
   app.use("/api/children", appPolicyRoutes);
   app.use("/api/children", webRulesRoutes);
   app.use("/api/children", browsingHistoryRoutes);
+  app.use("/api/children", geofenceRoutes);
   app.use("/api/children", childrenRoutes);
   app.use("/api/devices", deviceRoutes);
   app.use("/api/screen-share", screenShareRoutes);

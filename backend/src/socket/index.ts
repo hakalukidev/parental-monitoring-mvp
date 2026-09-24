@@ -6,6 +6,7 @@ import { CameraStreamSession } from "../models/CameraStreamSession";
 import { LocationRecord } from "../models/LocationRecord";
 import { User } from "../models/User";
 import { BrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
+import { evaluateChildGeofences } from "../services/geofenceService";
 
 import {
   setChildSocket,
@@ -329,6 +330,11 @@ export function registerSocketHandlers(io: Server): void {
                 ...locationPayload,
               });
             }
+
+            // Real-time boundary evaluation against active geofences
+            evaluateChildGeofences(userId, child.parentId.toString(), locationPayload).catch((err) =>
+              console.error("Error in evaluateChildGeofences (socket):", err)
+            );
           }
         } catch (err) {
           // Keep socket resilient on DB write error

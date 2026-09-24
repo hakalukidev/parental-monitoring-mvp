@@ -403,6 +403,82 @@ class ApiService {
     final res = await _send('DELETE', _u('/api/children/$childId/browsing-history'));
     _parseResponse(res);
   }
+
+  // ==========================================
+  // Geofences & Safety Boundaries
+  // ==========================================
+
+  Future<Map<String, dynamic>> createGeofence(String childId, Map<String, dynamic> data) async {
+    final res = await _send('POST', _u('/api/children/$childId/geofences'), body: data);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> listGeofences(String childId) async {
+    final res = await _send('GET', _u('/api/children/$childId/geofences'));
+    final body = _parseResponse(res) as Map<String, dynamic>;
+    return (body['geofences'] as List<dynamic>?) ?? [];
+  }
+
+  Future<Map<String, dynamic>> getGeofence(String childId, String geofenceId) async {
+    final res = await _send('GET', _u('/api/children/$childId/geofences/$geofenceId'));
+    final body = _parseResponse(res) as Map<String, dynamic>;
+    return (body['geofence'] as Map<String, dynamic>?) ?? {};
+  }
+
+  Future<Map<String, dynamic>> updateGeofence(
+    String childId,
+    String geofenceId,
+    Map<String, dynamic> data,
+  ) async {
+    final res = await _send('PUT', _u('/api/children/$childId/geofences/$geofenceId'), body: data);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> toggleGeofence(String childId, String geofenceId) async {
+    final res = await _send('PATCH', _u('/api/children/$childId/geofences/$geofenceId/toggle'));
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteGeofence(String childId, String geofenceId) async {
+    final res = await _send('DELETE', _u('/api/children/$childId/geofences/$geofenceId'));
+    _parseResponse(res);
+  }
+
+  Future<Map<String, dynamic>> listGeofenceEvents(
+    String childId, {
+    String? geofenceId,
+    String? eventType,
+    bool? isRead,
+    String? startDate,
+    String? endDate,
+    int page = 1,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+      if (geofenceId != null) 'geofenceId': geofenceId,
+      if (eventType != null) 'eventType': eventType,
+      if (isRead != null) 'isRead': isRead.toString(),
+      if (startDate != null) 'startDate': startDate,
+      if (endDate != null) 'endDate': endDate,
+    };
+
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/geofence-events')
+        .replace(queryParameters: query);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<void> markGeofenceEventRead(String childId, String eventId) async {
+    final res = await _send('PATCH', _u('/api/children/$childId/geofence-events/$eventId/read'));
+    _parseResponse(res);
+  }
+
+  Future<void> markAllGeofenceEventsRead(String childId) async {
+    final res = await _send('PATCH', _u('/api/children/$childId/geofence-events/mark-all-read'));
+    _parseResponse(res);
+  }
 }
 
 class ApiException implements Exception {

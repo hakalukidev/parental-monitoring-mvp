@@ -150,4 +150,13 @@ class SocketService {
   void onSuspiciousWebAlert(void Function(Map<String, dynamic>) cb) {
     socket.on('suspicious_web_alert', (data) => cb(Map<String, dynamic>.from(data)));
   }
+
+  // ==========================================
+  // Geofencing & Boundary Alerts
+  // ==========================================
+
+  void onGeofenceAlert(void Function(Map<String, dynamic>) cb) {
+    socket.on('geofence_alert', (data) => cb(Map<String, dynamic>.from(data)));
+  }
 }
+

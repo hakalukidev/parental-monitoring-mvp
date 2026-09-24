@@ -130,6 +130,23 @@ flowchart TD
 * **Battery Exemption:** Requests exemption from Android Doze (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) to maintain constant WebSocket connectivity.
 * **Onboarding Setup Wizard (`PermissionsSetupScreen.kt`):** Step-by-step checklist guiding the initial install to grant Camera, Mic, Location, Accessibility, Overlay (`SYSTEM_ALERT_WINDOW`), Usage Stats, Battery Exemption, and MediaProjection authorization.
 
+### 2.8. Multi-Child Geofencing & Instant Boundary Alerts
+* **Objective:** Enable parents to define customized geographical boundaries (Safe Zones vs Restricted Zones) per child, and deliver real-time push alerts when boundaries are crossed.
+* **Parent UI & Controls (`geofences_screen.dart`, `edit_geofence_screen.dart`):**
+  - Interactive map with movable pin, center-on-child / parent shortcuts, reverse geocoding, and radius slider ($50\text{m} - 2000\text{m}$) with real-time `CircleLayer` preview.
+  - Configurable triggers: `EXIT` (Safe Zone default), `ENTRY` (Restricted Zone default), or `BOTH`.
+  - Active schedule filters (specific days of week and time windows).
+  - Instant in-app heads-up alert modal with direct **"View on Map"** jump.
+  - Active boundary overlays and labels directly in live `LocationTrackingScreen.dart`.
+* **Backend Evaluation Engine (`geofenceService.ts`):**
+  - High-precision Haversine distance calculations on every incoming GPS fix (`socket` and `REST`).
+  - **Hysteresis Buffer & Anti-Jitter:** Dynamic boundary margin ($\pm 15\text{m}$) and 5-minute cooldown debounce to eliminate false alarms from boundary GPS drift.
+  - Stateful transition tracking (`UNKNOWN` $\rightarrow$ `INSIDE` $\leftrightarrow$ `OUTSIDE`) and immutable audit event logging (`GeofenceEvent.ts`).
+  - Instant WebSocket broadcast (`geofence_alert`) to parent socket rooms.
+* **Child Edge Engine (`LocationService.kt`, `LocalDatabase.kt`):**
+  - Local SQLite caching of active geofences synced via `geofence_updated` socket events and `GET /api/children/my-geofences`.
+  - Proximity burst detection: Bypasses stationary deadband filter when within $35\text{m}$ of a boundary to guarantee immediate real-time sync.
+
 ---
 
 ## 3. Tech Stack & Dependencies
@@ -227,6 +244,10 @@ flowchart TD
 * `blockedReason`: string
 * `visitedAt`: Date
 
+### `Geofence` & `GeofenceEvent`
+* `Geofence`: `{ parentId, childId, name, latitude, longitude, radius, address, zoneType: 'SAFE_ZONE' | 'RESTRICTED_ZONE', triggerType: 'EXIT' | 'ENTRY' | 'BOTH', isEnabled, colorHex, lastState: 'INSIDE' | 'OUTSIDE' | 'UNKNOWN', lastStateChangedAt, lastTriggeredAt, schedule: { daysOfWeek, startTime, endTime } }`
+* `GeofenceEvent`: `{ parentId, childId, geofenceId, geofenceName, eventType: 'EXIT' | 'ENTRY', zoneType, latitude, longitude, accuracy, speed, distanceFromCenter, geofenceRadius, address, isRead, triggeredAt }`
+
 ---
 
 ## 5. API Endpoints & Socket Events Reference
@@ -253,6 +274,16 @@ flowchart TD
 | | `POST` | `/api/location/batch` | Child | Batch upload offline GPS points |
 | | `GET` | `/api/location/latest/:childId`| Parent | Get latest child location point |
 | | `GET` | `/api/location/history/:childId`| Parent | Get location trail with start/end filter |
+| **Geofences** | `POST` | `/api/children/:childId/geofences` | Parent | Create safe/restricted boundary |
+| | `GET` | `/api/children/:childId/geofences` | Parent | List child geofences |
+| | `GET` | `/api/children/:childId/geofences/:id` | Parent | Get geofence details |
+| | `PUT` | `/api/children/:childId/geofences/:id` | Parent | Update geofence parameters |
+| | `PATCH` | `/api/children/:childId/geofences/:id/toggle` | Parent | Quick enable/disable toggle |
+| | `DELETE`| `/api/children/:childId/geofences/:id` | Parent | Delete geofence |
+| | `GET` | `/api/children/:childId/geofence-events` | Parent | Query boundary alert event log |
+| | `PATCH` | `/api/children/:childId/geofence-events/:id/read` | Parent | Mark alert event as read |
+| | `PATCH` | `/api/children/:childId/geofence-events/mark-all-read` | Parent | Mark all alert events read |
+| | `GET` | `/api/children/my-geofences` | Child | Sync active geofences to device |
 | **App Policies** | `POST` | `/api/children/:childId/apps/sync` | Child/Parent | Sync list of installed apps |
 | | `GET` | `/api/children/my-policies` | Child | Fetch active policies for child |
 | | `GET` | `/api/children/:childId/apps` | Parent | Get installed apps and rules |
@@ -290,6 +321,8 @@ flowchart TD
 | `ice_candidate` | Either $\rightarrow$ Server $\rightarrow$ Peer | `{ sessionId, candidate }` |
 | `location_update` | Child $\rightarrow$ Server | `{ latitude, longitude, accuracy, speed, heading, batteryLevel, recordedAt }` |
 | `child_location_update` | Server $\rightarrow$ Parent | Dispatches updated coordinates to parent in real time |
+| `geofence_alert` | Server $\rightarrow$ Parent | Instant alert `{ eventId, childId, childName, geofenceName, eventType: "EXIT" \| "ENTRY", location, message }` |
+| `geofence_updated` | Server $\rightarrow$ Child | `{ action: "UPSERT" \| "DELETE", geofenceId, geofence }` |
 | `policy_updated` | Server $\rightarrow$ Child | `{ type: "APP_POLICY" \| "WEB_RULE_ADDED" \| "BULK_UPDATE", ... }` |
 | `instant_lockdown_toggle` | Parent $\rightarrow$ Server $\rightarrow$ Child | `{ isPaused: boolean }` |
 | `unblock_request` | Child $\rightarrow$ Server $\rightarrow$ Parent | `{ requestId, childId, childName, packageName, appName, reason }` |
@@ -305,38 +338,36 @@ flowchart TD
 * [`app.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/app.ts): Express app configuration, middleware pipeline, route registration.
 * [`server.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/server.ts): HTTP and Socket.IO server initialization, MongoDB connection.
 * [`config/env.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/config/env.ts): Environment configuration (JWT secrets, Mongo URI, STUN/TURN).
-* [`models/`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/models/): Mongoose schemas (`User.ts`, `Device.ts`, `ScreenShareSession.ts`, `CameraStreamSession.ts`, `LocationRecord.ts`, `AppPolicy.ts`, `InstalledApp.ts`, `WebBlockRule.ts`, `BrowsingHistoryRecord.ts`).
-* [`controllers/`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/controllers/): REST endpoint business logic.
-* [`socket/index.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/socket/index.ts): Socket.IO connection handling, presence sync, WebRTC relaying, unblock negotiations, live location, and history dispatching.
+* [`models/`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/models/): Mongoose schemas (`User.ts`, `Device.ts`, `ScreenShareSession.ts`, `CameraStreamSession.ts`, `LocationRecord.ts`, `Geofence.ts`, `GeofenceEvent.ts`, `AppPolicy.ts`, `InstalledApp.ts`, `WebBlockRule.ts`, `BrowsingHistoryRecord.ts`).
+* [`controllers/`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/controllers/): REST endpoint business logic (`geofenceController.ts`, `locationController.ts`, etc.).
+* [`services/geofenceService.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/services/geofenceService.ts): Geofencing evaluation engine with Haversine math, hysteresis buffer, cooldown debounce, and real-time alert broadcasting.
+* [`socket/index.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/socket/index.ts): Socket.IO connection handling, presence sync, WebRTC relaying, unblock negotiations, live location, geofence evaluation, and history dispatching.
 * [`socket/presence.ts`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/backend/src/socket/presence.ts): In-memory presence map tracking parent/child socket IDs.
 
 ### Parent App (`/parent-app/lib/`)
 * [`main.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/main.dart): Entry point, auth state check, theme configuration.
-* [`services/api_service.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/services/api_service.dart): Singleton HTTP client with automatic silent token refresh on 401.
-* [`services/socket_service.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/services/socket_service.dart): Socket.IO client event emitter and listener.
+* [`models/`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/models/): Data models (`geofence.dart`, `geofence_event.dart`, `child.dart`, `location_point.dart`, etc.).
+* [`services/api_service.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/services/api_service.dart): Singleton HTTP client with geofence endpoints and auto-refresh.
+* [`services/socket_service.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/services/socket_service.dart): Socket.IO client with `onGeofenceAlert` listener.
 * [`services/routing_service.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/services/routing_service.dart): Queries OSRM for live driving directions polyline and travel times.
 * [`services/geocoding_service.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/services/geocoding_service.dart): Nominatim reverse-geocoding for physical addresses.
-* [`screens/dashboard_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/dashboard_screen.dart): Main parent hub listing children, online status, unblock request modals, and quick navigation.
+* [`screens/dashboard_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/dashboard_screen.dart): Main parent hub with real-time `geofence_alert` heads-up modal, child status, and quick navigation.
+* [`screens/geofences_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/geofences_screen.dart): Dual-tab safe boundaries manager and historical alert logs.
+* [`screens/edit_geofence_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/edit_geofence_screen.dart): Interactive map boundary editor with real-time circle radius slider, presets, and trigger filters.
+* [`screens/location_tracking_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/location_tracking_screen.dart): Live GPS map rendering active geofence circle overlays, center labels, driving directions, and historical breadcrumbs.
 * [`screens/screen_share_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/screen_share_screen.dart): WebRTC screen viewer with fallback TURN handling and reconnection logic.
 * [`screens/camera_stream_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/camera_stream_screen.dart): Live camera viewer with front/back camera switch and audio controls.
-* [`screens/location_tracking_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/location_tracking_screen.dart): Dual-mode map (Directions to child with OSRM routing vs. historical breadcrumb trail with scrubber).
 * [`screens/app_blocker_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/app_blocker_screen.dart): App list, category filters, instant lockdown toggle, time limit editors, schedule configuration.
 * [`screens/web_filter_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/web_filter_screen.dart): Category toggles (Adult, Gambling, Gaming, etc.) and custom domain/keyword rules.
 * [`screens/browsing_history_screen.dart`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app/lib/screens/browsing_history_screen.dart): Live browsing feed, analytics cards, search and category filters.
 
 ### Child App (`/child-app/app/src/main/java/com/example/childapp/`)
-* [`service/ChildMonitoringService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/service/ChildMonitoringService.kt): 24/7 foreground daemon holding persistent Socket.IO connection, handles stealth screen share requests, and coordinates data sync.
-* [`accessibility/ChildAccessibilityService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/accessibility/ChildAccessibilityService.kt): Accessibility backbone — auto-confirms MediaProjection dialogs ("Entire screen" + "Start now"), enforces app blocking, intercepts blocked URLs, extracts browsing history, and blocks uninstallation in Settings.
-* [`screen/InvisibleScreenCaptureActivity.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/screen/InvisibleScreenCaptureActivity.kt): Headless transparent activity that launches `createScreenCaptureIntent()` on Android 14.
-* [`screen/ScreenCaptureService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/screen/ScreenCaptureService.kt): Foreground service managing WebRTC screen capture and peer connection.
-* [`camera/CameraStreamService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/camera/CameraStreamService.kt): Foreground service managing WebRTC camera capture.
-* [`location/LocationService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/location/LocationService.kt): High-accuracy GPS tracking foreground service with accuracy spike and stationary jitter filters.
-* [`blocker/AppScanner.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/blocker/AppScanner.kt): Scans installed launcher apps and classifies categories.
-* [`blocker/AppUsageTracker.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/blocker/AppUsageTracker.kt): Queries `UsageStatsManager` to track daily screen time per app against policy limits.
-* [`blocker/WebFilterEvaluator.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/blocker/WebFilterEvaluator.kt): URL/keyword/category matching engine against cached web rules.
-* [`ui/BlockedAppActivity.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/ui/BlockedAppActivity.kt): Stealth loading screen overlay shown when a restricted app or website is accessed.
-* [`ui/PermissionsSetupScreen.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/ui/PermissionsSetupScreen.kt): Onboarding wizard checking all mandatory Android permissions on first run.
-* [`data/LocalDatabase.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/data/LocalDatabase.kt): SQLite database caching app policies, web rules, and offline browsing history.
+* [`service/ChildMonitoringService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/service/ChildMonitoringService.kt): 24/7 foreground daemon holding persistent Socket.IO connection, syncs geofences on startup and updates via `geofence_updated` socket events.
+* [`accessibility/ChildAccessibilityService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/accessibility/ChildAccessibilityService.kt): Accessibility backbone — auto-confirms MediaProjection dialogs, enforces app blocking, intercepts blocked URLs, and blocks uninstallation in Settings.
+* [`location/LocationService.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/location/LocationService.kt): High-accuracy GPS tracking with boundary proximity burst mode (bypasses stationary deadband when near active geofence perimeters).
+* [`data/LocalDatabase.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/data/LocalDatabase.kt): SQLite database caching active geofences, app policies, web rules, and offline browsing history.
+* [`data/ApiClient.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/data/ApiClient.kt): REST client syncing child policies and geofences (`/api/children/my-geofences`).
+* [`socket/SocketManager.kt`](file:///mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/child-app/app/src/main/java/com/example/childapp/socket/SocketManager.kt): Handles real-time socket events including `geofence_updated` notifications.
 
 ---
 

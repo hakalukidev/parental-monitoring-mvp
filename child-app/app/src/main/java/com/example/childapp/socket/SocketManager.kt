@@ -35,6 +35,7 @@ class SocketManager(private var accessToken: String) {
     var onPolicyUpdated: ((data: JSONObject) -> Unit)? = null
     var onInstantLockdownToggle: ((isPaused: Boolean) -> Unit)? = null
     var onUnblockResponse: ((requestId: String, packageName: String, approved: Boolean, durationMinutes: Int) -> Unit)? = null
+    var onGeofenceUpdated: ((action: String, geofenceId: String, geofence: JSONObject?) -> Unit)? = null
 
     fun updateTokenAndReconnect(newToken: String) {
         this.accessToken = newToken
@@ -133,6 +134,14 @@ class SocketManager(private var accessToken: String) {
                     data.optBoolean("approved", false),
                     data.optInt("temporaryDurationMinutes", 15)
                 )
+            }
+            s.on("geofence_updated") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                val action = data.optString("action", "UPSERT")
+                val geofenceId = data.optString("geofenceId", "")
+                val geofence = data.optJSONObject("geofence")
+                android.util.Log.i("SocketManager", "Received geofence_updated ($action): $geofenceId")
+                onGeofenceUpdated?.invoke(action, geofenceId, geofence)
             }
             s.connect()
         }

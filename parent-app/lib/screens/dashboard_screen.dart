@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/child.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
@@ -10,6 +11,7 @@ import 'location_tracking_screen.dart';
 import 'app_blocker_screen.dart';
 import 'web_filter_screen.dart';
 import 'browsing_history_screen.dart';
+import 'geofences_screen.dart';
 import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -94,9 +96,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _showUnblockRequestDialog(req);
         });
 
+        sock.onGeofenceAlert((data) {
+          if (!mounted) return;
+          _showGeofenceAlertDialog(data);
+        });
+
         _socketService = sock;
       }
     } catch (_) {}
+  }
+
+  void _showGeofenceAlertDialog(Map<String, dynamic> data) {
+    final childName = data['childName']?.toString() ?? 'Child';
+    final childId = data['childId']?.toString() ?? '';
+    final geofenceName = data['geofenceName']?.toString() ?? 'Boundary';
+    final eventType = data['eventType']?.toString() ?? 'EXIT';
+    final message = data['message']?.toString() ??
+        (eventType == 'EXIT' ? '$childName left $geofenceName' : '$childName arrived at $geofenceName');
+    final isExit = eventType == 'EXIT';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              isExit ? Icons.warning_amber_rounded : Icons.shield_outlined,
+              color: isExit ? Colors.red : Colors.teal,
+            ),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Geofence Alert!')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isExit ? Colors.red.shade50 : Colors.teal.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isExit ? Colors.red.shade200 : Colors.teal.shade200,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isExit ? Icons.location_off : Icons.location_on,
+                    color: isExit ? Colors.red : Colors.teal,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      message,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: isExit ? Colors.red.shade900 : Colors.teal.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Recorded at: ${DateFormat('h:mm a, MMM d').format(DateTime.now())}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Dismiss'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: isExit ? Colors.red : Colors.teal,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => LocationTrackingScreen(
+                    childId: childId,
+                    childName: childName,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.map, size: 18),
+            label: const Text('View on Map'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showUnblockRequestDialog(UnblockRequest req) {
@@ -314,20 +410,43 @@ class _ChildCard extends StatelessWidget {
             const Divider(height: 20),
 
             // Live Supervision Features
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonalIcon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => LocationTrackingScreen(
-                      childId: child.id,
-                      childName: child.name,
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LocationTrackingScreen(
+                          childId: child.id,
+                          childName: child.name,
+                        ),
+                      ),
                     ),
+                    icon: const Icon(Icons.location_on, size: 18),
+                    label: const Text('Live Location'),
                   ),
                 ),
-                icon: const Icon(Icons.location_on),
-                label: const Text('Child Location & Directions'),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.teal.shade50,
+                      foregroundColor: Colors.teal.shade800,
+                    ),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => GeofencesScreen(
+                          childId: child.id,
+                          childName: child.name,
+                          socketService: socketService,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.shield_outlined, size: 18),
+                    label: const Text('Safe Zones'),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             Row(

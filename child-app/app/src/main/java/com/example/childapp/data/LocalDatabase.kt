@@ -39,12 +39,24 @@ data class CachedBrowsingHistory(
     val isSynced: Boolean = false
 )
 
+data class CachedGeofence(
+    val id: String,
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val radius: Double,
+    val zoneType: String,
+    val triggerType: String,
+    val isEnabled: Boolean,
+    val colorHex: String
+)
+
 class LocalDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "child_monitoring.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
 
         @Volatile
         private var instance: LocalDatabase? = null
@@ -118,6 +130,22 @@ class LocalDatabase private constructor(context: Context) :
             )
             """.trimIndent()
         )
+
+        db.execSQL(
+            """
+            CREATE TABLE geofences (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                latitude REAL,
+                longitude REAL,
+                radius REAL,
+                zone_type TEXT,
+                trigger_type TEXT,
+                is_enabled INTEGER,
+                color_hex TEXT
+            )
+            """.trimIndent()
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -126,6 +154,7 @@ class LocalDatabase private constructor(context: Context) :
         db.execSQL("DROP TABLE IF EXISTS browsing_history")
         db.execSQL("DROP TABLE IF EXISTS unblock_grants")
         db.execSQL("DROP TABLE IF EXISTS device_state")
+        db.execSQL("DROP TABLE IF EXISTS geofences")
         onCreate(db)
     }
 
@@ -404,5 +433,85 @@ class LocalDatabase private constructor(context: Context) :
         val db = writableDatabase
         val inClause = ids.joinToString(",") { it.toString() }
         db.execSQL("UPDATE browsing_history SET is_synced = 1 WHERE id IN ($inClause)")
+    }
+
+    // ==========================================
+    // Geofences Cache
+    // ==========================================
+    @Synchronized
+    fun saveGeofences(geofencesJson: JSONArray) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("geofences", null, null)
+            for (i in 0 until geofencesJson.length()) {
+                val g = geofencesJson.getJSONObject(i)
+                val cv = ContentValues().apply {
+                    put("id", g.optString("_id", g.optString("id")))
+                    put("name", g.optString("name", "Boundary"))
+                    put("latitude", g.getDouble("latitude"))
+                    put("longitude", g.getDouble("longitude"))
+                    put("radius", g.optDouble("radius", 200.0))
+                    put("zone_type", g.optString("zoneType", "SAFE_ZONE"))
+                    put("trigger_type", g.optString("triggerType", "EXIT"))
+                    put("is_enabled", if (g.optBoolean("isEnabled", true)) 1 else 0)
+                    put("color_hex", g.optString("colorHex", "#2196F3"))
+                }
+                db.insertWithOnConflict("geofences", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun upsertGeofence(g: JSONObject) {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("id", g.optString("_id", g.optString("id")))
+            put("name", g.optString("name", "Boundary"))
+            put("latitude", g.getDouble("latitude"))
+            put("longitude", g.getDouble("longitude"))
+            put("radius", g.optDouble("radius", 200.0))
+            put("zone_type", g.optString("zoneType", "SAFE_ZONE"))
+            put("trigger_type", g.optString("triggerType", "EXIT"))
+            put("is_enabled", if (g.optBoolean("isEnabled", true)) 1 else 0)
+            put("color_hex", g.optString("colorHex", "#2196F3"))
+        }
+        db.insertWithOnConflict("geofences", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    @Synchronized
+    fun deleteGeofence(geofenceId: String) {
+        val db = writableDatabase
+        db.delete("geofences", "id = ?", arrayOf(geofenceId))
+    }
+
+    @Synchronized
+    fun getAllActiveGeofences(): List<CachedGeofence> {
+        val list = mutableListOf<CachedGeofence>()
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT id, name, latitude, longitude, radius, zone_type, trigger_type, is_enabled, color_hex FROM geofences WHERE is_enabled = 1",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    CachedGeofence(
+                        id = cursor.getString(0),
+                        name = cursor.getString(1),
+                        latitude = cursor.getDouble(2),
+                        longitude = cursor.getDouble(3),
+                        radius = cursor.getDouble(4),
+                        zoneType = cursor.getString(5),
+                        triggerType = cursor.getString(6),
+                        isEnabled = cursor.getInt(7) == 1,
+                        colorHex = cursor.getString(8)
+                    )
+                )
+            }
+        }
+        return list
     }
 }

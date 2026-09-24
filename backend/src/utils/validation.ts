@@ -157,5 +157,55 @@ export const browsingHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+// Geofence Validation Schemas
+export const createGeofenceSchema = z.object({
+  name: z.string().min(1).max(100),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  radius: z.number().min(30).max(20000).default(200),
+  address: z.string().optional(),
+  zoneType: z.enum(["SAFE_ZONE", "RESTRICTED_ZONE"]).default("SAFE_ZONE"),
+  triggerType: z.enum(["EXIT", "ENTRY", "BOTH"]).default("EXIT"),
+  isEnabled: z.boolean().default(true),
+  colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().default("#2196F3"),
+  schedule: z
+    .object({
+      daysOfWeek: z.array(z.number().min(0).max(6)).default([0, 1, 2, 3, 4, 5, 6]),
+      startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+      endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    })
+    .optional(),
+});
+
+export const updateGeofenceSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  radius: z.number().min(30).max(20000).optional(),
+  address: z.string().optional(),
+  zoneType: z.enum(["SAFE_ZONE", "RESTRICTED_ZONE"]).optional(),
+  triggerType: z.enum(["EXIT", "ENTRY", "BOTH"]).optional(),
+  isEnabled: z.boolean().optional(),
+  colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  schedule: z
+    .object({
+      daysOfWeek: z.array(z.number().min(0).max(6)),
+      startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+      endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    })
+    .optional(),
+});
+
+export const geofenceEventsQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  geofenceId: z.string().optional(),
+  eventType: z.enum(["EXIT", "ENTRY"]).optional(),
+  isRead: z.enum(["true", "false"]).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+
 
 
