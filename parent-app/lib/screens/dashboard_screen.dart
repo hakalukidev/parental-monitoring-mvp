@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/child.dart';
@@ -21,22 +22,61 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
   List<Child> _children = [];
   bool _loading = true;
   String? _error;
   SocketService? _socketService;
+  Timer? _autoSyncTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initSocketAndLoad();
+    _startAutoSyncTimer();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoSyncTimer?.cancel();
     _socketService?.disconnect();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _silentSync();
+      if (_socketService?.isConnected != true) {
+        _reconnectSocket();
+      }
+    }
+  }
+
+  void _startAutoSyncTimer() {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (mounted) _silentSync();
+    });
+  }
+
+  Future<void> _silentSync() async {
+    try {
+      final raw = await ApiService.instance.listChildren();
+      if (!mounted) return;
+      setState(() {
+        _children = raw.map((e) => Child.fromJson(e as Map<String, dynamic>)).toList();
+      });
+    } catch (_) {}
+  }
+
+  void _reconnectSocket() async {
+    final token = await ApiService.instance.accessToken;
+    if (token != null && mounted) {
+      _socketService?.updateTokenAndReconnect(token, onAuthError: _reconnectSocket);
+    }
   }
 
   Future<void> _initSocketAndLoad() async {
@@ -61,30 +101,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
         connectWithAuth();
 
+        // Initial snapshot from server upon connecting
+        sock.onInitialChildrenPresence((data) {
+          if (!mounted) return;
+          final list = (data['children'] as List<dynamic>?) ?? [];
+          setState(() {
+            for (final item in list) {
+              final map = Map<String, dynamic>.from(item as Map);
+              final cid = map['childId'] as String?;
+              final status = map['status'] as String?;
+              final devName = map['deviceName'] as String?;
+              final platform = map['platform'] as String?;
+              if (cid != null && status != null) {
+                final idx = _children.indexWhere((c) => c.id == cid);
+                if (idx != -1) {
+                  final current = _children[idx];
+                  final dev = current.device;
+                  _children[idx] = Child(
+                    id: current.id,
+                    name: current.name,
+                    username: current.username,
+                    device: ChildDevice(
+                      id: dev?.id ?? '',
+                      deviceName: devName ?? dev?.deviceName ?? 'Android Device',
+                      platform: platform ?? dev?.platform ?? 'Android',
+                      status: status.toUpperCase(),
+                      lastSeen: status.toUpperCase() == 'ONLINE'
+                          ? DateTime.now()
+                          : (dev?.lastSeen ?? DateTime.now()),
+                    ),
+                  );
+                }
+              }
+            }
+          });
+        });
+
+        // Real-time status changes
         sock.onChildStatusChanged((data) {
           if (!mounted) return;
           final cid = data['childId'] as String?;
           final status = data['status'] as String?;
+          final devName = data['deviceName'] as String?;
           if (cid != null && status != null) {
             setState(() {
               final idx = _children.indexWhere((c) => c.id == cid);
               if (idx != -1) {
                 final current = _children[idx];
                 final dev = current.device;
-                if (dev != null) {
-                  _children[idx] = Child(
-                    id: current.id,
-                    name: current.name,
-                    username: current.username,
-                    device: ChildDevice(
-                      id: dev.id,
-                      deviceName: dev.deviceName,
-                      platform: dev.platform,
-                      status: status,
-                      lastSeen: DateTime.now(),
-                    ),
-                  );
-                }
+                _children[idx] = Child(
+                  id: current.id,
+                  name: current.name,
+                  username: current.username,
+                  device: ChildDevice(
+                    id: dev?.id ?? '',
+                    deviceName: devName ?? dev?.deviceName ?? 'Android Device',
+                    platform: dev?.platform ?? 'Android',
+                    status: status.toUpperCase(),
+                    lastSeen: DateTime.now(),
+                  ),
+                );
               }
             });
           }
@@ -374,6 +450,14 @@ class _ChildCard extends StatelessWidget {
 
   const _ChildCard({required this.child, this.socketService});
 
+  String _formatRelativeLastSeen(DateTime dt) {
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.inSeconds < 45) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return DateFormat('MMM d, h:mm a').format(dt.toLocal());
+  }
+
   @override
   Widget build(BuildContext context) {
     final online = child.isOnline;
@@ -390,21 +474,65 @@ class _ChildCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(child.name, style: Theme.of(context).textTheme.titleMedium),
-                      Text('@${child.username}', style: Theme.of(context).textTheme.bodySmall),
+                      Text(child.name, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 2),
+                      Text('@${child.username}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600)),
                     ],
                   ),
                 ),
-                Chip(
-                  label: Text(online ? 'ONLINE' : 'OFFLINE'),
-                  backgroundColor: online ? Colors.green.shade100 : Colors.grey.shade300,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: online ? Colors.green.shade50 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: online ? Colors.green.shade300 : Colors.grey.shade300,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: online ? Colors.green.shade600 : Colors.grey.shade500,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        online ? 'ONLINE' : 'OFFLINE',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: online ? Colors.green.shade800 : Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
             if (child.device != null) ...[
-              const SizedBox(height: 8),
-              Text('Device: ${child.device!.deviceName} (${child.device!.platform})'),
-              Text('Last seen: ${child.device!.lastSeen.toLocal()}'),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(Icons.smartphone, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${child.device!.deviceName} (${child.device!.platform})',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                  ),
+                  const Spacer(),
+                  Icon(Icons.access_time, size: 14, color: Colors.grey.shade500),
+                  const SizedBox(width: 4),
+                  Text(
+                    online ? 'Active now' : _formatRelativeLastSeen(child.device!.lastSeen),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
             ],
 
             const Divider(height: 20),

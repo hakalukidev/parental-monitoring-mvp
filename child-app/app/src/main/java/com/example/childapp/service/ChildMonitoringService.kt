@@ -3,6 +3,8 @@ package com.example.childapp.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.location.LocationManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -32,6 +34,7 @@ class ChildMonitoringService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socketManager: SocketManager? = null
+    private var heartbeatJob: Job? = null
     private lateinit var session: SessionStore
     private lateinit var api: ApiClient
 
@@ -101,10 +104,17 @@ class ChildMonitoringService : Service() {
         socket.onConnected = {
             Log.i(TAG, "Persistent socket connected successfully")
             syncAppData()
+            startHeartbeat()
+        }
+
+        socket.onDisconnected = {
+            Log.w(TAG, "Socket disconnected, pausing heartbeat")
+            heartbeatJob?.cancel()
         }
 
         socket.onAuthError = {
             Log.w(TAG, "Socket auth error detected, refreshing access token...")
+            heartbeatJob?.cancel()
             serviceScope.launch {
                 val ok = api.refreshAccessToken()
                 if (ok) {
@@ -255,8 +265,28 @@ class ChildMonitoringService : Service() {
         }
     }
 
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                    val batteryLevel = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                    val isGpsOn = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+                    socketManager?.sendHeartbeat(batteryLevel, isGpsOn, deviceName)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Heartbeat emission error: ${e.message}")
+                }
+                delay(25000)
+            }
+        }
+    }
+
     private fun stopMonitoring() {
         activeSocket = null
+        heartbeatJob?.cancel()
         socketManager?.disconnect()
         socketManager = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -265,6 +295,7 @@ class ChildMonitoringService : Service() {
 
     override fun onDestroy() {
         activeSocket = null
+        heartbeatJob?.cancel()
         socketManager?.disconnect()
         serviceScope.cancel()
         super.onDestroy()

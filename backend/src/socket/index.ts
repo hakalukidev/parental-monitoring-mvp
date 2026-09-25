@@ -46,16 +46,73 @@ export function registerSocketHandlers(io: Server): void {
 
     if (role === "CHILD") {
       setChildSocket(userId, socket.id);
-      await Device.findOneAndUpdate(
+      const now = new Date();
+      const updatedDev = await Device.findOneAndUpdate(
         { childId: userId },
-        { status: "ONLINE", lastSeen: new Date(), socketId: socket.id },
-        { sort: { updatedAt: -1 } }
+        { status: "ONLINE", lastSeen: now, socketId: socket.id },
+        { sort: { updatedAt: -1 }, new: true }
       );
       // Let any connected parent dashboards know this child came online.
-      socket.broadcast.emit("child_status_changed", { childId: userId, status: "ONLINE" });
+      socket.broadcast.emit("child_status_changed", {
+        childId: userId,
+        status: "ONLINE",
+        lastSeen: now,
+        deviceName: updatedDev?.deviceName ?? "Child Device",
+      });
     } else if (role === "PARENT") {
       addParentSocket(userId, socket.id);
+      try {
+        const children = await User.find({ parentId: userId, role: "CHILD" }).select("_id name username").lean();
+        const childrenStatus = await Promise.all(
+          children.map(async (ch) => {
+            const childIdStr = ch._id.toString();
+            const liveSockets = getChildSocketIds(childIdStr);
+            const isOnline = liveSockets.length > 0;
+            const device = await Device.findOne({ childId: childIdStr }).sort({ updatedAt: -1 }).lean();
+            return {
+              childId: childIdStr,
+              status: isOnline ? "ONLINE" : (device?.status || "OFFLINE"),
+              lastSeen: isOnline ? new Date() : (device?.lastSeen || new Date()),
+              deviceName: device?.deviceName ?? "Child Device",
+              platform: device?.platform ?? "Android",
+            };
+          })
+        );
+        socket.emit("initial_children_presence", { children: childrenStatus });
+      } catch (err) {
+        console.error("Error sending initial_children_presence:", err);
+      }
     }
+
+    // Handle periodic heartbeat from active child monitoring service
+    socket.on("child_heartbeat", async (data: { batteryLevel?: number; isGpsOn?: boolean; deviceName?: string }) => {
+      if (role !== "CHILD") return;
+      try {
+        const now = new Date();
+        const updateDoc: any = { status: "ONLINE", lastSeen: now, socketId: socket.id };
+        if (typeof data?.batteryLevel === "number") {
+          updateDoc["lastLocation.batteryLevel"] = data.batteryLevel;
+        }
+        if (data?.deviceName) {
+          updateDoc.deviceName = data.deviceName;
+        }
+        const updatedDev = await Device.findOneAndUpdate(
+          { childId: userId },
+          { $set: updateDoc },
+          { sort: { updatedAt: -1 }, new: true }
+        );
+
+        socket.broadcast.emit("child_status_changed", {
+          childId: userId,
+          status: "ONLINE",
+          lastSeen: now,
+          batteryLevel: data?.batteryLevel,
+          deviceName: updatedDev?.deviceName ?? "Child Device",
+        });
+      } catch (err) {
+        console.error("Error handling child_heartbeat:", err);
+      }
+    });
 
     // Auto-join any active/requested sessions for this user so reconnected sockets stay in sync
     try {

@@ -250,6 +250,15 @@ class SocketManager(private var accessToken: String) {
         socket?.emit("new_browsing_activity", payload)
     }
 
+    fun sendHeartbeat(batteryLevel: Int? = null, isGpsOn: Boolean? = null, deviceName: String? = null) {
+        val payload = JSONObject().apply {
+            batteryLevel?.let { put("batteryLevel", it) }
+            isGpsOn?.let { put("isGpsOn", it) }
+            deviceName?.let { put("deviceName", it) }
+        }
+        socket?.emit("child_heartbeat", payload)
+    }
+
     fun disconnect() {
         socket?.off()
         socket?.disconnect()

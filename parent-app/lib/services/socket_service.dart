@@ -33,9 +33,23 @@ class SocketService {
     return _socket!;
   }
 
+  bool get isConnected => _socket?.connected == true;
+
+  void onConnect(void Function() cb) {
+    _socket?.onConnect((_) => cb());
+  }
+
+  void onDisconnect(void Function() cb) {
+    _socket?.onDisconnect((_) => cb());
+  }
+
   void disconnect() {
     _socket?.disconnect();
     _socket = null;
+  }
+
+  void onInitialChildrenPresence(void Function(Map<String, dynamic>) cb) {
+    socket.on('initial_children_presence', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onChildStatusChanged(void Function(Map<String, dynamic>) cb) {

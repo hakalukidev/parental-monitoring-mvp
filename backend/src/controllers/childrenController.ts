@@ -5,6 +5,7 @@ import { hashPassword } from "../utils/password";
 import { asyncHandler, AppError } from "../utils/http";
 import { createChildSchema } from "../utils/validation";
 import { AuthedRequest } from "../middleware/auth";
+import { getChildSocketIds } from "../socket/presence";
 
 function trialExpiry() {
   const expiry = new Date();
@@ -46,6 +47,9 @@ export const listChildren = asyncHandler(async (req: AuthedRequest, res: Respons
 
   const results = await Promise.all(
     children.map(async (child) => {
+      const childIdStr = child._id.toString();
+      const liveSockets = getChildSocketIds(childIdStr);
+      const isOnline = liveSockets.length > 0;
       const device = await Device.findOne({ childId: child._id }).sort({ updatedAt: -1 }).lean();
       return {
         id: child._id,
@@ -56,10 +60,16 @@ export const listChildren = asyncHandler(async (req: AuthedRequest, res: Respons
               id: device._id,
               deviceName: device.deviceName,
               platform: device.platform,
-              status: device.status,
-              lastSeen: device.lastSeen,
+              status: isOnline ? "ONLINE" : device.status,
+              lastSeen: isOnline ? new Date() : device.lastSeen,
             }
-          : null,
+          : {
+              id: "",
+              deviceName: "Child Device",
+              platform: "Android",
+              status: isOnline ? "ONLINE" : "OFFLINE",
+              lastSeen: new Date(),
+            },
       };
     })
   );
