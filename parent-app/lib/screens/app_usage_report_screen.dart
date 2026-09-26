@@ -448,21 +448,39 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             ),
             const SizedBox(height: 12),
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Wrap(
+              spacing: 12,
+              runSpacing: 6,
+              alignment: WrapAlignment.spaceBetween,
               children: [
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(width: 12, height: 12, decoration: BoxDecoration(color: Colors.blue.shade600, borderRadius: BorderRadius.circular(3))),
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(color: Colors.blue.shade600, borderRadius: BorderRadius.circular(3)),
+                    ),
                     const SizedBox(width: 6),
-                    Text('Active Screen: ${summary.formattedScreenTime} ($screenPct%)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text(
+                      'Active Screen: ${summary.formattedScreenTime} ($screenPct%)',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
                   ],
                 ),
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(width: 12, height: 12, decoration: BoxDecoration(color: Colors.indigo.shade300, borderRadius: BorderRadius.circular(3))),
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(color: Colors.indigo.shade300, borderRadius: BorderRadius.circular(3)),
+                    ),
                     const SizedBox(width: 6),
-                    Text('Downtime: ${summary.formattedDowntime} ($downPct%)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text(
+                      'Downtime: ${summary.formattedDowntime} ($downPct%)',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
                   ],
                 ),
               ],
