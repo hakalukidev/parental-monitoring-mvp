@@ -484,6 +484,16 @@ class ApiService {
     final res = await _send('PATCH', _u('/api/children/$childId/geofence-events/mark-all-read'));
     _parseResponse(res);
   }
+
+  Future<Map<String, dynamic>> getUnreadGeofenceEventsSummary({DateTime? since}) async {
+    final query = <String, String>{
+      if (since != null) 'since': since.toIso8601String(),
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/geofence-events/unread-summary')
+        .replace(queryParameters: query.isNotEmpty ? query : null);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
 }
 
 class ApiException implements Exception {

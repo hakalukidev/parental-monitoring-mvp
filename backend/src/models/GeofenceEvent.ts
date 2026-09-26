@@ -8,6 +8,8 @@ export interface IGeofenceEvent extends Document {
   geofenceName: string;
   eventType: "EXIT" | "ENTRY";
   zoneType: "SAFE_ZONE" | "RESTRICTED_ZONE";
+  title?: string;
+  body?: string;
   latitude: number;
   longitude: number;
   accuracy?: number;
@@ -16,6 +18,7 @@ export interface IGeofenceEvent extends Document {
   geofenceRadius: number;
   address?: string;
   isRead: boolean;
+  isNotified: boolean;
   triggeredAt: Date;
   createdAt: Date;
 }
@@ -28,6 +31,8 @@ const geofenceEventSchema = new Schema<IGeofenceEvent>(
     geofenceName: { type: String, required: true },
     eventType: { type: String, enum: ["EXIT", "ENTRY"], required: true },
     zoneType: { type: String, enum: ["SAFE_ZONE", "RESTRICTED_ZONE"], required: true },
+    title: { type: String, default: "" },
+    body: { type: String, default: "" },
     latitude: { type: Number, required: true },
     longitude: { type: Number, required: true },
     accuracy: { type: Number, default: null },
@@ -36,6 +41,7 @@ const geofenceEventSchema = new Schema<IGeofenceEvent>(
     geofenceRadius: { type: Number, required: true },
     address: { type: String, default: "" },
     isRead: { type: Boolean, default: false, index: true },
+    isNotified: { type: Boolean, default: false, index: true },
     triggeredAt: { type: Date, required: true, default: Date.now, index: true },
   },
   { timestamps: true }
@@ -43,5 +49,6 @@ const geofenceEventSchema = new Schema<IGeofenceEvent>(
 
 geofenceEventSchema.index({ childId: 1, triggeredAt: -1 });
 geofenceEventSchema.index({ parentId: 1, isRead: 1 });
+geofenceEventSchema.index({ parentId: 1, isNotified: 1 });
 
 export const GeofenceEvent = model<IGeofenceEvent>("GeofenceEvent", geofenceEventSchema);

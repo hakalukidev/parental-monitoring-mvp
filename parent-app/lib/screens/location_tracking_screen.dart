@@ -29,11 +29,21 @@ enum RouteTimeFilter {
 class LocationTrackingScreen extends StatefulWidget {
   final String childId;
   final String childName;
+  final MapTrackingMode initialTrackingMode;
+  final DateTime? focusTimestamp;
+  final LatLng? focusLocation;
+  final String? highlightGeofenceId;
+  final String? breachType;
 
   const LocationTrackingScreen({
     super.key,
     required this.childId,
     required this.childName,
+    this.initialTrackingMode = MapTrackingMode.directionsToChild,
+    this.focusTimestamp,
+    this.focusLocation,
+    this.highlightGeofenceId,
+    this.breachType,
   });
 
   @override
@@ -46,8 +56,10 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   final GeocodingService _geocodingService = GeocodingService();
   final RoutingService _routingService = RoutingService();
 
-  MapTrackingMode _trackingMode = MapTrackingMode.directionsToChild;
+  late MapTrackingMode _trackingMode;
   bool _isSatelliteView = false;
+  bool _breachBannerDismissed = false;
+  bool _hasInitialCenteredOnBreach = false;
 
   LocationPoint? _latestLocation;
   String? _resolvedAddress;
@@ -80,6 +92,21 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   @override
   void initState() {
     super.initState();
+    _trackingMode = widget.initialTrackingMode;
+    if (widget.focusTimestamp != null) {
+      _trackingMode = MapTrackingMode.historyTrail;
+      final now = DateTime.now();
+      final focus = widget.focusTimestamp!.toLocal();
+      if (focus.year == now.year && focus.month == now.month && focus.day == now.day) {
+        _selectedFilter = RouteTimeFilter.today;
+      } else {
+        _selectedFilter = RouteTimeFilter.custom;
+        _customDateRange = DateTimeRange(
+          start: DateTime(focus.year, focus.month, focus.day),
+          end: DateTime(focus.year, focus.month, focus.day).add(const Duration(days: 1)),
+        );
+      }
+    }
     _loadLocationData();
     _loadGeofences();
     _setupSocketListener();
@@ -418,6 +445,12 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   }
 
   void _fitMapToBounds() {
+    if (widget.focusLocation != null && !_hasInitialCenteredOnBreach) {
+      _hasInitialCenteredOnBreach = true;
+      _mapController.move(widget.focusLocation!, 16.5);
+      return;
+    }
+
     if (_latestLocation == null && _routeHistory.isEmpty && _parentPosition == null) return;
 
     if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null && _latestLocation != null) {
@@ -736,14 +769,15 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 CircleLayer(
                   circles: _geofences.where((g) => g.isEnabled).map((g) {
                     final isSafe = g.zoneType == GeofenceZoneType.safeZone;
+                    final isHighlighted = widget.highlightGeofenceId != null && g.id == widget.highlightGeofenceId;
                     final col = isSafe ? Colors.teal : Colors.red;
                     return CircleMarker(
                       point: g.latLng,
                       radius: g.radius,
                       useRadiusInMeter: true,
-                      color: col.withValues(alpha: 0.18),
-                      borderColor: col,
-                      borderStrokeWidth: 2.0,
+                      color: col.withValues(alpha: isHighlighted ? 0.35 : 0.18),
+                      borderColor: isHighlighted ? (isSafe ? Colors.teal.shade900 : Colors.red.shade900) : col,
+                      borderStrokeWidth: isHighlighted ? 3.5 : 2.0,
                     );
                   }).toList(),
                 ),
@@ -814,6 +848,50 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               // Map Markers
               MarkerLayer(
                 markers: [
+                  // Breach Alert Marker (when opened from push notification)
+                  if (widget.focusLocation != null)
+                    Marker(
+                      point: widget.focusLocation!,
+                      width: 140,
+                      height: 70,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade700,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.white, width: 1.5),
+                              boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 12),
+                                const SizedBox(width: 4),
+                                Text(
+                                  widget.breachType != null ? '${widget.breachType} Breach' : 'Breach Point',
+                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade600,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                              boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 6)],
+                            ),
+                            child: const Icon(Icons.location_on, color: Colors.white, size: 20),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   // Parent Marker (Directions Mode)
                   if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null)
                     Marker(
@@ -1036,6 +1114,58 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       onSelected: _selectCustomDateRange,
                     ),
                   ],
+                ),
+              ),
+            ),
+
+          // Geofence Breach Banner (shown when opened via push notification)
+          if (widget.focusTimestamp != null && !_breachBannerDismissed)
+            Positioned(
+              top: _trackingMode == MapTrackingMode.historyTrail ? 116 : 72,
+              left: 12,
+              right: 12,
+              child: Card(
+                elevation: 4,
+                color: Colors.red.shade50,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.red.shade300, width: 1.2),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.notifications_active, color: Colors.red.shade700, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Safety Boundary Breach Event',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade900,
+                              ),
+                            ),
+                            Text(
+                              'Showing trail around ${DateFormat('MMM d, h:mm a').format(widget.focusTimestamp!.toLocal())}',
+                              style: TextStyle(fontSize: 11, color: Colors.red.shade800),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        color: Colors.red.shade900,
+                        onPressed: () => setState(() => _breachBannerDismissed = true),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

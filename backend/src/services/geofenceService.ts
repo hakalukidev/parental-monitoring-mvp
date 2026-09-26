@@ -175,6 +175,23 @@ export async function evaluateChildGeofences(
           geofence.lastTriggeredAt = recordedDate;
           await geofence.save();
 
+          // Generate notification title and body
+          const actionText = transitionType === "EXIT" ? "left" : "entered";
+          let alertTitle = "";
+          if (geofence.zoneType === "RESTRICTED_ZONE") {
+            alertTitle = transitionType === "ENTRY"
+              ? `⚠️ Restricted Zone Entered: ${geofence.name}`
+              : `🛡️ Restricted Zone Exited: ${geofence.name}`;
+          } else {
+            alertTitle = transitionType === "EXIT"
+              ? `🚨 Safe Zone Left: ${geofence.name}`
+              : `✅ Safe Zone Reached: ${geofence.name}`;
+          }
+
+          const timeString = recordedDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+          const alertBody = `${childName || "Child"} ${actionText} ${geofence.name} at ${timeString}. Tap to view route trail.`;
+          const message = alertBody;
+
           // Create persistent GeofenceEvent in MongoDB
           const event = await GeofenceEvent.create({
             parentId,
@@ -183,6 +200,8 @@ export async function evaluateChildGeofences(
             geofenceName: geofence.name,
             eventType: transitionType,
             zoneType: geofence.zoneType,
+            title: alertTitle,
+            body: alertBody,
             latitude: location.latitude,
             longitude: location.longitude,
             accuracy: location.accuracy,
@@ -191,13 +210,9 @@ export async function evaluateChildGeofences(
             geofenceRadius: geofence.radius,
             address: geofence.address || "",
             isRead: false,
+            isNotified: false,
             triggeredAt: recordedDate,
           });
-
-          // Generate alert message
-          const actionText = transitionType === "EXIT" ? "left" : "entered";
-          const zoneDescriptor = geofence.zoneType === "RESTRICTED_ZONE" ? "⚠️ Restricted Zone" : "Safe Zone";
-          const message = `${childName || "Child"} has ${actionText} ${geofence.name} (${zoneDescriptor})`;
 
           // Broadcast instant alert via Socket.IO to connected parent sockets
           try {
@@ -212,6 +227,8 @@ export async function evaluateChildGeofences(
                 geofenceName: geofence.name,
                 eventType: transitionType,
                 zoneType: geofence.zoneType,
+                title: alertTitle,
+                body: alertBody,
                 message,
                 location: {
                   latitude: location.latitude,

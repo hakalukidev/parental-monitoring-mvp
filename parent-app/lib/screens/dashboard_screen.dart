@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import '../models/child.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
+import '../services/notification_service.dart';
 import 'create_child_screen.dart';
 import 'screen_share_screen.dart';
 import 'camera_stream_screen.dart';
@@ -35,6 +37,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     WidgetsBinding.instance.addObserver(this);
     _initSocketAndLoad();
     _startAutoSyncTimer();
+    _syncUnreadGeofenceNotifications();
   }
 
   @override
@@ -49,6 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _silentSync();
+      _syncUnreadGeofenceNotifications();
       if (_socketService?.isConnected != true) {
         _reconnectSocket();
       }
@@ -69,6 +73,46 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       setState(() {
         _children = raw.map((e) => Child.fromJson(e as Map<String, dynamic>)).toList();
       });
+      _syncUnreadGeofenceNotifications();
+    } catch (_) {}
+  }
+
+  Future<void> _syncUnreadGeofenceNotifications() async {
+    try {
+      final res = await ApiService.instance.getUnreadGeofenceEventsSummary();
+      final events = (res['events'] as List<dynamic>?) ?? [];
+      for (final raw in events) {
+        final ev = raw as Map<String, dynamic>;
+        final eventId = ev['_id']?.toString() ?? ev['id']?.toString() ?? '';
+        final childId = ev['childId']?.toString() ?? '';
+        final childName = ev['childName']?.toString() ?? 'Child';
+        final geofenceId = ev['geofenceId']?.toString() ?? '';
+        final geofenceName = ev['geofenceName']?.toString() ?? 'Safety Zone';
+        final eventType = ev['eventType']?.toString() ?? 'EXIT';
+        final zoneType = ev['zoneType']?.toString() ?? 'SAFE_ZONE';
+        final location = ev['location'] as Map<String, dynamic>?;
+        final lat = (location?['latitude'] as num?)?.toDouble() ?? (ev['latitude'] as num?)?.toDouble() ?? 0.0;
+        final lon = (location?['longitude'] as num?)?.toDouble() ?? (ev['longitude'] as num?)?.toDouble() ?? 0.0;
+        final triggeredAtStr = ev['triggeredAt']?.toString() ?? ev['timestamp']?.toString();
+        final timestamp = triggeredAtStr != null ? DateTime.tryParse(triggeredAtStr) ?? DateTime.now() : DateTime.now();
+        final title = ev['title']?.toString();
+        final body = ev['body']?.toString();
+
+        await NotificationService.instance.showGeofenceAlertNotification(
+          eventId: eventId,
+          childId: childId,
+          childName: childName,
+          geofenceId: geofenceId,
+          geofenceName: geofenceName,
+          eventType: eventType,
+          zoneType: zoneType,
+          latitude: lat,
+          longitude: lon,
+          timestamp: timestamp,
+          title: title,
+          body: body,
+        );
+      }
     } catch (_) {}
   }
 
@@ -174,6 +218,34 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
         sock.onGeofenceAlert((data) {
           if (!mounted) return;
+          final eventId = data['eventId']?.toString() ?? data['id']?.toString() ?? data['_id']?.toString() ?? '';
+          final childId = data['childId']?.toString() ?? '';
+          final childName = data['childName']?.toString() ?? 'Child';
+          final geofenceId = data['geofenceId']?.toString() ?? '';
+          final geofenceName = data['geofenceName']?.toString() ?? 'Safety Zone';
+          final eventType = data['eventType']?.toString() ?? 'EXIT';
+          final zoneType = data['zoneType']?.toString() ?? 'SAFE_ZONE';
+          final lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+          final lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+          final timestamp = DateTime.now();
+          final title = data['title']?.toString();
+          final body = data['body']?.toString();
+
+          NotificationService.instance.showGeofenceAlertNotification(
+            eventId: eventId,
+            childId: childId,
+            childName: childName,
+            geofenceId: geofenceId,
+            geofenceName: geofenceName,
+            eventType: eventType,
+            zoneType: zoneType,
+            latitude: lat,
+            longitude: lon,
+            timestamp: timestamp,
+            title: title,
+            body: body,
+          );
+
           _showGeofenceAlertDialog(data);
         });
 
@@ -254,17 +326,28 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             ),
             onPressed: () {
               Navigator.pop(ctx);
+              final lat = (data['latitude'] as num?)?.toDouble();
+              final lon = (data['longitude'] as num?)?.toDouble();
+              final tsStr = data['timestamp']?.toString();
+              final timestamp = tsStr != null ? DateTime.tryParse(tsStr) : DateTime.now();
+              final geofenceId = data['geofenceId']?.toString();
+
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => LocationTrackingScreen(
                     childId: childId,
                     childName: childName,
+                    initialTrackingMode: MapTrackingMode.historyTrail,
+                    focusTimestamp: timestamp,
+                    focusLocation: (lat != null && lon != null) ? LatLng(lat, lon) : null,
+                    highlightGeofenceId: geofenceId,
+                    breachType: eventType,
                   ),
                 ),
               );
             },
             icon: const Icon(Icons.map, size: 18),
-            label: const Text('View on Map'),
+            label: const Text('View Trail on Map'),
           ),
         ],
       ),

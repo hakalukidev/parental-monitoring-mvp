@@ -289,3 +289,38 @@ export const getMyGeofences = asyncHandler(async (req: AuthedRequest, res: Respo
     geofences,
   });
 });
+
+// GET /api/children/geofence-events/unread-summary (Parent only - for internet reconnection catch-up sync)
+export const getUnreadGeofenceEventsSummary = asyncHandler(async (req: AuthedRequest, res: Response) => {
+  const parentId = req.user!.id;
+  const since = req.query.since ? new Date(req.query.since as string) : undefined;
+
+  const filter: any = { parentId, isRead: false };
+  if (since && !isNaN(since.getTime())) {
+    filter.triggeredAt = { $gt: since };
+  }
+
+  const events = await GeofenceEvent.find(filter)
+    .sort({ triggeredAt: -1 })
+    .limit(50)
+    .lean();
+
+  const childIds = Array.from(new Set(events.map((e) => e.childId.toString())));
+  const children = await User.find({ _id: { $in: childIds } }).select("_id name username").lean();
+  const childMap = new Map(children.map((c) => [c._id.toString(), c]));
+
+  const enriched = events.map((e) => {
+    const ch = childMap.get(e.childId.toString());
+    return {
+      ...e,
+      childName: ch?.name || "Child",
+      childUsername: ch?.email || "",
+    };
+  });
+
+  res.json({
+    count: enriched.length,
+    unreadCount: enriched.length,
+    events: enriched,
+  });
+});

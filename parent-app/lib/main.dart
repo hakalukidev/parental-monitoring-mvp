@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
+import 'services/notification_service.dart';
 
 class MyHttpOverrides extends HttpOverrides {
   @override
@@ -15,10 +16,13 @@ class MyHttpOverrides extends HttpOverrides {
   }
 }
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 Future<void> main() async {
   HttpOverrides.global = MyHttpOverrides();
   WidgetsFlutterBinding.ensureInitialized();
   await ApiService.instance.loadPersistedToken();
+  await NotificationService.instance.init(rootNavigatorKey);
   runApp(const ParentApp());
 }
 
@@ -28,6 +32,7 @@ class ParentApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Seftly Parent',
       theme: ThemeData(
