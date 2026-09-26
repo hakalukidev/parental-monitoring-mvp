@@ -72,7 +72,9 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
           _state = _CameraViewState.rejected;
           _errorMessage = reason == 'permission_denied'
               ? 'Child device denied camera permission.'
-              : 'Child device rejected the camera stream request.';
+              : reason == 'camera_unavailable'
+                  ? 'Child device camera is unavailable or in use by another app.'
+                  : 'Child device rejected the camera stream request.';
         });
       }
     });
@@ -80,7 +82,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       if (mounted && _isStreamReady) setState(() => _state = _CameraViewState.live);
     });
     _socketService.onCameraStreamStopped((_) => _teardown(notifyBackend: false));
-    _socketService.onWebrtcAnswer(_onAnswer);
+    _socketService.onWebrtcOffer(_onOffer);
     _socketService.onIceCandidate(_onRemoteIceCandidate);
 
     await _setupPeerConnection();
@@ -178,6 +180,10 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
             _state = _CameraViewState.live;
           });
         }
+      } else if (event.track.kind == 'audio') {
+        if (_remoteRenderer.srcObject != null) {
+          _remoteRenderer.srcObject!.addTrack(event.track);
+        }
       }
     };
 
@@ -205,46 +211,40 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       if (_sessionId == null) return;
       _socketService.sendIceCandidate(_sessionId!, candidate.toMap());
     };
-
-    _socketService.socket.on('webrtc_offer', (data) async {
-      try {
-        final map = Map<String, dynamic>.from(data);
-        final incomingSid = map['sessionId']?.toString();
-        if (_sessionId != null && incomingSid != _sessionId) return;
-        _sessionId ??= incomingSid;
-
-        if (_pc == null) {
-          await _setupPeerConnection();
-        }
-
-        final sdpMap = Map<String, dynamic>.from(map['sdp']);
-        final offer = RTCSessionDescription(sdpMap['sdp'], sdpMap['type']);
-        await _pc!.setRemoteDescription(offer);
-        _remoteDescriptionSet = true;
-
-        for (final candidate in _pendingIceCandidates) {
-          await _pc!.addCandidate(candidate);
-        }
-        _pendingIceCandidates.clear();
-
-        final answer = await _pc!.createAnswer();
-        await _pc!.setLocalDescription(answer);
-
-        _socketService.socket.emit('webrtc_answer', {
-          'sessionId': _sessionId,
-          'sdp': {'sdp': answer.sdp, 'type': answer.type},
-        });
-      } catch (e) {
-        debugPrint('Error handling camera webrtc_offer: $e');
-      }
-    });
   }
 
-  Future<void> _onAnswer(Map<String, dynamic> data) async {
-    if (_pc == null || (_sessionId != null && data['sessionId'] != _sessionId)) return;
-    final sdpMap = Map<String, dynamic>.from(data['sdp']);
-    await _pc!.setRemoteDescription(RTCSessionDescription(sdpMap['sdp'], sdpMap['type']));
-    _remoteDescriptionSet = true;
+  Future<void> _onOffer(Map<String, dynamic> data) async {
+    try {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != _sessionId) return;
+      _sessionId ??= incomingSid;
+
+      if (_pc == null) {
+        await _setupPeerConnection();
+      }
+
+      final sdpMap = Map<String, dynamic>.from(data['sdp']);
+      final offer = RTCSessionDescription(sdpMap['sdp'], sdpMap['type']);
+      await _pc!.setRemoteDescription(offer);
+      _remoteDescriptionSet = true;
+
+      for (final candidate in _pendingIceCandidates) {
+        await _pc!.addCandidate(candidate);
+      }
+      _pendingIceCandidates.clear();
+
+      final answer = await _pc!.createAnswer();
+      await _pc!.setLocalDescription(answer);
+
+      if (_sessionId != null) {
+        _socketService.sendWebrtcAnswer(_sessionId!, {
+          'sdp': answer.sdp,
+          'type': answer.type,
+        });
+      }
+    } catch (e) {
+      debugPrint('Error handling camera webrtc_offer: $e');
+    }
   }
 
   Future<void> _onRemoteIceCandidate(Map<String, dynamic> data) async {

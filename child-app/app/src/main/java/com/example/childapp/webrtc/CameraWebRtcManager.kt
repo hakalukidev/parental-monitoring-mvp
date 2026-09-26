@@ -1,9 +1,13 @@
 package com.example.childapp.webrtc
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import org.webrtc.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns the WebRTC PeerConnection + camera video track + mic audio track for an
@@ -13,7 +17,8 @@ class CameraWebRtcManager(
     private val context: Context,
     private val onLocalOffer: (sdp: JSONObject) -> Unit,
     private val onIceCandidate: (candidate: JSONObject) -> Unit,
-    private val onStateChange: (PeerConnection.PeerConnectionState) -> Unit
+    private val onStateChange: (PeerConnection.PeerConnectionState) -> Unit,
+    private val onError: ((String) -> Unit)? = null
 ) {
     private lateinit var factory: PeerConnectionFactory
     private var peerConnection: PeerConnection? = null
@@ -27,7 +32,7 @@ class CameraWebRtcManager(
     private val eglBase: EglBase = EglBase.create()
     private var isRemoteDescriptionSet = false
     private val pendingIceCandidates = mutableListOf<IceCandidate>()
-    private val isDisposed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isDisposed = AtomicBoolean(false)
 
     fun init() {
         PeerConnectionFactory.initialize(
@@ -55,6 +60,18 @@ class CameraWebRtcManager(
         iceServers: List<PeerConnection.IceServer>
     ) {
         isDisposed.set(false)
+
+        val hasCameraPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasCameraPermission) {
+            Log.e(TAG, "Camera permission not granted")
+            onError?.invoke("permission_denied")
+            return
+        }
+
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -71,7 +88,9 @@ class CameraWebRtcManager(
 
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
                 Log.d(TAG, "PeerConnection state changed: $newState")
-                onStateChange(newState)
+                if (!isDisposed.get()) {
+                    onStateChange(newState)
+                }
             }
 
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
@@ -97,32 +116,58 @@ class CameraWebRtcManager(
         val capturer = createCameraCapturer(cameraFacing)
         if (capturer == null) {
             Log.e(TAG, "Failed to create camera capturer for facing: $cameraFacing")
+            onError?.invoke("camera_unavailable")
             return
         }
         cameraCapturer = capturer
 
-        videoSource = factory.createVideoSource(false)
-        surfaceTextureHelper = SurfaceTextureHelper.create("CameraCaptureThread", eglBase.eglBaseContext)
-        capturer.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
-        capturer.startCapture(1280, 720, 30)
+        try {
+            videoSource = factory.createVideoSource(false)
+            surfaceTextureHelper = SurfaceTextureHelper.create("CameraCaptureThread", eglBase.eglBaseContext)
+            capturer.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
+            
+            try {
+                capturer.startCapture(1280, 720, 30)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed startCapture at 1280x720, falling back to 640x480: ${e.message}")
+                capturer.startCapture(640, 480, 30)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing camera capturer: ${e.message}", e)
+            onError?.invoke("camera_init_error")
+            return
+        }
 
         val streamId = "camera_stream"
 
         val vTrack = factory.createVideoTrack("camera_video_track", videoSource)
         videoTrack = vTrack
-        peerConnection!!.addTrack(vTrack, listOf(streamId))
+        peerConnection?.addTrack(vTrack, listOf(streamId))
 
         if (withAudio) {
-            val audioConstraints = MediaConstraints()
-            val aSource = factory.createAudioSource(audioConstraints)
-            audioSource = aSource
-            val aTrack = factory.createAudioTrack("camera_audio_track", aSource)
-            audioTrack = aTrack
-            peerConnection!!.addTrack(aTrack, listOf(streamId))
+            val hasAudioPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (hasAudioPermission) {
+                try {
+                    val audioConstraints = MediaConstraints()
+                    val aSource = factory.createAudioSource(audioConstraints)
+                    audioSource = aSource
+                    val aTrack = factory.createAudioTrack("camera_audio_track", aSource)
+                    audioTrack = aTrack
+                    peerConnection?.addTrack(aTrack, listOf(streamId))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to initialize microphone audio track: ${e.message}")
+                }
+            } else {
+                Log.w(TAG, "RECORD_AUDIO permission not granted, proceeding with video-only camera stream")
+            }
         }
 
         val constraints = MediaConstraints()
-        peerConnection!!.createOffer(object : SdpObserverAdapter() {
+        peerConnection?.createOffer(object : SdpObserverAdapter() {
             override fun onCreateSuccess(desc: SessionDescription?) {
                 if (desc == null) return
                 peerConnection?.setLocalDescription(object : SdpObserverAdapter() {
@@ -140,6 +185,7 @@ class CameraWebRtcManager(
 
             override fun onCreateFailure(p0: String?) {
                 Log.e(TAG, "createOffer failure: $p0")
+                onError?.invoke("sdp_offer_failed")
             }
         }, constraints)
     }
@@ -243,7 +289,7 @@ class CameraWebRtcManager(
         val iceCandidate = IceCandidate(
             candidate.optString("sdpMid", "0"),
             candidate.optInt("sdpMLineIndex", 0),
-            candidate.getString("candidate")
+            candidate.optString("candidate", "")
         )
         if (isRemoteDescriptionSet && peerConnection != null) {
             peerConnection?.addIceCandidate(iceCandidate)

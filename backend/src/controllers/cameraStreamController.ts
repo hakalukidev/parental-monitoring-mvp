@@ -19,7 +19,7 @@ export const requestCameraStream = asyncHandler(async (req: AuthedRequest, res: 
   if (!device) throw new AppError("Child has no registered device", 404);
 
   const childSocketIds = getChildSocketIds(childId);
-  if (device.status !== "ONLINE" || childSocketIds.length === 0) {
+  if (childSocketIds.length === 0 && device.status !== "ONLINE") {
     throw new AppError("Child device is offline", 409);
   }
 

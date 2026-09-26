@@ -10,10 +10,12 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.SessionStore
+import com.example.childapp.service.ChildMonitoringService
 import com.example.childapp.socket.SocketManager
 import com.example.childapp.webrtc.CameraWebRtcManager
 import org.json.JSONObject
 import org.webrtc.PeerConnection
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Foreground service that owns the active remote camera streaming session end-to-end:
@@ -22,6 +24,7 @@ import org.webrtc.PeerConnection
  */
 class CameraStreamService : Service() {
 
+    private val isStopping = AtomicBoolean(false)
     private var socketManager: SocketManager? = null
     private var cameraWebRtcManager: CameraWebRtcManager? = null
     private var sessionId: String? = null
@@ -44,10 +47,13 @@ class CameraStreamService : Service() {
         }
 
         sessionId = sid
+        currentSessionId = sid
+        isSessionRunning.set(true)
+        isStopping.set(false)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            if (withAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (withAudio) {
                 serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             }
             startForeground(NOTIFICATION_ID, buildNotification(), serviceType)
@@ -55,28 +61,32 @@ class CameraStreamService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
 
-        val socket = SocketManager(token).also { socketManager = it }
+        val activeSock = ChildMonitoringService.activeSocket
+        val isShared = activeSock != null && activeSock.isConnected
+        val socket = if (isShared) {
+            Log.i(TAG, "Reusing persistent connected socket from ChildMonitoringService")
+            activeSock!!
+        } else {
+            Log.i(TAG, "Creating dedicated socket connection")
+            SocketManager(token).also { socketManager = it }
+        }
+
         socket.onCameraStreamStopped = { stoppedId ->
             if (stoppedId == sessionId) stopStreaming()
         }
-        socket.onCameraStreamSwitchCamera = { switchSid, facing ->
+        socket.onCameraStreamSwitchCamera = { switchSid, _ ->
             if (switchSid == sessionId) {
                 cameraWebRtcManager?.switchCamera()
             }
         }
         socket.onWebrtcAnswer = { sdpSessionId, sdp ->
+            Log.i(TAG, "Received onWebrtcAnswer for session $sdpSessionId")
             if (sdpSessionId == sessionId) cameraWebRtcManager?.applyRemoteAnswer(sdp)
         }
         socket.onIceCandidate = { iceSessionId, candidate ->
+            Log.i(TAG, "Received onIceCandidate for session $iceSessionId")
             if (iceSessionId == sessionId) cameraWebRtcManager?.addRemoteIceCandidate(candidate)
         }
-        socket.onConnected = {
-            socket.joinSession(sid)
-            socket.acceptCameraStream(sid)
-        }
-        socket.connect()
-        socket.joinSession(sid)
-        socket.acceptCameraStream(sid)
 
         val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
@@ -85,17 +95,43 @@ class CameraStreamService : Service() {
 
         val webRtc = CameraWebRtcManager(
             context = applicationContext,
-            onLocalOffer = { sdp -> socket.sendOffer(sid, sdp) },
-            onIceCandidate = { candidate -> socket.sendIceCandidate(sid, candidate) },
+            onLocalOffer = { sdp ->
+                Log.i(TAG, "Sending local WebRTC offer for session $sid")
+                socket.sendOffer(sid, sdp)
+            },
+            onIceCandidate = { candidate ->
+                Log.i(TAG, "Sending local ICE candidate for session $sid")
+                socket.sendIceCandidate(sid, candidate)
+            },
             onStateChange = { state ->
+                Log.d(TAG, "Camera WebRTC state changed: $state")
                 if (state == PeerConnection.PeerConnectionState.CLOSED ||
                     state == PeerConnection.PeerConnectionState.FAILED
                 ) {
-                    stopStreaming()
+                    if (!isStopping.get()) {
+                        Log.i(TAG, "Stopping camera stream due to connection state: $state")
+                        stopStreaming()
+                    }
                 }
+            },
+            onError = { reason ->
+                Log.e(TAG, "Camera streaming error: $reason")
+                socket.rejectCameraStream(sid, reason)
+                stopStreaming()
             }
         ).also { cameraWebRtcManager = it }
         webRtc.init()
+
+        fun beginCapture(iceServers: List<PeerConnection.IceServer>) {
+            Log.i(TAG, "Beginning WebRTC camera capture with ${iceServers.size} ICE servers")
+            socket.joinSession(sid)
+            socket.acceptCameraStream(sid)
+            webRtc.startStreaming(
+                cameraFacing = cameraFacing,
+                withAudio = withAudio,
+                iceServers = iceServers
+            )
+        }
 
         // Fetch server ICE configuration asynchronously in background thread
         Thread {
@@ -106,32 +142,48 @@ class CameraStreamService : Service() {
             } catch (_: Exception) {
                 defaultIceServers
             }
+            val finalIce = if (iceServers.isNotEmpty()) iceServers else defaultIceServers
 
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                if (cameraWebRtcManager != null) {
-                    webRtc.startStreaming(
-                        cameraFacing = cameraFacing,
-                        withAudio = withAudio,
-                        iceServers = if (iceServers.isNotEmpty()) iceServers else defaultIceServers
-                    )
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (cameraWebRtcManager != null && !isStopping.get()) {
+                    if (socket.isConnected) {
+                        beginCapture(finalIce)
+                    } else {
+                        Log.i(TAG, "Socket not yet connected, waiting for onConnected...")
+                        socket.onConnected = {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                if (cameraWebRtcManager != null && !isStopping.get()) {
+                                    beginCapture(finalIce)
+                                }
+                            }
+                        }
+                        socket.connect()
+                    }
                 }
-            }, 300)
+            }
         }.start()
 
         return START_STICKY
     }
 
     private fun stopStreaming() {
+        if (isStopping.getAndSet(true)) return
+        isSessionRunning.set(false)
+        currentSessionId = null
         val sid = sessionId
-        cameraWebRtcManager?.release()
+        sessionId = null
+        val rtc = cameraWebRtcManager
         cameraWebRtcManager = null
+        rtc?.release()
+
         if (sid != null) {
             try {
-                socketManager?.notifyCameraStopped(sid)
+                val sock = socketManager ?: ChildMonitoringService.activeSocket
+                sock?.notifyCameraStopped(sid)
                 val api = ApiClient(SessionStore(applicationContext))
                 Thread { runCatching { api.stopCameraStream(sid) } }.start()
             } catch (_: Exception) {
-                // best-effort; socket event above already signals both sides
+                // best-effort
             }
         }
         socketManager?.disconnect()
@@ -141,8 +193,9 @@ class CameraStreamService : Service() {
     }
 
     override fun onDestroy() {
-        cameraWebRtcManager?.release()
-        socketManager?.disconnect()
+        isSessionRunning.set(false)
+        currentSessionId = null
+        stopStreaming()
         super.onDestroy()
     }
 
@@ -222,6 +275,9 @@ class CameraStreamService : Service() {
     }
 
     companion object {
+        private const val TAG = "CameraStreamService"
+        val isSessionRunning = AtomicBoolean(false)
+        @Volatile var currentSessionId: String? = null
         const val ACTION_STOP = "com.example.childapp.action.STOP_CAMERA_STREAM"
         const val EXTRA_ACCESS_TOKEN = "extra_access_token"
         const val EXTRA_SESSION_ID = "extra_session_id"
@@ -236,6 +292,7 @@ class CameraStreamService : Service() {
             cameraFacing: String = "BACK",
             withAudio: Boolean = true
         ) {
+            currentSessionId = sessionId
             val intent = Intent(context, CameraStreamService::class.java).apply {
                 putExtra(EXTRA_ACCESS_TOKEN, accessToken)
                 putExtra(EXTRA_SESSION_ID, sessionId)
@@ -250,6 +307,8 @@ class CameraStreamService : Service() {
         }
 
         fun stop(context: Context) {
+            isSessionRunning.set(false)
+            currentSessionId = null
             val intent = Intent(context, CameraStreamService::class.java).apply { action = ACTION_STOP }
             context.startService(intent)
         }

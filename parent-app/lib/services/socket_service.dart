@@ -103,6 +103,18 @@ class SocketService {
     });
   }
 
+  void onWebrtcOffer(void Function(Map<String, dynamic>) cb) {
+    socket.on('webrtc_offer', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void sendWebrtcAnswer(String sessionId, Map<String, dynamic> sdp) {
+    socket.emit('webrtc_answer', {'sessionId': sessionId, 'sdp': sdp});
+  }
+
+  void sendWebrtcOffer(String sessionId, Map<String, dynamic> sdp) {
+    socket.emit('webrtc_offer', {'sessionId': sessionId, 'sdp': sdp});
+  }
+
   void onWebrtcAnswer(void Function(Map<String, dynamic>) cb) {
     socket.on('webrtc_answer', (data) => cb(Map<String, dynamic>.from(data)));
   }
