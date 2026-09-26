@@ -59,6 +59,36 @@ export function registerSocketHandlers(io: Server): void {
         lastSeen: now,
         deviceName: updatedDev?.deviceName ?? "Child Device",
       });
+
+      // Immediately evaluate geofences when child connects / comes online
+      try {
+        const childUser = await User.findById(userId);
+        if (childUser?.parentId) {
+          let loc: any = updatedDev?.lastLocation;
+          if (!loc?.latitude) {
+            const locRec = await LocationRecord.findOne({ childId: userId }).sort({ recordedAt: -1 }).lean();
+            if (locRec) {
+              loc = {
+                latitude: locRec.latitude,
+                longitude: locRec.longitude,
+                accuracy: locRec.accuracy,
+                altitude: locRec.altitude,
+                speed: locRec.speed,
+                heading: locRec.heading,
+                batteryLevel: locRec.batteryLevel,
+                recordedAt: locRec.recordedAt,
+              };
+            }
+          }
+          if (loc?.latitude && loc?.longitude) {
+            evaluateChildGeofences(userId, childUser.parentId.toString(), loc).catch((e) =>
+              console.error("Error evaluating geofences on child connect:", e)
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Error checking geofences on child connect:", err);
+      }
     } else if (role === "PARENT") {
       addParentSocket(userId, socket.id);
       try {
@@ -109,6 +139,14 @@ export function registerSocketHandlers(io: Server): void {
           batteryLevel: data?.batteryLevel,
           deviceName: updatedDev?.deviceName ?? "Child Device",
         });
+
+        // Trigger geofence evaluation on heartbeat if child has location
+        const childUser = await User.findById(userId);
+        if (childUser?.parentId && updatedDev?.lastLocation?.latitude && updatedDev?.lastLocation?.longitude) {
+          evaluateChildGeofences(userId, childUser.parentId.toString(), updatedDev.lastLocation).catch((err) =>
+            console.error("Error evaluating geofences on child heartbeat:", err)
+          );
+        }
       } catch (err) {
         console.error("Error handling child_heartbeat:", err);
       }

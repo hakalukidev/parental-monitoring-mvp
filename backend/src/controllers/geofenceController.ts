@@ -2,6 +2,8 @@ import { Response } from "express";
 import { Geofence } from "../models/Geofence";
 import { GeofenceEvent } from "../models/GeofenceEvent";
 import { User } from "../models/User";
+import { Device } from "../models/Device";
+import { LocationRecord } from "../models/LocationRecord";
 import { asyncHandler, AppError } from "../utils/http";
 import {
   createGeofenceSchema,
@@ -12,6 +14,35 @@ import { AuthedRequest } from "../middleware/auth";
 import { assertParentOwnsChild } from "./childrenController";
 import { getIO } from "../socket/io";
 import { getChildSocketIds } from "../socket/presence";
+import { evaluateChildGeofences } from "../services/geofenceService";
+
+// Helper to trigger geofence evaluation against child's latest known location
+async function triggerGeofenceEvaluationForChild(childId: string, parentId: string) {
+  try {
+    const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
+    let loc: any = device?.lastLocation;
+    if (!loc?.latitude) {
+      const lastRec = await LocationRecord.findOne({ childId }).sort({ recordedAt: -1 }).lean();
+      if (lastRec) {
+        loc = {
+          latitude: lastRec.latitude,
+          longitude: lastRec.longitude,
+          accuracy: lastRec.accuracy,
+          altitude: lastRec.altitude,
+          speed: lastRec.speed,
+          heading: lastRec.heading,
+          batteryLevel: lastRec.batteryLevel,
+          recordedAt: lastRec.recordedAt,
+        };
+      }
+    }
+    if (loc?.latitude && loc?.longitude) {
+      await evaluateChildGeofences(childId, parentId, loc);
+    }
+  } catch (err) {
+    console.error("Failed to trigger geofence evaluation:", err);
+  }
+}
 
 // Helper to notify child socket of geofence changes
 function notifyChildGeofenceUpdate(childId: string, action: "UPSERT" | "DELETE", geofenceData: any) {
@@ -56,6 +87,12 @@ export const createGeofence = asyncHandler(async (req: AuthedRequest, res: Respo
   });
 
   notifyChildGeofenceUpdate(childId, "UPSERT", geofence.toObject());
+
+  if (geofence.isEnabled) {
+    triggerGeofenceEvaluationForChild(childId, parentId).catch((err) =>
+      console.error("Error evaluating geofence on create:", err)
+    );
+  }
 
   res.status(201).json({
     message: "Geofence created successfully",
@@ -132,6 +169,12 @@ export const updateGeofence = asyncHandler(async (req: AuthedRequest, res: Respo
 
   notifyChildGeofenceUpdate(childId, "UPSERT", geofence.toObject());
 
+  if (geofence.isEnabled) {
+    triggerGeofenceEvaluationForChild(childId, parentId).catch((err) =>
+      console.error("Error evaluating geofence on update:", err)
+    );
+  }
+
   res.json({
     message: "Geofence updated successfully",
     geofence,
@@ -157,6 +200,12 @@ export const toggleGeofence = asyncHandler(async (req: AuthedRequest, res: Respo
   await geofence.save();
 
   notifyChildGeofenceUpdate(childId, "UPSERT", geofence.toObject());
+
+  if (geofence.isEnabled) {
+    triggerGeofenceEvaluationForChild(childId, parentId).catch((err) =>
+      console.error("Error evaluating geofence on toggle:", err)
+    );
+  }
 
   res.json({
     message: `Geofence ${geofence.isEnabled ? "enabled" : "disabled"}`,

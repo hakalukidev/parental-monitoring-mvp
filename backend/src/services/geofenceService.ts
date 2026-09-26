@@ -136,119 +136,198 @@ export async function evaluateChildGeofences(
         currentState = "OUTSIDE";
       } else {
         // In the buffer band: retain previous state to prevent boundary jitter
-        currentState = geofence.lastState === "UNKNOWN"
-          ? distance <= geofence.radius ? "INSIDE" : "OUTSIDE"
-          : geofence.lastState;
+        currentState =
+          geofence.lastState === "UNKNOWN"
+            ? distance <= geofence.radius
+              ? "INSIDE"
+              : "OUTSIDE"
+            : geofence.lastState;
       }
 
-      // First time initialization: initialize state without triggering false alert
-      if (geofence.lastState === "UNKNOWN") {
-        geofence.lastState = currentState;
-        geofence.lastStateChangedAt = recordedDate;
-        await geofence.save();
-        continue;
-      }
-
-      // Check if state transition occurred
       const previousState = geofence.lastState;
-      if (previousState !== currentState) {
-        const transitionType: "EXIT" | "ENTRY" =
+      const isInitialCheck = previousState === "UNKNOWN";
+      const isStateChanged = previousState !== currentState;
+
+      let shouldTrigger = false;
+      let transitionType: "EXIT" | "ENTRY" = "ENTRY";
+      let alertTitle = "";
+      let alertBody = "";
+
+      const TRANSITION_COOLDOWN_MS = 60 * 1000; // 1 minute cooldown for transition bouncing
+      const SUSTAINED_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes cooldown for sustained violation
+
+      const timeSinceLastTrigger = geofence.lastTriggeredAt
+        ? recordedDate.getTime() - geofence.lastTriggeredAt.getTime()
+        : Infinity;
+
+      const timeString = recordedDate.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+
+      if (isInitialCheck) {
+        // Child's location is evaluated for the first time or after state reset
+        if (geofence.zoneType === "RESTRICTED_ZONE") {
+          if (currentState === "INSIDE") {
+            // Child is currently inside a restricted zone!
+            transitionType = "ENTRY";
+            shouldTrigger =
+              geofence.triggerType === "ENTRY" ||
+              geofence.triggerType === "BOTH";
+            alertTitle = `⚠️ Restricted Zone Alert: ${geofence.name}`;
+            alertBody = `${childName || "Child"} is currently inside restricted zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+          }
+        } else {
+          // SAFE_ZONE
+          if (currentState === "OUTSIDE") {
+            // Child is currently outside the safe zone!
+            transitionType = "EXIT";
+            shouldTrigger =
+              geofence.triggerType === "EXIT" ||
+              geofence.triggerType === "BOTH";
+            alertTitle = `🚨 Safe Zone Alert: ${geofence.name}`;
+            alertBody = `${childName || "Child"} is currently outside safe zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+          } else if (currentState === "INSIDE") {
+            // Child is currently inside safe zone
+            if (
+              geofence.triggerType === "ENTRY" ||
+              geofence.triggerType === "BOTH"
+            ) {
+              transitionType = "ENTRY";
+              shouldTrigger = true;
+              alertTitle = `✅ Safe Zone Reached: ${geofence.name}`;
+              alertBody = `${childName || "Child"} is currently inside safe zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+            }
+          }
+        }
+      } else if (isStateChanged) {
+        // Child crossed the boundary
+        transitionType =
           previousState === "INSIDE" && currentState === "OUTSIDE" ? "EXIT" : "ENTRY";
 
-        // Check if this transition matches alert trigger criteria
         const matchesTrigger =
           geofence.triggerType === "BOTH" ||
           geofence.triggerType === transitionType ||
           (geofence.zoneType === "SAFE_ZONE" && transitionType === "EXIT") ||
           (geofence.zoneType === "RESTRICTED_ZONE" && transitionType === "ENTRY");
 
-        // Debounce / Cooldown check (5 minutes cooldown for repeat triggers on same geofence)
-        const COOLDOWN_MS = 5 * 60 * 1000;
-        const isCooldownElapsed =
-          !geofence.lastTriggeredAt ||
-          recordedDate.getTime() - geofence.lastTriggeredAt.getTime() > COOLDOWN_MS;
-
-        geofence.lastState = currentState;
-        geofence.lastStateChangedAt = recordedDate;
-
-        if (matchesTrigger && isCooldownElapsed) {
-          geofence.lastTriggeredAt = recordedDate;
-          await geofence.save();
-
-          // Generate notification title and body
-          const actionText = transitionType === "EXIT" ? "left" : "entered";
-          let alertTitle = "";
+        if (matchesTrigger && timeSinceLastTrigger > TRANSITION_COOLDOWN_MS) {
+          shouldTrigger = true;
           if (geofence.zoneType === "RESTRICTED_ZONE") {
-            alertTitle = transitionType === "ENTRY"
-              ? `⚠️ Restricted Zone Entered: ${geofence.name}`
-              : `🛡️ Restricted Zone Exited: ${geofence.name}`;
+            alertTitle =
+              transitionType === "ENTRY"
+                ? `⚠️ Restricted Zone Entered: ${geofence.name}`
+                : `🛡️ Restricted Zone Exited: ${geofence.name}`;
+            alertBody = `${childName || "Child"} ${transitionType === "ENTRY" ? "entered" : "left"} restricted zone ${geofence.name} at ${timeString}. Tap to view route trail.`;
           } else {
-            alertTitle = transitionType === "EXIT"
-              ? `🚨 Safe Zone Left: ${geofence.name}`
-              : `✅ Safe Zone Reached: ${geofence.name}`;
+            alertTitle =
+              transitionType === "EXIT"
+                ? `🚨 Safe Zone Left: ${geofence.name}`
+                : `✅ Safe Zone Reached: ${geofence.name}`;
+            alertBody = `${childName || "Child"} ${transitionType === "EXIT" ? "left" : "entered"} safe zone ${geofence.name} at ${timeString}. Tap to view route trail.`;
           }
-
-          const timeString = recordedDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-          const alertBody = `${childName || "Child"} ${actionText} ${geofence.name} at ${timeString}. Tap to view route trail.`;
-          const message = alertBody;
-
-          // Create persistent GeofenceEvent in MongoDB
-          const event = await GeofenceEvent.create({
-            parentId,
-            childId,
-            geofenceId: geofence._id,
-            geofenceName: geofence.name,
-            eventType: transitionType,
-            zoneType: geofence.zoneType,
-            title: alertTitle,
-            body: alertBody,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            accuracy: location.accuracy,
-            speed: location.speed,
-            distanceFromCenter: Math.round(distance),
-            geofenceRadius: geofence.radius,
-            address: geofence.address || "",
-            isRead: false,
-            isNotified: false,
-            triggeredAt: recordedDate,
-          });
-
-          // Broadcast instant alert via Socket.IO to connected parent sockets
-          try {
-            const io = getIO();
-            const parentSocketIds = getParentSocketIds(parentId);
-            for (const socketId of parentSocketIds) {
-              io.to(socketId).emit("geofence_alert", {
-                eventId: event._id.toString(),
-                childId,
-                childName: childName || "Child",
-                geofenceId: geofence._id.toString(),
-                geofenceName: geofence.name,
-                eventType: transitionType,
-                zoneType: geofence.zoneType,
-                title: alertTitle,
-                body: alertBody,
-                message,
-                location: {
-                  latitude: location.latitude,
-                  longitude: location.longitude,
-                  accuracy: location.accuracy,
-                  speed: location.speed,
-                  distanceFromCenter: Math.round(distance),
-                  geofenceRadius: geofence.radius,
-                  recordedAt: recordedDate.toISOString(),
-                },
-                address: geofence.address,
-                triggeredAt: recordedDate.toISOString(),
-              });
-            }
-          } catch (socketErr) {
-            console.error("Failed to emit geofence_alert socket event:", socketErr);
-          }
-        } else {
-          await geofence.save();
         }
+      } else {
+        // Child is still in the same state (Sustained state violation check)
+        const isRestrictedViolation =
+          geofence.zoneType === "RESTRICTED_ZONE" && currentState === "INSIDE";
+        const isSafeZoneViolation =
+          geofence.zoneType === "SAFE_ZONE" &&
+          currentState === "OUTSIDE" &&
+          (geofence.triggerType === "EXIT" || geofence.triggerType === "BOTH");
+
+        if (
+          (isRestrictedViolation || isSafeZoneViolation) &&
+          timeSinceLastTrigger > SUSTAINED_COOLDOWN_MS
+        ) {
+          shouldTrigger = true;
+          if (isRestrictedViolation) {
+            transitionType = "ENTRY";
+            alertTitle = `⚠️ Ongoing Restricted Zone Alert: ${geofence.name}`;
+            alertBody = `${childName || "Child"} is still inside restricted zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+          } else {
+            transitionType = "EXIT";
+            alertTitle = `🚨 Ongoing Safe Zone Alert: ${geofence.name}`;
+            alertBody = `${childName || "Child"} is still outside safe zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+          }
+        }
+      }
+
+      // Update state tracking on geofence
+      geofence.lastState = currentState;
+      if (isStateChanged || isInitialCheck) {
+        geofence.lastStateChangedAt = recordedDate;
+      }
+
+      if (shouldTrigger) {
+        geofence.lastTriggeredAt = recordedDate;
+        await geofence.save();
+
+        const message = alertBody;
+
+        // Create persistent GeofenceEvent in MongoDB
+        const event = await GeofenceEvent.create({
+          parentId,
+          childId,
+          geofenceId: geofence._id,
+          geofenceName: geofence.name,
+          eventType: transitionType,
+          zoneType: geofence.zoneType,
+          title: alertTitle,
+          body: alertBody,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy,
+          speed: location.speed,
+          distanceFromCenter: Math.round(distance),
+          geofenceRadius: geofence.radius,
+          address: geofence.address || "",
+          isRead: false,
+          isNotified: false,
+          triggeredAt: recordedDate,
+        });
+
+        // Broadcast instant alert via Socket.IO to connected parent sockets
+        try {
+          const io = getIO();
+          const parentSocketIds = getParentSocketIds(parentId);
+          for (const socketId of parentSocketIds) {
+            io.to(socketId).emit("geofence_alert", {
+              eventId: event._id.toString(),
+              childId,
+              childName: childName || "Child",
+              geofenceId: geofence._id.toString(),
+              geofenceName: geofence.name,
+              eventType: transitionType,
+              zoneType: geofence.zoneType,
+              title: alertTitle,
+              body: alertBody,
+              message,
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy,
+              speed: location.speed,
+              distanceFromCenter: Math.round(distance),
+              geofenceRadius: geofence.radius,
+              address: geofence.address,
+              triggeredAt: recordedDate.toISOString(),
+              location: {
+                latitude: location.latitude,
+                longitude: location.longitude,
+                accuracy: location.accuracy,
+                speed: location.speed,
+                distanceFromCenter: Math.round(distance),
+                geofenceRadius: geofence.radius,
+                recordedAt: recordedDate.toISOString(),
+              },
+            });
+          }
+        } catch (socketErr) {
+          console.error("Failed to emit geofence_alert socket event:", socketErr);
+        }
+      } else {
+        await geofence.save();
       }
     }
   } catch (err) {
