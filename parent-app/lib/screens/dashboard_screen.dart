@@ -15,6 +15,7 @@ import 'app_blocker_screen.dart';
 import 'web_filter_screen.dart';
 import 'browsing_history_screen.dart';
 import 'geofences_screen.dart';
+import 'app_usage_report_screen.dart';
 import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -700,15 +701,41 @@ class _ChildCard extends StatelessWidget {
 
             const Divider(height: 20),
 
-            // Requirement 3 & 4: Blocker & Web Filtering & Browsing History
+            // Requirement 3 & 4: Blocker & Web Filtering & Browsing History & Usage Reports
             Text('Digital Wellbeing & Safety', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+
+            // Usage & Downtime Report Button
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.blue.shade700,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AppUsageReportScreen(
+                      childId: child.id,
+                      childName: child.name,
+                      socketService: socketService,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.analytics_outlined, size: 18),
+                label: const Text('App Usage & Downtime Report (Today)'),
+              ),
+            ),
             const SizedBox(height: 8),
 
             Row(
               children: [
                 Expanded(
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.indigo),
+                  child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.indigo.shade50,
+                      foregroundColor: Colors.indigo.shade900,
+                    ),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => AppBlockerScreen(
@@ -723,8 +750,11 @@ class _ChildCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.teal),
+                  child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.teal.shade50,
+                      foregroundColor: Colors.teal.shade900,
+                    ),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => WebFilterScreen(

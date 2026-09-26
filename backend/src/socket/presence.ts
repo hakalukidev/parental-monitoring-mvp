@@ -50,6 +50,14 @@ export function getParentSocketIds(parentId: string): string[] {
   return Array.from(parentSockets.get(parentId) ?? []);
 }
 
+export function getAllParentSocketIds(): string[] {
+  const all: string[] = [];
+  for (const set of parentSockets.values()) {
+    all.push(...Array.from(set));
+  }
+  return all;
+}
+
 /** Find which childId (if any) owns a given socketId — used on disconnect. */
 export function findChildIdBySocket(socketId: string): string | undefined {
   for (const [childId, set] of childSockets.entries()) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
+import 'app_usage_report_screen.dart';
 
 class AppBlockerScreen extends StatefulWidget {
   final String childId;
@@ -163,6 +164,18 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
       appBar: AppBar(
         title: Text("${widget.childName}'s Apps"),
         actions: [
+          IconButton(
+            tooltip: "Today's Usage Report",
+            icon: const Icon(Icons.analytics_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AppUsageReportScreen(
+                  childId: widget.childId,
+                  childName: widget.childName,
+                ),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,

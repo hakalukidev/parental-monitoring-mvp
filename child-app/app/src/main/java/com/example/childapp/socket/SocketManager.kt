@@ -36,6 +36,7 @@ class SocketManager(private var accessToken: String) {
     var onInstantLockdownToggle: ((isPaused: Boolean) -> Unit)? = null
     var onUnblockResponse: ((requestId: String, packageName: String, approved: Boolean, durationMinutes: Int) -> Unit)? = null
     var onGeofenceUpdated: ((action: String, geofenceId: String, geofence: JSONObject?) -> Unit)? = null
+    var onRequestUsageSync: (() -> Unit)? = null
 
     fun updateTokenAndReconnect(newToken: String) {
         this.accessToken = newToken
@@ -143,6 +144,10 @@ class SocketManager(private var accessToken: String) {
                 android.util.Log.i("SocketManager", "Received geofence_updated ($action): $geofenceId")
                 onGeofenceUpdated?.invoke(action, geofenceId, geofence)
             }
+            s.on("request_usage_sync") { _ ->
+                android.util.Log.i("SocketManager", "Received request_usage_sync from server")
+                onRequestUsageSync?.invoke()
+            }
             s.connect()
         }
     }
@@ -248,6 +253,10 @@ class SocketManager(private var accessToken: String) {
             put("visitedAt", entry.visitedAt)
         }
         socket?.emit("new_browsing_activity", payload)
+    }
+
+    fun sendUsageUpdated(report: JSONObject) {
+        socket?.emit("usage_updated", JSONObject().put("report", report))
     }
 
     fun sendHeartbeat(batteryLevel: Int? = null, isGpsOn: Boolean? = null, deviceName: String? = null) {

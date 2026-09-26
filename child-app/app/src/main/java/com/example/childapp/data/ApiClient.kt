@@ -116,6 +116,13 @@ class ApiClient(private val session: SessionStore) {
         return execute(req)
     }
 
+    /** POST /api/children/:childId/usage/sync */
+    fun syncDailyUsage(report: JSONObject): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val req = authedRequest("/api/children/$childId/usage/sync", "POST", report).build()
+        return execute(req)
+    }
+
     /** POST /api/devices/register */
     fun registerDevice(deviceName: String, platform: String = "Android"): JSONObject {
         val payload = JSONObject().put("deviceName", deviceName).put("platform", platform)

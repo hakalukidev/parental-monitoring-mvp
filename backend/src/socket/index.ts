@@ -535,6 +535,41 @@ export function registerSocketHandlers(io: Server): void {
       }
     );
 
+    // ---- App Usage & Downtime: Real-time sync events ----
+    socket.on("request_usage_sync", async (data: { childId: string }) => {
+      if (role !== "PARENT" || !data?.childId) return;
+      try {
+        const childSockets = getChildSocketIds(data.childId);
+        for (const cSocketId of childSockets) {
+          io.to(cSocketId).emit("request_usage_sync", {
+            childId: data.childId,
+            requestedAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.error("Error processing request_usage_sync socket event:", err);
+      }
+    });
+
+    socket.on("usage_updated", async (data: { childId?: string; report: any }) => {
+      if (role !== "CHILD") return;
+      try {
+        const child = await User.findById(userId);
+        if (child?.parentId) {
+          const parentSockets = getParentSocketIds(child.parentId.toString());
+          for (const pSocketId of parentSockets) {
+            io.to(pSocketId).emit("usage_updated", {
+              childId: userId,
+              date: data.report?.date,
+              report: data.report,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error processing usage_updated socket event:", err);
+      }
+    });
+
     socket.on("disconnect", async () => {
       if (role === "CHILD") {
         const childId = findChildIdBySocket(socket.id);

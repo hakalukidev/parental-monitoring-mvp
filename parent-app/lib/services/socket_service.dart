@@ -172,5 +172,17 @@ class SocketService {
   void onGeofenceAlert(void Function(Map<String, dynamic>) cb) {
     socket.on('geofence_alert', (data) => cb(Map<String, dynamic>.from(data)));
   }
+
+  // ==========================================
+  // App Usages & Downtime Real-Time Sync
+  // ==========================================
+
+  void onUsageUpdated(void Function(Map<String, dynamic>) cb) {
+    socket.on('usage_updated', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void requestUsageSync(String childId) {
+    socket.emit('request_usage_sync', {'childId': childId});
+  }
 }
 

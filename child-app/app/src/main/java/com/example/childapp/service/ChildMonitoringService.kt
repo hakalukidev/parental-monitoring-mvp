@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.childapp.accessibility.ChildAccessibilityService
 import com.example.childapp.blocker.AppScanner
+import com.example.childapp.blocker.AppUsageTracker
 import com.example.childapp.camera.CameraStreamService
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.LocalDatabase
@@ -156,6 +157,20 @@ class ChildMonitoringService : Service() {
             }
         }
 
+        socket.onRequestUsageSync = {
+            Log.i(TAG, "Parent requested immediate usage & downtime refresh over socket")
+            serviceScope.launch {
+                try {
+                    val report = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
+                    api.syncDailyUsage(report)
+                    socketManager?.sendUsageUpdated(report)
+                    Log.i(TAG, "Sent updated usage report successfully")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to respond to request_usage_sync: ${e.message}")
+                }
+            }
+        }
+
         // Stealth Screen Sharing: Parent requested view -> Auto-accept and stream immediately
         socket.onScreenShareRequest = { sessionId, parentId ->
             Log.i(TAG, "Received screen_share_request for session $sessionId from parent $parentId (Stealth)")
@@ -259,6 +274,15 @@ class ChildMonitoringService : Service() {
                     LocalDatabase.getInstance(this@ChildMonitoringService)
                         .markBrowsingHistorySynced(unsynced.map { it.id })
                 }
+
+                // Sync today's app usages and downtime report
+                try {
+                    val usageReport = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
+                    api.syncDailyUsage(usageReport)
+                    socketManager?.sendUsageUpdated(usageReport)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to sync daily usage: ${e.message}")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error syncing app data", e)
             }
@@ -268,6 +292,7 @@ class ChildMonitoringService : Service() {
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = serviceScope.launch {
+            var heartbeatCounter = 0
             while (isActive) {
                 try {
                     val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
@@ -276,6 +301,15 @@ class ChildMonitoringService : Service() {
                     val isGpsOn = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER)
                     val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
                     socketManager?.sendHeartbeat(batteryLevel, isGpsOn, deviceName)
+
+                    heartbeatCounter++
+                    if (heartbeatCounter % 3 == 0) {
+                        try {
+                            val report = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
+                            api.syncDailyUsage(report)
+                            socketManager?.sendUsageUpdated(report)
+                        } catch (_: Exception) {}
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Heartbeat emission error: ${e.message}")
                 }

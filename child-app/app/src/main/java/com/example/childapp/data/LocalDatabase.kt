@@ -56,7 +56,7 @@ class LocalDatabase private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "child_monitoring.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         @Volatile
         private var instance: LocalDatabase? = null
@@ -146,6 +146,18 @@ class LocalDatabase private constructor(context: Context) :
             )
             """.trimIndent()
         )
+
+        db.execSQL(
+            """
+            CREATE TABLE blocked_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                package_name TEXT,
+                app_name TEXT,
+                reason TEXT,
+                timestamp INTEGER
+            )
+            """.trimIndent()
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -155,6 +167,7 @@ class LocalDatabase private constructor(context: Context) :
         db.execSQL("DROP TABLE IF EXISTS unblock_grants")
         db.execSQL("DROP TABLE IF EXISTS device_state")
         db.execSQL("DROP TABLE IF EXISTS geofences")
+        db.execSQL("DROP TABLE IF EXISTS blocked_events")
         onCreate(db)
     }
 
@@ -513,5 +526,42 @@ class LocalDatabase private constructor(context: Context) :
             }
         }
         return list
+    }
+
+    // ==========================================
+    // Blocked Events & Restrictions
+    // ==========================================
+    @Synchronized
+    fun recordBlockedAttempt(packageName: String, appName: String, reason: String) {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("package_name", packageName)
+            put("app_name", appName)
+            put("reason", reason)
+            put("timestamp", System.currentTimeMillis())
+        }
+        db.insert("blocked_events", null, cv)
+    }
+
+    @Synchronized
+    fun getTodayBlockedAttemptsCount(): Int {
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val startTime = cal.timeInMillis
+
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT COUNT(*) FROM blocked_events WHERE timestamp >= ?",
+            arrayOf(startTime.toString())
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                return cursor.getInt(0)
+            }
+        }
+        return 0
     }
 }

@@ -206,6 +206,52 @@ export const geofenceEventsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+// App Usage & Downtime Report Schemas
+export const syncAppUsageItemSchema = z.object({
+  packageName: z.string().min(1),
+  appName: z.string().min(1),
+  category: z
+    .enum(["GAME", "SOCIAL", "ENTERTAINMENT", "EDUCATION", "PRODUCTIVITY", "OTHER"])
+    .default("OTHER"),
+  foregroundTimeSeconds: z.number().nonnegative().default(0),
+  lastTimeUsed: z.string().or(z.date()).optional().nullable(),
+  launchCount: z.number().int().nonnegative().default(0),
+  status: z
+    .enum(["ALWAYS_ALLOWED", "BLOCKED", "TIME_LIMITED", "SCHEDULED"])
+    .default("ALWAYS_ALLOWED"),
+  dailyLimitMinutes: z.number().nonnegative().optional().nullable(),
+  isSystemApp: z.boolean().default(false),
+});
 
+export const syncAppUsageReportSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // YYYY-MM-DD
+  totalScreenTimeSeconds: z.number().nonnegative().default(0),
+  totalDowntimeSeconds: z.number().nonnegative().default(0),
+  screenOffTimeSeconds: z.number().nonnegative().default(0),
+  isDevicePaused: z.boolean().default(false),
+  activeScheduleDowntime: z.string().optional().nullable(),
+  blockedAttemptsCount: z.number().int().nonnegative().default(0),
+  limitsReachedCount: z.number().int().nonnegative().default(0),
+  apps: z.array(syncAppUsageItemSchema).default([]),
+  categoryBreakdown: z
+    .array(
+      z.object({
+        category: z.enum(["GAME", "SOCIAL", "ENTERTAINMENT", "EDUCATION", "PRODUCTIVITY", "OTHER"]),
+        totalTimeSeconds: z.number().nonnegative(),
+        percentage: z.number().nonnegative().max(100),
+      })
+    )
+    .optional(),
+  hourlyUsage: z
+    .array(
+      z.object({
+        hour: z.number().int().min(0).max(23),
+        screenTimeSeconds: z.number().nonnegative(),
+      })
+    )
+    .optional(),
+});
 
-
+export const usageReportQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});

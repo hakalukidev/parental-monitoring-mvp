@@ -494,6 +494,25 @@ class ApiService {
     final res = await _send('GET', uri);
     return _parseResponse(res) as Map<String, dynamic>;
   }
+
+  // ==========================================
+  // App Usages & Downtime Report APIs
+  // ==========================================
+
+  Future<Map<String, dynamic>> getTodayUsageReport(String childId, {String? date}) async {
+    final query = <String, String>{
+      if (date != null && date.isNotEmpty) 'date': date,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/usage/today')
+        .replace(queryParameters: query.isNotEmpty ? query : null);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> requestUsageSync(String childId) async {
+    final res = await _send('POST', _u('/api/children/$childId/usage/request-sync'));
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
 }
 
 class ApiException implements Exception {
