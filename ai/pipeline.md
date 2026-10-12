@@ -52,9 +52,9 @@ Compile the Flutter project into a universal release APK:
 
 ```bash
 cd /mnt/503ADFEC3ADFCD5A/code/flutter/parental-monitoring-mvp/parent-app
-flutter clean
-flutter pub get
-flutter build apk --release --no-tree-shake-icons
+fvm flutter clean
+fvm flutter pub get
+fvm flutter build apk --release --no-tree-shake-icons
 ```
 
 * **Output location:** `parent-app/build/app/outputs/flutter-apk/app-release.apk`

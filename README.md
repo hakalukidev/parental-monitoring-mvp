@@ -87,8 +87,8 @@ Socket.IO at `wss://api.yourdomain.com`.
 
 ```bash
 cd parent-app
-flutter pub get
-flutter run \
+fvm flutter pub get
+fvm flutter run \
   --dart-define=API_BASE_URL=https://api.yourdomain.com \
   --dart-define=SOCKET_URL=https://api.yourdomain.com
 ```

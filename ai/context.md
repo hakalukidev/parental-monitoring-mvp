@@ -428,8 +428,8 @@ npm run dev          # Runs with ts-node-dev on port 4000
 ### 7.2. Running Parent App (Flutter)
 ```bash
 cd parent-app
-flutter pub get
-flutter run \
+fvm flutter pub get
+fvm flutter run \
   --dart-define=API_BASE_URL=https://api.hakaluki.dev \
   --dart-define=SOCKET_URL=https://api.hakaluki.dev
 ```
