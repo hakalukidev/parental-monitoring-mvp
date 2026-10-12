@@ -210,7 +210,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       elevation: 0,
-      color: Theme.of(context).colorScheme.surfaceVariant,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -236,7 +236,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.background,
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Column(
@@ -257,7 +257,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _analytics!.blockedAttempts > 0 ? Colors.red.shade50 : Theme.of(context).colorScheme.background,
+                      color: _analytics!.blockedAttempts > 0 ? Colors.red.shade50 : Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(10),
                       border: _analytics!.blockedAttempts > 0
                           ? Border.all(color: Colors.red.shade200)
@@ -491,7 +491,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                               leading: CircleAvatar(
                                 backgroundColor: record.isBlockedAttempt
                                     ? Colors.red.shade100
-                                    : Theme.of(context).colorScheme.surfaceVariant,
+                                    : Theme.of(context).colorScheme.surfaceContainerHighest,
                                 child: Icon(
                                   _browserIcon(record.browser),
                                   color: record.isBlockedAttempt ? Colors.red : Theme.of(context).colorScheme.primary,

@@ -87,7 +87,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
 
   // Geofences layer state
   List<Geofence> _geofences = [];
-  bool _showGeofences = true;
+  final bool _showGeofences = true;
 
   @override
   void initState() {

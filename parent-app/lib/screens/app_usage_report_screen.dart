@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/app_usage_report.dart';
-import '../models/app_policy.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 
@@ -267,10 +266,10 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
 
     return Card(
       elevation: 0,
-      color: theme.colorScheme.primaryContainer.withOpacity(0.4),
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.2)),
+        side: BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.2)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -311,7 +310,7 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withOpacity(0.15),
+                color: theme.colorScheme.primary.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -598,7 +597,7 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                       LinearProgressIndicator(
                         value: (cat.percentage / 100.0).clamp(0.0, 1.0),
                         color: cat.color,
-                        backgroundColor: cat.color.withOpacity(0.12),
+                        backgroundColor: cat.color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(4),
                         minHeight: 6,
                       ),
@@ -618,7 +617,7 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
 
     return Card(
       elevation: 1,
-      color: Colors.indigo.shade50.withOpacity(0.6),
+      color: Colors.indigo.shade50.withValues(alpha: 0.6),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: Colors.indigo.shade200),
@@ -817,7 +816,7 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundColor: categoryColor.withOpacity(0.12),
+                    backgroundColor: categoryColor.withValues(alpha: 0.12),
                     child: Icon(categoryIcon, color: categoryColor, size: 20),
                   ),
                   const SizedBox(width: 12),
@@ -854,7 +853,7 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                 LinearProgressIndicator(
                   value: (app.foregroundTimeSeconds / totalScreenTime).clamp(0.0, 1.0),
                   color: categoryColor,
-                  backgroundColor: categoryColor.withOpacity(0.1),
+                  backgroundColor: categoryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(3),
                   minHeight: 4,
                 ),
@@ -1052,89 +1051,87 @@ class _QuickAppConfigSheetState extends State<_QuickAppConfigSheet> {
         top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
+      child: RadioGroup<String>(
+        groupValue: _status,
+        onChanged: (val) => setState(() => _status = val!),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.app.appName,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'Today: ${widget.app.formattedUsageTime} • ${widget.app.launchCount} opens',
+                        style: const TextStyle(fontSize: 12, color: Colors.blue),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const Divider(height: 20),
+
+            const Text('Access Rule:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const RadioListTile<String>(
+              title: Text('Always Allowed'),
+              value: 'ALWAYS_ALLOWED',
+            ),
+            const RadioListTile<String>(
+              title: Text('Daily Time Quota'),
+              subtitle: Text('Limit total active minutes per day'),
+              value: 'TIME_LIMITED',
+            ),
+            if (_status == 'TIME_LIMITED') ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.app.appName,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Daily Limit:'),
+                        Text(
+                          '${_dailyMinutes.toInt()} min (${(_dailyMinutes / 60).toStringAsFixed(1)} hrs)',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Today: ${widget.app.formattedUsageTime} • ${widget.app.launchCount} opens',
-                      style: const TextStyle(fontSize: 12, color: Colors.blue),
+                    Slider(
+                      value: _dailyMinutes,
+                      min: 15,
+                      max: 480,
+                      divisions: 31,
+                      onChanged: (val) => setState(() => _dailyMinutes = val),
                     ),
                   ],
                 ),
               ),
-              IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
             ],
-          ),
-          const Divider(height: 20),
+            const RadioListTile<String>(
+              title: Text('Blocked'),
+              subtitle: Text('Lock this app completely'),
+              value: 'BLOCKED',
+            ),
 
-          const Text('Access Rule:', style: TextStyle(fontWeight: FontWeight.bold)),
-          RadioListTile<String>(
-            title: const Text('Always Allowed'),
-            value: 'ALWAYS_ALLOWED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-          RadioListTile<String>(
-            title: const Text('Daily Time Quota'),
-            subtitle: const Text('Limit total active minutes per day'),
-            value: 'TIME_LIMITED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-          if (_status == 'TIME_LIMITED') ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Daily Limit:'),
-                      Text(
-                        '${_dailyMinutes.toInt()} min (${(_dailyMinutes / 60).toStringAsFixed(1)} hrs)',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-                      ),
-                    ],
-                  ),
-                  Slider(
-                    value: _dailyMinutes,
-                    min: 15,
-                    max: 480,
-                    divisions: 31,
-                    onChanged: (val) => setState(() => _dailyMinutes = val),
-                  ),
-                ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _saving ? null : _save,
+                child: _saving ? const CircularProgressIndicator(color: Colors.white) : const Text('Save Rule'),
               ),
             ),
           ],
-          RadioListTile<String>(
-            title: const Text('Blocked'),
-            subtitle: const Text('Lock this app completely'),
-            value: 'BLOCKED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _saving ? null : _save,
-              child: _saving ? const CircularProgressIndicator(color: Colors.white) : const Text('Save Rule'),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

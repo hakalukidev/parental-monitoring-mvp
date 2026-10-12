@@ -86,11 +86,13 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
         status: status,
         dailyLimitMinutes: limit,
       );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Bulk updated $category apps to $status')),
       );
       _loadData();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Bulk update failed: $e'), backgroundColor: Colors.red),
       );
@@ -126,6 +128,7 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
               app.packageName,
               updated.toPolicyJson(),
             );
+            if (!mounted) return;
             setState(() {
               final idx = _apps.indexWhere((a) => a.packageName == app.packageName);
               if (idx != -1) _apps[idx] = updated;
@@ -134,6 +137,7 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
               SnackBar(content: Text('Updated rules for ${app.appName}')),
             );
           } catch (e) {
+            if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
             );
@@ -295,7 +299,7 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                             ),
                             Switch(
                               value: _isPaused,
-                              activeColor: Colors.red,
+                              activeThumbColor: Colors.red,
                               onChanged: _togglePause,
                             ),
                           ],
@@ -534,147 +538,143 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
         top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
+      child: RadioGroup<String>(
+        groupValue: _status,
+        onChanged: (val) => setState(() => _status = val!),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.app.appName,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      Text(widget.app.packageName, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+
+            const Text('Access Rule:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+
+            const RadioListTile<String>(
+              title: Text('Always Allowed'),
+              subtitle: Text('No screen time limits or schedule restrictions'),
+              value: 'ALWAYS_ALLOWED',
+            ),
+            const RadioListTile<String>(
+              title: Text('Blocked (Stealth)'),
+              subtitle: Text('Shows fake loading spinner so child assumes app is unresponsive'),
+              value: 'BLOCKED',
+            ),
+            const RadioListTile<String>(
+              title: Text('Daily Time Quota'),
+              subtitle: Text('Limit total active minutes per day'),
+              value: 'TIME_LIMITED',
+            ),
+
+            if (_status == 'TIME_LIMITED') ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.app.appName,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Daily Limit:'),
+                        Text(
+                          '${_dailyMinutes.toInt()} minutes (${(_dailyMinutes / 60).toStringAsFixed(1)} hrs)',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                        ),
+                      ],
                     ),
-                    Text(widget.app.packageName, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    Slider(
+                      value: _dailyMinutes,
+                      min: 15,
+                      max: 480,
+                      divisions: 31,
+                      label: '${_dailyMinutes.toInt()} min',
+                      onChanged: (val) => setState(() => _dailyMinutes = val),
+                    ),
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
+            ],
+
+            const RadioListTile<String>(
+              title: Text('Schedule Restriction'),
+              subtitle: Text('Block during study or bedtime hours'),
+              value: 'SCHEDULED',
+            ),
+
+            if (_status == 'SCHEDULED') ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.access_time),
+                        label: Text('From: ${_formatTime(_startTime)}'),
+                        onPressed: () async {
+                          final picked = await showTimePicker(context: context, initialTime: _startTime);
+                          if (picked != null) setState(() => _startTime = picked);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.access_time),
+                        label: Text('To: ${_formatTime(_endTime)}'),
+                        onPressed: () async {
+                          final picked = await showTimePicker(context: context, initialTime: _endTime);
+                          if (picked != null) setState(() => _endTime = picked);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-          ),
-          const Divider(height: 24),
 
-          const Text('Access Rule:', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () {
+                  final limit = _status == 'TIME_LIMITED' ? _dailyMinutes.toInt() : null;
+                  final schedules = _status == 'SCHEDULED'
+                      ? [
+                          AppSchedule(
+                            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                            startTime: _formatTime(_startTime),
+                            endTime: _formatTime(_endTime),
+                          )
+                        ]
+                      : <AppSchedule>[];
 
-          RadioListTile<String>(
-            title: const Text('Always Allowed'),
-            subtitle: const Text('No screen time limits or schedule restrictions'),
-            value: 'ALWAYS_ALLOWED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-          RadioListTile<String>(
-            title: const Text('Blocked (Stealth)'),
-            subtitle: const Text('Shows fake loading spinner so child assumes app is unresponsive'),
-            value: 'BLOCKED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-          RadioListTile<String>(
-            title: const Text('Daily Time Quota'),
-            subtitle: const Text('Limit total active minutes per day'),
-            value: 'TIME_LIMITED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-
-          if (_status == 'TIME_LIMITED') ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Daily Limit:'),
-                      Text(
-                        '${_dailyMinutes.toInt()} minutes (${(_dailyMinutes / 60).toStringAsFixed(1)} hrs)',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-                      ),
-                    ],
-                  ),
-                  Slider(
-                    value: _dailyMinutes,
-                    min: 15,
-                    max: 480,
-                    divisions: 31,
-                    label: '${_dailyMinutes.toInt()} min',
-                    onChanged: (val) => setState(() => _dailyMinutes = val),
-                  ),
-                ],
+                  widget.onSave(_status, limit, schedules);
+                },
+                child: const Text('Save Rule'),
               ),
             ),
           ],
-
-          RadioListTile<String>(
-            title: const Text('Schedule Restriction'),
-            subtitle: const Text('Block during study or bedtime hours'),
-            value: 'SCHEDULED',
-            groupValue: _status,
-            onChanged: (val) => setState(() => _status = val!),
-          ),
-
-          if (_status == 'SCHEDULED') ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.access_time),
-                      label: Text('From: ${_formatTime(_startTime)}'),
-                      onPressed: () async {
-                        final picked = await showTimePicker(context: context, initialTime: _startTime);
-                        if (picked != null) setState(() => _startTime = picked);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.access_time),
-                      label: Text('To: ${_formatTime(_endTime)}'),
-                      onPressed: () async {
-                        final picked = await showTimePicker(context: context, initialTime: _endTime);
-                        if (picked != null) setState(() => _endTime = picked);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: () {
-                final limit = _status == 'TIME_LIMITED' ? _dailyMinutes.toInt() : null;
-                final schedules = _status == 'SCHEDULED'
-                    ? [
-                        AppSchedule(
-                          daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-                          startTime: _formatTime(_startTime),
-                          endTime: _formatTime(_endTime),
-                        )
-                      ]
-                    : <AppSchedule>[];
-
-                widget.onSave(_status, limit, schedules);
-              },
-              child: const Text('Save Rule'),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
