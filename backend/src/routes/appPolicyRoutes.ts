@@ -12,7 +12,7 @@ import { requireAuth, requireRole } from "../middleware/auth";
 const router = Router();
 
 // Child endpoints
-router.post("/:childId/apps/sync", requireAuth, syncInstalledApps);
+router.post("/:childId/apps/sync", requireAuth, requireRole("CHILD"), syncInstalledApps);
 router.get("/my-policies", requireAuth, requireRole("CHILD"), getMyPolicies);
 
 // Parent endpoints

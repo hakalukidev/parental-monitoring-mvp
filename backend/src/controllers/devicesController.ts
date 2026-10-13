@@ -1,3 +1,4 @@
+import { getChildSocketIds } from "../socket/presence";
 import { Response } from "express";
 import { Device } from "../models/Device";
 import { asyncHandler } from "../utils/http";
@@ -9,17 +10,19 @@ export const registerDevice = asyncHandler(async (req: AuthedRequest, res: Respo
   const data = registerDeviceSchema.parse(req.body);
   const childId = req.user!.id;
 
-  // A child has (for this MVP) a single primary device record; upsert by childId+deviceName
+  // Preserve the primary device and pause state when model/heartbeat display names change.
   const device = await Device.findOneAndUpdate(
-    { childId, deviceName: data.deviceName },
+    { childId },
     {
       childId,
       deviceName: data.deviceName,
       platform: data.platform,
-      status: "OFFLINE", // becomes ONLINE once the socket connects
+        ...(data.timeZone ? { timeZone: data.timeZone } : {}),
+      ...(data.mediaConsentVersion ? { mediaConsentVersion: data.mediaConsentVersion } : {}),
+      status: getChildSocketIds(childId).length ? "ONLINE" : "OFFLINE",
       lastSeen: new Date(),
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, new: true, setDefaultsOnInsert: true, sort: { updatedAt: -1 } }
   );
 
   res.status(201).json({

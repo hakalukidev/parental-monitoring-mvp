@@ -42,7 +42,7 @@ export const createWebRule = asyncHandler(async (req: AuthedRequest, res: Respon
         rule,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.status(201).json({ rule });
 });
@@ -71,7 +71,7 @@ export const updateWebRule = asyncHandler(async (req: AuthedRequest, res: Respon
         rule,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.json({ rule });
 });
@@ -94,7 +94,7 @@ export const deleteWebRule = asyncHandler(async (req: AuthedRequest, res: Respon
         ruleId,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.json({ success: true, message: "Rule deleted" });
 });

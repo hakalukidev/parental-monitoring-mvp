@@ -19,7 +19,7 @@ router.get("/", requireAuth, (_req, res) => {
       });
     }
   }
-  res.json({ iceServers });
+  res.json({ iceServers, mediaProtocolVersion: 2, consentRequired: true });
 });
 
 export default router;

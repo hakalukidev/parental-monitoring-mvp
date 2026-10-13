@@ -10,3 +10,10 @@ export function getIO(): Server {
   if (!ioInstance) throw new Error("Socket.IO server has not been initialized yet");
   return ioInstance;
 }
+
+export function disconnectUserSockets(userId: string): void {
+  if (!ioInstance) return;
+  for (const socket of ioInstance.sockets.sockets.values()) {
+    if (socket.data.userId === userId) socket.disconnect(true);
+  }
+}

@@ -131,7 +131,7 @@ class WebRtcManager(
                 override fun onStop() {
                     Log.i("WebRtcManager", "MediaProjection.Callback.onStop() triggered")
                     if (!isDisposed.get()) {
-                        stop()
+                        onStateChange(PeerConnection.PeerConnectionState.CLOSED)
                     }
                 }
             }
@@ -141,7 +141,6 @@ class WebRtcManager(
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
         videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
         videoCapturer!!.startCapture(targetWidth, targetHeight, 30)
-        com.example.childapp.screen.InvisibleScreenCaptureActivity.onCaptureInitialized?.invoke()
 
         val vTrack = factory.createVideoTrack("screen_share_track", videoSource)
         videoTrack = vTrack

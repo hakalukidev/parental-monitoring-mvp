@@ -32,6 +32,7 @@ export const syncInstalledApps = asyncHandler(async (req: AuthedRequest, res: Re
       update: {
         $set: {
           appName: app.appName,
+          ...(app.iconPngBase64 ? { iconPngBase64: app.iconPngBase64 } : {}),
           category: app.category,
           versionName: app.versionName,
           isSystemApp: app.isSystemApp,
@@ -95,6 +96,7 @@ export const listChildApps = asyncHandler(async (req: AuthedRequest, res: Respon
       isSystemWhitelisted: policy?.isSystemWhitelisted || app.isSystemApp,
       versionName: app.versionName,
       syncedAt: app.syncedAt,
+      iconPngBase64: app.iconPngBase64,
     };
   });
 
@@ -119,7 +121,7 @@ export const updateAppPolicy = asyncHandler(async (req: AuthedRequest, res: Resp
         ...(data.appName ? { appName: data.appName } : {}),
         ...(data.category ? { category: data.category } : {}),
         status: data.status,
-        dailyLimitMinutes: data.dailyLimitMinutes,
+        dailyLimitMinutes: data.status === "TIME_LIMITED" ? data.dailyLimitMinutes : null,
         schedules: data.schedules ?? [],
         ...(data.isSystemWhitelisted !== undefined
           ? { isSystemWhitelisted: data.isSystemWhitelisted }
@@ -139,7 +141,7 @@ export const updateAppPolicy = asyncHandler(async (req: AuthedRequest, res: Resp
         policy,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.json({ policy });
 });
@@ -157,9 +159,8 @@ export const bulkUpdatePolicy = asyncHandler(async (req: AuthedRequest, res: Res
     {
       $set: {
         status: data.status,
-        ...(data.dailyLimitMinutes !== undefined
-          ? { dailyLimitMinutes: data.dailyLimitMinutes }
-          : {}),
+        dailyLimitMinutes: data.status === "TIME_LIMITED" ? data.dailyLimitMinutes : null,
+        schedules: [],
       },
     }
   );
@@ -174,7 +175,7 @@ export const bulkUpdatePolicy = asyncHandler(async (req: AuthedRequest, res: Res
         status: data.status,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.json({ success: true, modifiedCount: result.modifiedCount });
 });
@@ -197,7 +198,7 @@ export const toggleDevicePause = asyncHandler(async (req: AuthedRequest, res: Re
         isPaused: data.isPaused,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.json({ success: true, isPaused: data.isPaused });
 });

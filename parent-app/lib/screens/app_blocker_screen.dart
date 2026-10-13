@@ -1,3 +1,5 @@
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'package:flutter/material.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
@@ -43,7 +45,9 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
       final isPaused = res['isPaused'] as bool? ?? false;
 
       setState(() {
-        _apps = rawApps.map((e) => InstalledAppInfo.fromJson(e as Map<String, dynamic>)).toList();
+        _apps = rawApps
+            .map((e) => InstalledAppInfo.fromJson(e as Map<String, dynamic>))
+            .toList();
         _isPaused = isPaused;
       });
     } catch (e) {
@@ -62,9 +66,11 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(value
-                ? 'Device paused! All non-essential apps are locked.'
-                : 'Device unpaused. Regular rules restored.'),
-            backgroundColor: value ? Colors.orange.shade800 : Colors.green,
+                ? 'Pause policy saved. It applies when the child device synchronizes.'
+                : 'Resume policy saved. Regular rules apply after synchronization.'),
+            backgroundColor: value
+                ? context.colors.onTertiaryContainer
+                : context.colors.primary,
           ),
         );
       }
@@ -72,7 +78,9 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
       setState(() => _isPaused = prev);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update pause state: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Failed to update pause state: $e'),
+              backgroundColor: context.colors.error),
         );
       }
     }
@@ -94,7 +102,9 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bulk update failed: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Bulk update failed: $e'),
+            backgroundColor: context.colors.error),
       );
     }
   }
@@ -130,7 +140,8 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
             );
             if (!mounted) return;
             setState(() {
-              final idx = _apps.indexWhere((a) => a.packageName == app.packageName);
+              final idx =
+                  _apps.indexWhere((a) => a.packageName == app.packageName);
               if (idx != -1) _apps[idx] = updated;
             });
             ScaffoldMessenger.of(context).showSnackBar(
@@ -139,7 +150,9 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
           } catch (e) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
+              SnackBar(
+                  content: Text('Update failed: $e'),
+                  backgroundColor: context.colors.error),
             );
           }
         },
@@ -164,7 +177,10 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SeftlyScaffold(
+      title: 'Healthy app habits',
+      subtitle: 'Manage apps, daily limits and schedules for this child.',
+      icon: Icons.apps_rounded,
       appBar: AppBar(
         title: Text("${widget.childName}'s Apps"),
         actions: [
@@ -190,47 +206,49 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
               if (val == 'BLOCK_GAMES') _bulkUpdate('GAME', 'BLOCKED');
               if (val == 'ALLOW_GAMES') _bulkUpdate('GAME', 'ALWAYS_ALLOWED');
               if (val == 'BLOCK_SOCIAL') _bulkUpdate('SOCIAL', 'BLOCKED');
-              if (val == 'ALLOW_SOCIAL') _bulkUpdate('SOCIAL', 'ALWAYS_ALLOWED');
+              if (val == 'ALLOW_SOCIAL') {
+                _bulkUpdate('SOCIAL', 'ALWAYS_ALLOWED');
+              }
             },
             itemBuilder: (ctx) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'BLOCK_GAMES',
                 child: Row(
                   children: [
-                    Icon(Icons.sports_esports, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Block All Games'),
+                    Icon(Icons.sports_esports, color: context.colors.error),
+                    const SizedBox(width: 8),
+                    const Text('Block All Games'),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'ALLOW_GAMES',
                 child: Row(
                   children: [
-                    Icon(Icons.sports_esports, color: Colors.green),
-                    SizedBox(width: 8),
-                    Text('Allow All Games'),
+                    Icon(Icons.sports_esports, color: context.colors.primary),
+                    const SizedBox(width: 8),
+                    const Text('Allow All Games'),
                   ],
                 ),
               ),
               const PopupMenuDivider(),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'BLOCK_SOCIAL',
                 child: Row(
                   children: [
-                    Icon(Icons.people, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Block All Social Media'),
+                    Icon(Icons.people, color: context.colors.error),
+                    const SizedBox(width: 8),
+                    const Text('Block All Social Media'),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'ALLOW_SOCIAL',
                 child: Row(
                   children: [
-                    Icon(Icons.people, color: Colors.green),
-                    SizedBox(width: 8),
-                    Text('Allow All Social Media'),
+                    Icon(Icons.people, color: context.colors.primary),
+                    const SizedBox(width: 8),
+                    const Text('Allow All Social Media'),
                   ],
                 ),
               ),
@@ -245,9 +263,11 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(_error!, style: const TextStyle(color: Colors.red)),
+                      Text(_error!,
+                          style: TextStyle(color: context.colors.error)),
                       const SizedBox(height: 12),
-                      FilledButton(onPressed: _loadData, child: const Text('Retry')),
+                      FilledButton(
+                          onPressed: _loadData, child: const Text('Retry')),
                     ],
                   ),
                 )
@@ -258,19 +278,28 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                       // Instant Lockdown Switch Banner
                       Container(
                         margin: const EdgeInsets.all(12),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
-                          color: _isPaused ? Colors.red.shade50 : Colors.blue.shade50,
+                          color: _isPaused
+                              ? context.colors.errorContainer
+                              : context.colors.primaryContainer,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: _isPaused ? Colors.red.shade300 : Colors.blue.shade200,
+                            color: _isPaused
+                                ? context.colors.error
+                                : context.colors.primaryContainer,
                           ),
                         ),
                         child: Row(
                           children: [
                             Icon(
-                              _isPaused ? Icons.pause_circle_filled : Icons.shield,
-                              color: _isPaused ? Colors.red : Colors.blue,
+                              _isPaused
+                                  ? Icons.pause_circle_filled
+                                  : Icons.shield,
+                              color: _isPaused
+                                  ? context.colors.error
+                                  : context.colors.primary,
                               size: 32,
                             ),
                             const SizedBox(width: 12),
@@ -279,10 +308,14 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _isPaused ? 'Device Is Paused' : 'Instant Device Pause',
+                                    _isPaused
+                                        ? 'Pause Policy Enabled'
+                                        : 'Instant Device Pause',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: _isPaused ? Colors.red.shade900 : Colors.blue.shade900,
+                                      color: _isPaused
+                                          ? context.colors.error
+                                          : context.colors.primary,
                                     ),
                                   ),
                                   Text(
@@ -291,7 +324,9 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                                         : 'Freeze non-essential apps instantly',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: _isPaused ? Colors.red.shade700 : Colors.blue.shade700,
+                                      color: _isPaused
+                                          ? context.colors.error
+                                          : context.colors.primary,
                                     ),
                                   ),
                                 ],
@@ -299,7 +334,7 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                             ),
                             Switch(
                               value: _isPaused,
-                              activeThumbColor: Colors.red,
+                              activeThumbColor: context.colors.error,
                               onChanged: _togglePause,
                             ),
                           ],
@@ -316,7 +351,8 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                             suffixIcon: _searchQuery.isNotEmpty
                                 ? IconButton(
                                     icon: const Icon(Icons.clear),
-                                    onPressed: () => setState(() => _searchQuery = ''),
+                                    onPressed: () =>
+                                        setState(() => _searchQuery = ''),
                                   )
                                 : null,
                             border: OutlineInputBorder(
@@ -324,9 +360,11 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                               borderSide: BorderSide.none,
                             ),
                             filled: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 12),
                           ),
-                          onChanged: (val) => setState(() => _searchQuery = val),
+                          onChanged: (val) =>
+                              setState(() => _searchQuery = val),
                         ),
                       ),
 
@@ -411,30 +449,30 @@ class _AppListItem extends StatelessWidget {
     }
   }
 
-  Widget _statusBadge(String status) {
+  Widget _statusBadge(BuildContext context, String status) {
     Color bg;
     Color fg;
     String label;
 
     switch (status) {
       case 'BLOCKED':
-        bg = Colors.red.shade100;
-        fg = Colors.red.shade900;
+        bg = context.colors.errorContainer;
+        fg = context.colors.error;
         label = 'BLOCKED';
         break;
       case 'TIME_LIMITED':
-        bg = Colors.orange.shade100;
-        fg = Colors.orange.shade900;
+        bg = context.colors.tertiaryContainer;
+        fg = context.colors.onTertiaryContainer;
         label = 'LIMITED';
         break;
       case 'SCHEDULED':
-        bg = Colors.purple.shade100;
-        fg = Colors.purple.shade900;
+        bg = context.colors.secondaryContainer;
+        fg = context.colors.secondary;
         label = 'SCHEDULED';
         break;
       default:
-        bg = Colors.green.shade100;
-        fg = Colors.green.shade900;
+        bg = context.colors.primaryContainer;
+        fg = context.colors.primary;
         label = 'ALLOWED';
     }
 
@@ -456,31 +494,35 @@ class _AppListItem extends StatelessWidget {
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        child: Icon(_categoryIcon(app.category), color: Theme.of(context).colorScheme.primary),
+        child: AppThumbnail(
+            encoded: app.iconPngBase64, fallback: _categoryIcon(app.category)),
       ),
-      title: Text(app.appName, style: const TextStyle(fontWeight: FontWeight.w600)),
+      title: Text(app.appName,
+          style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(app.category, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          Text(app.category,
+              style: TextStyle(fontSize: 12, color: context.muted)),
           if (app.status == 'TIME_LIMITED' && app.dailyLimitMinutes != null)
             Text(
               'Limit: ${app.dailyLimitMinutes} min/day',
-              style: const TextStyle(fontSize: 11, color: Colors.orange),
+              style: TextStyle(
+                  fontSize: 11, color: context.colors.onTertiaryContainer),
             ),
           if (app.status == 'SCHEDULED' && app.schedules.isNotEmpty)
             Text(
               'Schedule: ${app.schedules.first.startTime} - ${app.schedules.first.endTime}',
-              style: const TextStyle(fontSize: 11, color: Colors.purple),
+              style: TextStyle(fontSize: 11, color: context.colors.secondary),
             ),
         ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _statusBadge(app.status),
+          _statusBadge(context, app.status),
           const SizedBox(width: 4),
-          const Icon(Icons.chevron_right, color: Colors.grey),
+          Icon(Icons.chevron_right, color: context.muted),
         ],
       ),
       onTap: onTap,
@@ -490,7 +532,8 @@ class _AppListItem extends StatelessWidget {
 
 class _AppConfigSheet extends StatefulWidget {
   final InstalledAppInfo app;
-  final Function(String status, int? dailyLimit, List<AppSchedule> schedules) onSave;
+  final Function(String status, int? dailyLimit, List<AppSchedule> schedules)
+      onSave;
 
   const _AppConfigSheet({required this.app, required this.onSave});
 
@@ -515,10 +558,12 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
       final startParts = s.startTime.split(':');
       final endParts = s.endTime.split(':');
       if (startParts.length == 2) {
-        _startTime = TimeOfDay(hour: int.parse(startParts[0]), minute: int.parse(startParts[1]));
+        _startTime = TimeOfDay(
+            hour: int.parse(startParts[0]), minute: int.parse(startParts[1]));
       }
       if (endParts.length == 2) {
-        _endTime = TimeOfDay(hour: int.parse(endParts[0]), minute: int.parse(endParts[1]));
+        _endTime = TimeOfDay(
+            hour: int.parse(endParts[0]), minute: int.parse(endParts[1]));
       }
     }
   }
@@ -553,9 +598,13 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
                     children: [
                       Text(
                         widget.app.appName,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
-                      Text(widget.app.packageName, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      Text(widget.app.packageName,
+                          style: TextStyle(fontSize: 12, color: context.muted)),
                     ],
                   ),
                 ),
@@ -566,10 +615,9 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
               ],
             ),
             const Divider(height: 24),
-
-            const Text('Access Rule:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Access Rule:',
+                style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-
             const RadioListTile<String>(
               title: Text('Always Allowed'),
               subtitle: Text('No screen time limits or schedule restrictions'),
@@ -577,7 +625,8 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
             ),
             const RadioListTile<String>(
               title: Text('Blocked (Stealth)'),
-              subtitle: Text('Shows fake loading spinner so child assumes app is unresponsive'),
+              subtitle: Text(
+                  'Shows fake loading spinner so child assumes app is unresponsive'),
               value: 'BLOCKED',
             ),
             const RadioListTile<String>(
@@ -585,7 +634,6 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
               subtitle: Text('Limit total active minutes per day'),
               value: 'TIME_LIMITED',
             ),
-
             if (_status == 'TIME_LIMITED') ...[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -598,7 +646,9 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
                         const Text('Daily Limit:'),
                         Text(
                           '${_dailyMinutes.toInt()} minutes (${(_dailyMinutes / 60).toStringAsFixed(1)} hrs)',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: context.colors.primary),
                         ),
                       ],
                     ),
@@ -614,16 +664,15 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
                 ),
               ),
             ],
-
             const RadioListTile<String>(
               title: Text('Schedule Restriction'),
               subtitle: Text('Block during study or bedtime hours'),
               value: 'SCHEDULED',
             ),
-
             if (_status == 'SCHEDULED') ...[
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   children: [
                     Expanded(
@@ -631,8 +680,11 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
                         icon: const Icon(Icons.access_time),
                         label: Text('From: ${_formatTime(_startTime)}'),
                         onPressed: () async {
-                          final picked = await showTimePicker(context: context, initialTime: _startTime);
-                          if (picked != null) setState(() => _startTime = picked);
+                          final picked = await showTimePicker(
+                              context: context, initialTime: _startTime);
+                          if (picked != null) {
+                            setState(() => _startTime = picked);
+                          }
                         },
                       ),
                     ),
@@ -642,7 +694,8 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
                         icon: const Icon(Icons.access_time),
                         label: Text('To: ${_formatTime(_endTime)}'),
                         onPressed: () async {
-                          final picked = await showTimePicker(context: context, initialTime: _endTime);
+                          final picked = await showTimePicker(
+                              context: context, initialTime: _endTime);
                           if (picked != null) setState(() => _endTime = picked);
                         },
                       ),
@@ -651,13 +704,13 @@ class _AppConfigSheetState extends State<_AppConfigSheet> {
                 ),
               ),
             ],
-
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: () {
-                  final limit = _status == 'TIME_LIMITED' ? _dailyMinutes.toInt() : null;
+                  final limit =
+                      _status == 'TIME_LIMITED' ? _dailyMinutes.toInt() : null;
                   final schedules = _status == 'SCHEDULED'
                       ? [
                           AppSchedule(

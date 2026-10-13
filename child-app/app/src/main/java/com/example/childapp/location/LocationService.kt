@@ -100,10 +100,9 @@ class LocationService : Service() {
             return START_NOT_STICKY
         }
 
-        socketManager = SocketManager(token).apply { connect() }
+        if (_isTracking.value) return START_STICKY
 
-        startLocationUpdates()
-        _isTracking.value = true
+        try { startLocationUpdates(); _isTracking.value = true } catch (_: SecurityException) { stopSelf(); _isTracking.value = false }
 
         return START_STICKY
     }
@@ -204,34 +203,22 @@ class LocationService : Service() {
 
         _latestLocation.value = info
 
-        // 1. Emit real-time over WebSocket if connected
-        socketManager?.sendLocationUpdate(
-            latitude = info.latitude,
-            longitude = info.longitude,
-            accuracy = info.accuracy,
-            speed = info.speed,
-            heading = info.heading,
-            altitude = info.altitude,
-            batteryLevel = info.batteryLevel,
-            recordedAt = isoDate
-        )
-
-        // 2. Post via REST API for persistence
+        val db = LocalDatabase.getInstance(this)
+        db.queueLocation(org.json.JSONObject().apply {
+            put("latitude", info.latitude); put("longitude", info.longitude); put("recordedAt", isoDate)
+            info.accuracy?.let { put("accuracy", it.toDouble()) }; info.speed?.let { put("speed", it.toDouble()) }
+            info.heading?.let { put("heading", it.toDouble()) }; info.altitude?.let { put("altitude", it) }
+            info.batteryLevel?.let { put("batteryLevel", it) }
+        })
         serviceScope.launch {
             try {
-                apiClient?.postLocation(
-                    latitude = info.latitude,
-                    longitude = info.longitude,
-                    accuracy = info.accuracy,
-                    speed = info.speed,
-                    heading = info.heading,
-                    altitude = info.altitude,
-                    batteryLevel = info.batteryLevel,
-                    recordedAt = isoDate
-                )
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to post location via REST: ${e.message}")
-            }
+                val pending = db.pendingLocations()
+                if (pending.isNotEmpty()) {
+                    apiClient?.postLocationBatch(org.json.JSONArray().apply { pending.forEach { put(it.second) } })
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    db.markLocationsSynced(pending.map { it.first })
+                }
+            } catch (_: Exception) { Log.w(TAG, "Location upload deferred until reconnection") }
         }
     }
 

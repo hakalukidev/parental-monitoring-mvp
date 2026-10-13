@@ -1,8 +1,8 @@
+import { ingestLocation } from "../services/locationIngestion";
 import { Response } from "express";
 import { LocationRecord } from "../models/LocationRecord";
 import { Device } from "../models/Device";
-import { User } from "../models/User";
-import { asyncHandler, AppError } from "../utils/http";
+import { asyncHandler } from "../utils/http";
 import {
   recordLocationSchema,
   recordLocationBatchSchema,
@@ -11,8 +11,7 @@ import {
 import { AuthedRequest } from "../middleware/auth";
 import { assertParentOwnsChild } from "./childrenController";
 import { getIO } from "../socket/io";
-import { getParentSocketIds } from "../socket/presence";
-import { evaluateChildGeofences } from "../services/geofenceService";
+import { getParentSocketIds, getChildSocketIds } from "../socket/presence";
 
 // Helper function to broadcast live location to connected parent sockets
 export function broadcastChildLocation(
@@ -43,110 +42,15 @@ export function broadcastChildLocation(
   }
 }
 
-// POST /api/location/record (Child only)
+// Both upload paths use the same validation, ordering and deduplication logic.
 export const recordLocation = asyncHandler(async (req: AuthedRequest, res: Response) => {
-  const childId = req.user!.id;
-  const data = recordLocationSchema.parse(req.body);
-
-  const child = await User.findById(childId);
-  if (!child || child.role !== "CHILD") throw new AppError("Child not found", 404);
-
-  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
-  const recordedDate = data.recordedAt ? new Date(data.recordedAt) : new Date();
-
-  const record = await LocationRecord.create({
-    childId,
-    deviceId: device?._id || null,
-    latitude: data.latitude,
-    longitude: data.longitude,
-    accuracy: data.accuracy,
-    altitude: data.altitude,
-    speed: data.speed,
-    heading: data.heading,
-    batteryLevel: data.batteryLevel,
-    recordedAt: recordedDate,
-  });
-
-  const locationPayload = {
-    latitude: data.latitude,
-    longitude: data.longitude,
-    accuracy: data.accuracy,
-    altitude: data.altitude,
-    speed: data.speed,
-    heading: data.heading,
-    batteryLevel: data.batteryLevel,
-    recordedAt: recordedDate,
-  };
-
-  if (device) {
-    device.lastLocation = locationPayload;
-    device.lastSeen = new Date();
-    await device.save();
-  }
-
-  if (child.parentId) {
-    broadcastChildLocation(childId, child.parentId.toString(), locationPayload);
-    evaluateChildGeofences(childId, child.parentId.toString(), locationPayload).catch((err) =>
-      console.error("Error in evaluateChildGeofences (recordLocation):", err)
-    );
-  }
-
-  res.status(201).json({
-    id: record._id,
-    childId: record.childId,
-    ...locationPayload,
-  });
+  const record = await ingestLocation(req.user!.id, recordLocationSchema.parse(req.body));
+  res.status(201).json(record);
 });
-
-// POST /api/location/batch (Child only)
 export const recordLocationBatch = asyncHandler(async (req: AuthedRequest, res: Response) => {
-  const childId = req.user!.id;
   const { points } = recordLocationBatchSchema.parse(req.body);
-
-  const child = await User.findById(childId);
-  if (!child || child.role !== "CHILD") throw new AppError("Child not found", 404);
-
-  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
-
-  const docs = points.map((p) => ({
-    childId,
-    deviceId: device?._id || null,
-    latitude: p.latitude,
-    longitude: p.longitude,
-    accuracy: p.accuracy,
-    altitude: p.altitude,
-    speed: p.speed,
-    heading: p.heading,
-    batteryLevel: p.batteryLevel,
-    recordedAt: p.recordedAt ? new Date(p.recordedAt) : new Date(),
-  }));
-
-  const inserted = await LocationRecord.insertMany(docs);
-
-  if (docs.length > 0) {
-    // Sort to find the latest point in the batch
-    const latestDoc = [...docs].sort(
-      (a, b) => b.recordedAt.getTime() - a.recordedAt.getTime()
-    )[0];
-
-    if (device) {
-      device.lastLocation = latestDoc;
-      device.lastSeen = new Date();
-      await device.save();
-    }
-
-    if (child.parentId) {
-      broadcastChildLocation(childId, child.parentId.toString(), latestDoc);
-      evaluateChildGeofences(childId, child.parentId.toString(), latestDoc).catch((err) =>
-        console.error("Error in evaluateChildGeofences (recordLocationBatch):", err)
-      );
-    }
-  }
-
-  res.status(201).json({
-    count: inserted.length,
-    message: `Recorded ${inserted.length} location points`,
-  });
+  for (const point of [...points].sort((a, b) => new Date(a.recordedAt ?? 0).getTime() - new Date(b.recordedAt ?? 0).getTime())) await ingestLocation(req.user!.id, point);
+  res.status(201).json({ count: points.length });
 });
 
 // GET /api/location/latest/:childId (Parent only)
@@ -158,11 +62,12 @@ export const getLatestLocation = asyncHandler(async (req: AuthedRequest, res: Re
 
   // Check device first for cached last location
   const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
-  if (device?.lastLocation) {
+  if (device?.lastLocation && typeof device.lastLocation.latitude === "number" && typeof device.lastLocation.longitude === "number" && device.lastLocation.recordedAt) {
     res.json({
       childId,
       location: device.lastLocation,
-      deviceStatus: device.status,
+      deviceStatus: getChildSocketIds(childId).length ? "ONLINE" : "OFFLINE",
+      isStale: Date.now() - new Date(device.lastLocation.recordedAt).getTime() > 300_000,
       lastSeen: device.lastSeen,
     });
     return;
@@ -174,7 +79,7 @@ export const getLatestLocation = asyncHandler(async (req: AuthedRequest, res: Re
     res.json({
       childId,
       location: null,
-      deviceStatus: device?.status || "OFFLINE",
+      deviceStatus: getChildSocketIds(childId).length ? "ONLINE" : "OFFLINE",
       lastSeen: device?.lastSeen || null,
     });
     return;
@@ -192,7 +97,7 @@ export const getLatestLocation = asyncHandler(async (req: AuthedRequest, res: Re
       batteryLevel: latestRecord.batteryLevel,
       recordedAt: latestRecord.recordedAt,
     },
-    deviceStatus: device?.status || "OFFLINE",
+    deviceStatus: getChildSocketIds(childId).length ? "ONLINE" : "OFFLINE",
     lastSeen: device?.lastSeen || null,
   });
 });

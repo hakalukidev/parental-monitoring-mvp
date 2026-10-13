@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -5,8 +6,11 @@ import 'app_config.dart';
 
 /// Robust wrapper around the backend REST API with silent auto-refresh support.
 class ApiService {
-  ApiService._internal();
-  static final ApiService instance = ApiService._internal();
+  ApiService({http.Client? client})
+      : _client = _TimedClient(client ?? http.Client());
+  static ApiService instance = ApiService();
+  final http.Client _client;
+  Future<bool>? _refreshing;
 
   final _storage = const FlutterSecureStorage();
   String? _accessToken;
@@ -26,7 +30,8 @@ class ApiService {
 
   Future<String?> get accessToken async => _accessToken;
 
-  Future<void> _saveTokens({required String accessToken, String? refreshToken}) async {
+  Future<void> _saveTokens(
+      {required String accessToken, String? refreshToken}) async {
     _accessToken = accessToken;
     await _storage.write(key: 'access_token', value: accessToken);
     if (refreshToken != null && refreshToken.isNotEmpty) {
@@ -35,12 +40,21 @@ class ApiService {
     }
   }
 
-  Future<bool> refreshToken() async {
+  Future<bool> refreshToken() {
+    if (_refreshing != null) return _refreshing!;
+    final task = _refreshTokenOnce();
+    _refreshing = task;
+    return task.whenComplete(() {
+      _refreshing = null;
+    });
+  }
+
+  Future<bool> _refreshTokenOnce() async {
     final rToken = _refreshToken ?? await _storage.read(key: 'refresh_token');
     if (rToken == null || rToken.isEmpty) return false;
 
     try {
-      final res = await http.post(
+      final res = await _client.post(
         _u('/api/auth/refresh'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'refreshToken': rToken}),
@@ -70,33 +84,37 @@ class ApiService {
       if (headers != null) ...headers,
     };
 
-    final Object? encodedBody = (body is Map || body is List) ? jsonEncode(body) : body;
+    final Object? encodedBody =
+        (body is Map || body is List) ? jsonEncode(body) : body;
 
     http.Response res;
     switch (method.toUpperCase()) {
       case 'GET':
-        res = await http.get(uri, headers: reqHeaders);
+        res = await _client.get(uri, headers: reqHeaders);
         break;
       case 'POST':
-        res = await http.post(uri, headers: reqHeaders, body: encodedBody);
+        res = await _client.post(uri, headers: reqHeaders, body: encodedBody);
         break;
       case 'PUT':
-        res = await http.put(uri, headers: reqHeaders, body: encodedBody);
+        res = await _client.put(uri, headers: reqHeaders, body: encodedBody);
         break;
       case 'PATCH':
-        res = await http.patch(uri, headers: reqHeaders, body: encodedBody);
+        res = await _client.patch(uri, headers: reqHeaders, body: encodedBody);
         break;
       case 'DELETE':
-        res = await http.delete(uri, headers: reqHeaders);
+        res = await _client.delete(uri, headers: reqHeaders);
         break;
       default:
         throw ApiException('Unsupported HTTP method $method');
     }
 
-    if (res.statusCode == 401 && retryOn401 && !uri.path.contains('/api/auth/')) {
+    if (res.statusCode == 401 &&
+        retryOn401 &&
+        (!uri.path.contains('/api/auth/') || uri.path.endsWith('/logout'))) {
       final refreshed = await refreshToken();
       if (refreshed) {
-        return _send(method, uri, headers: headers, body: body, retryOn401: false);
+        return _send(method, uri,
+            headers: headers, body: body, retryOn401: false);
       }
     }
 
@@ -110,12 +128,16 @@ class ApiService {
         jsonBody = jsonDecode(res.body);
       }
     } catch (_) {
-      throw ApiException('Server error (${res.statusCode}): Backend service unreachable or returned HTML.');
+      throw ApiException(
+          'Server error (${res.statusCode}): Backend service unreachable or returned HTML.');
     }
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       if (jsonBody is Map<String, dynamic>) {
-        throw ApiException(jsonBody['error']?.toString() ?? 'Request failed (${res.statusCode})');
+        throw ApiException(jsonBody['error'] == 'ValidationError'
+            ? 'Please check the fields you entered.'
+            : jsonBody['error']?.toString() ??
+                'Request failed (${res.statusCode})');
       }
       throw ApiException('Request failed (${res.statusCode})');
     }
@@ -129,7 +151,7 @@ class ApiService {
     required String password,
     required String confirmPassword,
   }) async {
-    final res = await http.post(
+    final res = await _client.post(
       _u('/api/auth/register'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -151,7 +173,7 @@ class ApiService {
     required String email,
     required String password,
   }) async {
-    final res = await http.post(
+    final res = await _client.post(
       _u('/api/auth/login'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
@@ -166,7 +188,7 @@ class ApiService {
 
   Future<void> logout() async {
     try {
-      await http.post(_u('/api/auth/logout'), headers: _authHeaders);
+      await _send('POST', _u('/api/auth/logout'));
     } catch (_) {}
     _accessToken = null;
     _refreshToken = null;
@@ -216,7 +238,7 @@ class ApiService {
   Future<Map<String, dynamic>> requestCameraStream(
     String childId, {
     String cameraFacing = 'BACK',
-    bool withAudio = true,
+    bool withAudio = false,
   }) async {
     final res = await _send(
       'POST',
@@ -251,11 +273,19 @@ class ApiService {
       if (startTime != null) 'startTime': startTime.toUtc().toIso8601String(),
       if (endTime != null) 'endTime': endTime.toUtc().toIso8601String(),
     };
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/location/history/$childId')
-        .replace(queryParameters: queryParams);
+    final uri =
+        Uri.parse('${AppConfig.apiBaseUrl}/api/location/history/$childId')
+            .replace(queryParameters: queryParams);
     final res = await _send('GET', uri);
     final body = _parseResponse(res) as Map<String, dynamic>;
     return body['points'] as List<dynamic>;
+  }
+
+  Future<bool> supportsExplicitMediaConsent() async {
+    final response = await _send('GET', _u('/api/config'));
+    final config = _parseResponse(response) as Map<String, dynamic>;
+    return config['mediaProtocolVersion'] == 2 &&
+        config['consentRequired'] == true;
   }
 
   Future<List<dynamic>> getIceServers() async {
@@ -363,7 +393,8 @@ class ApiService {
   }
 
   Future<void> deleteWebRule(String childId, String ruleId) async {
-    final res = await _send('DELETE', _u('/api/children/$childId/web-rules/$ruleId'));
+    final res =
+        await _send('DELETE', _u('/api/children/$childId/web-rules/$ruleId'));
     _parseResponse(res);
   }
 
@@ -393,19 +424,22 @@ class ApiService {
       if (isBlockedAttempt == true) 'isBlockedAttempt': 'true',
     };
 
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/browsing-history')
+    final uri = Uri.parse(
+            '${AppConfig.apiBaseUrl}/api/children/$childId/browsing-history')
         .replace(queryParameters: query);
     final res = await _send('GET', uri);
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> getBrowsingAnalytics(String childId) async {
-    final res = await _send('GET', _u('/api/children/$childId/browsing-history/analytics'));
+    final res = await _send(
+        'GET', _u('/api/children/$childId/browsing-history/analytics'));
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> clearBrowsingHistory(String childId) async {
-    final res = await _send('DELETE', _u('/api/children/$childId/browsing-history'));
+    final res =
+        await _send('DELETE', _u('/api/children/$childId/browsing-history'));
     _parseResponse(res);
   }
 
@@ -413,8 +447,10 @@ class ApiService {
   // Geofences & Safety Boundaries
   // ==========================================
 
-  Future<Map<String, dynamic>> createGeofence(String childId, Map<String, dynamic> data) async {
-    final res = await _send('POST', _u('/api/children/$childId/geofences'), body: data);
+  Future<Map<String, dynamic>> createGeofence(
+      String childId, Map<String, dynamic> data) async {
+    final res =
+        await _send('POST', _u('/api/children/$childId/geofences'), body: data);
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
@@ -424,8 +460,10 @@ class ApiService {
     return (body['geofences'] as List<dynamic>?) ?? [];
   }
 
-  Future<Map<String, dynamic>> getGeofence(String childId, String geofenceId) async {
-    final res = await _send('GET', _u('/api/children/$childId/geofences/$geofenceId'));
+  Future<Map<String, dynamic>> getGeofence(
+      String childId, String geofenceId) async {
+    final res =
+        await _send('GET', _u('/api/children/$childId/geofences/$geofenceId'));
     final body = _parseResponse(res) as Map<String, dynamic>;
     return (body['geofence'] as Map<String, dynamic>?) ?? {};
   }
@@ -435,17 +473,22 @@ class ApiService {
     String geofenceId,
     Map<String, dynamic> data,
   ) async {
-    final res = await _send('PUT', _u('/api/children/$childId/geofences/$geofenceId'), body: data);
+    final res = await _send(
+        'PUT', _u('/api/children/$childId/geofences/$geofenceId'),
+        body: data);
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> toggleGeofence(String childId, String geofenceId) async {
-    final res = await _send('PATCH', _u('/api/children/$childId/geofences/$geofenceId/toggle'));
+  Future<Map<String, dynamic>> toggleGeofence(
+      String childId, String geofenceId) async {
+    final res = await _send(
+        'PATCH', _u('/api/children/$childId/geofences/$geofenceId/toggle'));
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> deleteGeofence(String childId, String geofenceId) async {
-    final res = await _send('DELETE', _u('/api/children/$childId/geofences/$geofenceId'));
+    final res = await _send(
+        'DELETE', _u('/api/children/$childId/geofences/$geofenceId'));
     _parseResponse(res);
   }
 
@@ -469,27 +512,32 @@ class ApiService {
       if (endDate != null) 'endDate': endDate,
     };
 
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/geofence-events')
+    final uri = Uri.parse(
+            '${AppConfig.apiBaseUrl}/api/children/$childId/geofence-events')
         .replace(queryParameters: query);
     final res = await _send('GET', uri);
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<void> markGeofenceEventRead(String childId, String eventId) async {
-    final res = await _send('PATCH', _u('/api/children/$childId/geofence-events/$eventId/read'));
+    final res = await _send(
+        'PATCH', _u('/api/children/$childId/geofence-events/$eventId/read'));
     _parseResponse(res);
   }
 
   Future<void> markAllGeofenceEventsRead(String childId) async {
-    final res = await _send('PATCH', _u('/api/children/$childId/geofence-events/mark-all-read'));
+    final res = await _send(
+        'PATCH', _u('/api/children/$childId/geofence-events/mark-all-read'));
     _parseResponse(res);
   }
 
-  Future<Map<String, dynamic>> getUnreadGeofenceEventsSummary({DateTime? since}) async {
+  Future<Map<String, dynamic>> getUnreadGeofenceEventsSummary(
+      {DateTime? since}) async {
     final query = <String, String>{
       if (since != null) 'since': since.toIso8601String(),
     };
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/geofence-events/unread-summary')
+    final uri = Uri.parse(
+            '${AppConfig.apiBaseUrl}/api/children/geofence-events/unread-summary')
         .replace(queryParameters: query.isNotEmpty ? query : null);
     final res = await _send('GET', uri);
     return _parseResponse(res) as Map<String, dynamic>;
@@ -499,18 +547,21 @@ class ApiService {
   // App Usages & Downtime Report APIs
   // ==========================================
 
-  Future<Map<String, dynamic>> getTodayUsageReport(String childId, {String? date}) async {
+  Future<Map<String, dynamic>> getTodayUsageReport(String childId,
+      {String? date}) async {
     final query = <String, String>{
       if (date != null && date.isNotEmpty) 'date': date,
     };
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/usage/today')
-        .replace(queryParameters: query.isNotEmpty ? query : null);
+    final uri =
+        Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/usage/today')
+            .replace(queryParameters: query.isNotEmpty ? query : null);
     final res = await _send('GET', uri);
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> requestUsageSync(String childId) async {
-    final res = await _send('POST', _u('/api/children/$childId/usage/request-sync'));
+    final res =
+        await _send('POST', _u('/api/children/$childId/usage/request-sync'));
     return _parseResponse(res) as Map<String, dynamic>;
   }
 }
@@ -520,4 +571,30 @@ class ApiException implements Exception {
   ApiException(this.message);
   @override
   String toString() => message;
+}
+
+class _TimedClient extends http.BaseClient {
+  final http.Client inner;
+  _TimedClient(this.inner);
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    try {
+      final res =
+          await inner.send(request).timeout(const Duration(seconds: 20));
+      final bytes =
+          await res.stream.toBytes().timeout(const Duration(seconds: 20));
+      return http.StreamedResponse(Stream.value(bytes), res.statusCode,
+          contentLength: bytes.length,
+          headers: res.headers,
+          request: res.request,
+          reasonPhrase: res.reasonPhrase);
+    } on TimeoutException {
+      throw ApiException('The connection timed out. Please try again.');
+    } on http.ClientException {
+      throw ApiException('Unable to connect. Check your internet connection.');
+    }
+  }
+
+  @override
+  void close() => inner.close();
 }

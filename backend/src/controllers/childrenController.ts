@@ -1,3 +1,5 @@
+import { AppUsageReport } from "../models/AppUsageReport";
+import { ownedChild } from "../services/authorization";
 import { Response } from "express";
 import { User } from "../models/User";
 import { Device } from "../models/Device";
@@ -51,25 +53,24 @@ export const listChildren = asyncHandler(async (req: AuthedRequest, res: Respons
       const liveSockets = getChildSocketIds(childIdStr);
       const isOnline = liveSockets.length > 0;
       const device = await Device.findOne({ childId: child._id }).sort({ updatedAt: -1 }).lean();
+      const usage = await AppUsageReport.findOne({ childId: child._id, usageAvailable: true, metricsVersion: 2 }).sort({ date: -1 }).select("date totalScreenTimeSeconds lastSyncedAt").lean();
       return {
         id: child._id,
         name: child.name,
         username: child.email,
+        recentUsage: usage ?? null,
+        expireDate: child.expireDate ?? null,
+        isPremium: !!child.expireDate && child.expireDate.getTime() > Date.now(),
         device: device
           ? {
               id: device._id,
               deviceName: device.deviceName,
               platform: device.platform,
-              status: isOnline ? "ONLINE" : device.status,
-              lastSeen: isOnline ? new Date() : device.lastSeen,
-            }
-          : {
-              id: "",
-              deviceName: "Child Device",
-              platform: "Android",
               status: isOnline ? "ONLINE" : "OFFLINE",
-              lastSeen: new Date(),
-            },
+              lastSeen: device.lastSeen,
+              lastLocation: device.lastLocation ?? null,
+            }
+          : null,
       };
     })
   );
@@ -94,8 +95,9 @@ export const getChild = asyncHandler(async (req: AuthedRequest, res: Response) =
           id: device._id,
           deviceName: device.deviceName,
           platform: device.platform,
-          status: device.status,
+          status: getChildSocketIds(child._id.toString()).length ? "ONLINE" : "OFFLINE",
           lastSeen: device.lastSeen,
+              lastLocation: device.lastLocation ?? null,
         }
       : null,
   });
@@ -103,7 +105,5 @@ export const getChild = asyncHandler(async (req: AuthedRequest, res: Response) =
 
 /** Helper used elsewhere (screen-share controller, sockets) to verify parent->child ownership. */
 export async function assertParentOwnsChild(parentId: string, childId: string) {
-  const child = await User.findOne({ _id: childId, role: "CHILD", parentId });
-  if (!child) throw new AppError("Child not found or not owned by this parent", 403);
-  return child;
+  return ownedChild({ userId: parentId, role: "PARENT" }, childId);
 }

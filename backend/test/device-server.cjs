@@ -1,0 +1,31 @@
+// Explicit local-only fixture for emulator verification. Never connects to the configured production DB.
+if (!process.argv.includes('--isolated')) throw new Error('Use --isolated for the local emulator fixture');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const http = require('node:http');
+const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const { Server } = require('socket.io');
+Object.assign(process.env, { NODE_ENV: 'test', MONGO_URI: 'mongodb://127.0.0.1/seftly_device_fixture', CORS_ORIGINS: 'http://127.0.0.1:4001', JWT_ACCESS_SECRET: crypto.randomBytes(32).toString('hex'), JWT_REFRESH_SECRET: crypto.randomBytes(32).toString('hex'), SESSION_TOKEN_SECRET: crypto.randomBytes(32).toString('hex'), PARENT_CHILD_API_TOKEN: '', TURN_URL: '', TURN_USERNAME: '', TURN_CREDENTIAL: '', TRUST_PROXY_HOPS: '0' });
+const { createApp } = require('../dist/app');
+const { setIO } = require('../dist/socket/io');
+const { registerSocketHandlers } = require('../dist/socket');
+(async () => {
+  const db = await MongoMemoryServer.create({ instance: { dbName: 'seftly_device_fixture' } });
+  await mongoose.connect(db.getUri());
+  const server = http.createServer(createApp()), io = new Server(server);
+  setIO(io); registerSocketHandlers(io);
+  await new Promise(r => server.listen(4001, '127.0.0.1', r));
+  const password = crypto.randomBytes(12).toString('hex');
+  const parentResponse = await fetch('http://127.0.0.1:4001/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'QA Parent', email: 'qa-parent@example.test', password, confirmPassword: password }) });
+  if (!parentResponse.ok) throw new Error('Fixture registration failed');
+  const parent = await parentResponse.json();
+  const childResponse = await fetch('http://127.0.0.1:4001/api/children', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${parent.accessToken}` }, body: JSON.stringify({ name: 'QA Child', username: 'qa-child', password, confirmPassword: password }) });
+  if (!childResponse.ok) throw new Error('Fixture child creation failed');
+  const child = await childResponse.json();
+  fs.writeFileSync('/private/tmp/seftly-device-fixture.json', JSON.stringify({ parent, child, password, username: 'qa-child', email: 'qa-parent@example.test' }), { mode: 0o600 });
+  console.log('Isolated emulator fixture ready on 127.0.0.1:4001');
+  let closing = false;
+  const close = async () => { if (closing) return; closing = true; await new Promise(r => io.close(r)); await mongoose.disconnect(); await db.stop(); process.exit(0); };
+  process.on('SIGTERM', close); process.on('SIGINT', close);
+})().catch(() => { console.error('Local fixture startup failed'); process.exitCode = 1; });

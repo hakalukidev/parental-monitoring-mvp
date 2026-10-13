@@ -1,3 +1,5 @@
+import { reserveMediaSession, releaseMediaSession, notifySessionEnd } from "../services/mediaSessions";
+import { sessionExpired, openSessionStates } from "../services/authorization";
 import { Response } from "express";
 import { ScreenShareSession } from "../models/ScreenShareSession";
 import { Device } from "../models/Device";
@@ -17,13 +19,16 @@ export const requestScreenShare = asyncHandler(async (req: AuthedRequest, res: R
 
   const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
   if (!device) throw new AppError("Child has no registered device", 404);
+  if (device.mediaConsentVersion !== 2) throw new AppError("Update Seftly Child to enable on-device session approval", 409);
 
   const childSocketIds = getChildSocketIds(childId);
-  if (childSocketIds.length === 0 && device.status !== "ONLINE") {
+  if (childSocketIds.length === 0) {
     throw new AppError("Child device is offline", 409);
   }
 
+  const id = await reserveMediaSession("screen", childId);
   const session = await ScreenShareSession.create({
+    _id: id,
     parentId,
     childId,
     deviceId: device.id,
@@ -41,6 +46,7 @@ export const requestScreenShare = asyncHandler(async (req: AuthedRequest, res: R
     getIO().to(sId).emit("screen_share_request", {
       sessionId: session.id,
       parentId,
+      requestedAt: session.requestedAt,
     });
   }
 
@@ -64,7 +70,7 @@ export const getScreenShareSession = asyncHandler(async (req: AuthedRequest, res
 
   res.json({
     id: session.id,
-    status: session.status,
+    status: sessionExpired(session) && openSessionStates.includes(session.status) ? "ENDED" : session.status,
     requestedAt: session.requestedAt,
     startedAt: session.startedAt,
     endedAt: session.endedAt,
@@ -82,7 +88,7 @@ export const stopScreenShare = asyncHandler(async (req: AuthedRequest, res: Resp
   const isChildParticipant = role === "CHILD" && session.childId.toString() === userId;
   if (!isParentParticipant && !isChildParticipant) throw new AppError("Forbidden", 403);
 
-  if (session.status === "ENDED") {
+  if (!openSessionStates.includes(session.status)) {
     res.json({ id: session.id, status: session.status });
     return;
   }
@@ -92,11 +98,8 @@ export const stopScreenShare = asyncHandler(async (req: AuthedRequest, res: Resp
   session.endedBy = role;
   await session.save();
 
-  // Notify the room so both sides tear down WebRTC + UI state
-  getIO().to(`session:${session.id}`).emit("screen_share_stopped", {
-    sessionId: session.id,
-    endedBy: role,
-  });
+  await releaseMediaSession(session.id);
+  notifySessionEnd(session, "screen_share_stopped", role);
 
   res.json({ id: session.id, status: session.status });
 });

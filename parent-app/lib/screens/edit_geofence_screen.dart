@@ -1,3 +1,5 @@
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -48,13 +50,15 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
     super.initState();
     final eg = widget.existingGeofence;
     _nameController = TextEditingController(text: eg?.name ?? '');
-    _center = eg?.latLng ?? widget.initialCenter ?? const LatLng(37.7749, -122.4194);
+    _center =
+        eg?.latLng ?? widget.initialCenter ?? const LatLng(37.7749, -122.4194);
     _radius = eg?.radius ?? 200.0;
     _zoneType = eg?.zoneType ?? GeofenceZoneType.safeZone;
     _triggerType = eg?.triggerType ?? GeofenceTriggerType.exit;
     _isEnabled = eg?.isEnabled ?? true;
     _colorHex = eg?.colorHex ?? '#2196F3';
-    if (eg?.schedule?.daysOfWeek != null && eg!.schedule!.daysOfWeek.isNotEmpty) {
+    if (eg?.schedule?.daysOfWeek != null &&
+        eg!.schedule!.daysOfWeek.isNotEmpty) {
       _selectedDays = List<int>.from(eg.schedule!.daysOfWeek);
     }
 
@@ -79,9 +83,13 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
       final perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
         final req = await Geolocator.requestPermission();
-        if (req == LocationPermission.denied || req == LocationPermission.deniedForever) return;
+        if (req == LocationPermission.denied ||
+            req == LocationPermission.deniedForever) {
+          return;
+        }
       }
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
       final newCenter = LatLng(pos.latitude, pos.longitude);
       setState(() {
         _center = newCenter;
@@ -138,11 +146,15 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Boundary?'),
-        content: Text('Are you sure you want to delete "${widget.existingGeofence!.name}"?'),
+        content: Text(
+            'Are you sure you want to delete "${widget.existingGeofence!.name}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style:
+                FilledButton.styleFrom(backgroundColor: context.colors.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -154,7 +166,8 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
 
     setState(() => _saving = true);
     try {
-      await ApiService.instance.deleteGeofence(widget.childId, widget.existingGeofence!.id);
+      await ApiService.instance
+          .deleteGeofence(widget.childId, widget.existingGeofence!.id);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
@@ -166,9 +179,9 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
 
   Color get _zoneColor {
     if (_zoneType == GeofenceZoneType.restrictedZone) {
-      return Colors.red;
+      return context.colors.error;
     }
-    return Colors.teal;
+    return context.colors.primary;
   }
 
   @override
@@ -176,13 +189,16 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
     final isEditing = widget.existingGeofence != null;
     final dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-    return Scaffold(
+    return SeftlyScaffold(
+      title: 'Make a safety zone',
+      subtitle: 'Choose a location, radius and the alerts you want to receive.',
+      icon: Icons.add_location_alt_outlined,
       appBar: AppBar(
         title: Text(isEditing ? 'Edit Boundary' : 'New Safety Boundary'),
         actions: [
           if (isEditing)
             IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              icon: Icon(Icons.delete_outline, color: context.colors.error),
               tooltip: 'Delete Boundary',
               onPressed: _saving ? null : _delete,
             ),
@@ -198,15 +214,17 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: context.colors.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(color: context.colors.errorContainer),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline, color: Colors.red),
+                    Icon(Icons.error_outline, color: context.colors.error),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(_error!, style: const TextStyle(color: Colors.red))),
+                    Expanded(
+                        child: Text(_error!,
+                            style: TextStyle(color: context.colors.error))),
                   ],
                 ),
               ),
@@ -220,22 +238,24 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                 prefixIcon: Icon(Icons.bookmark_outline),
                 border: OutlineInputBorder(),
               ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter a name' : null,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Please enter a name'
+                  : null,
             ),
             const SizedBox(height: 16),
 
             // Zone Type Selector (Safe Zone vs Restricted)
             SegmentedButton<GeofenceZoneType>(
-              segments: const [
+              segments: [
                 ButtonSegment(
                   value: GeofenceZoneType.safeZone,
-                  icon: Icon(Icons.shield, color: Colors.teal),
-                  label: Text('Safe Zone'),
+                  icon: Icon(Icons.shield, color: context.colors.primary),
+                  label: const Text('Safe Zone'),
                 ),
                 ButtonSegment(
                   value: GeofenceZoneType.restrictedZone,
-                  icon: Icon(Icons.dangerous, color: Colors.red),
-                  label: Text('Restricted Zone'),
+                  icon: Icon(Icons.dangerous, color: context.colors.error),
+                  label: const Text('Restricted Zone'),
                 ),
               ],
               selected: {_zoneType},
@@ -251,7 +271,8 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
             const SizedBox(height: 16),
 
             // Trigger Type
-            Text('Alert Trigger', style: Theme.of(context).textTheme.labelLarge),
+            Text('Alert Trigger',
+                style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
@@ -260,21 +281,27 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                   label: const Text('Alert on Leave (Exit)'),
                   selected: _triggerType == GeofenceTriggerType.exit,
                   onSelected: (val) {
-                    if (val) setState(() => _triggerType = GeofenceTriggerType.exit);
+                    if (val) {
+                      setState(() => _triggerType = GeofenceTriggerType.exit);
+                    }
                   },
                 ),
                 ChoiceChip(
                   label: const Text('Alert on Enter (Arrival)'),
                   selected: _triggerType == GeofenceTriggerType.entry,
                   onSelected: (val) {
-                    if (val) setState(() => _triggerType = GeofenceTriggerType.entry);
+                    if (val) {
+                      setState(() => _triggerType = GeofenceTriggerType.entry);
+                    }
                   },
                 ),
                 ChoiceChip(
                   label: const Text('Alert on Both'),
                   selected: _triggerType == GeofenceTriggerType.both,
                   onSelected: (val) {
-                    if (val) setState(() => _triggerType = GeofenceTriggerType.both);
+                    if (val) {
+                      setState(() => _triggerType = GeofenceTriggerType.both);
+                    }
                   },
                 ),
               ],
@@ -289,25 +316,32 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    color: Colors.grey.shade100,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: context.colors.surfaceContainerHighest,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
                           'Tap map to place boundary center',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
                               icon: Icon(
-                                _isSatelliteView ? Icons.map_outlined : Icons.satellite_alt_outlined,
+                                _isSatelliteView
+                                    ? Icons.map_outlined
+                                    : Icons.satellite_alt_outlined,
                                 size: 20,
                               ),
-                              tooltip: _isSatelliteView ? 'Switch to Street Map' : 'Switch to Satellite View',
-                              onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
+                              tooltip: _isSatelliteView
+                                  ? 'Switch to Street Map'
+                                  : 'Switch to Satellite View',
+                              onPressed: () => setState(
+                                  () => _isSatelliteView = !_isSatelliteView),
                             ),
                             IconButton(
                               icon: const Icon(Icons.my_location, size: 20),
@@ -339,22 +373,26 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                         if (_isSatelliteView)
                           TileLayer(
                             // Google Hybrid: High-res satellite imagery + roads + labels
-                            urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                            urlTemplate:
+                                'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                             subdomains: const ['0', '1', '2', '3'],
                             userAgentPackageName: 'com.example.parent_app',
                             maxZoom: 20.0,
                             maxNativeZoom: 20,
-                            fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                            fallbackUrl:
+                                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                           )
                         else
                           TileLayer(
                             // Google Street: Full street map with local POIs (mosques, shops, schools, markets, Bengali/English labels)
-                            urlTemplate: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                            urlTemplate:
+                                'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                             subdomains: const ['0', '1', '2', '3'],
                             userAgentPackageName: 'com.example.parent_app',
                             maxZoom: 20.0,
                             maxNativeZoom: 20,
-                            fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            fallbackUrl:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           ),
                         CircleLayer(
                           circles: [
@@ -390,12 +428,14 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
-                          const Icon(Icons.place, size: 16, color: Colors.grey),
+                          Icon(Icons.place, size: 16, color: context.muted),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
                               _resolvedAddress!,
-                              style: const TextStyle(fontSize: 12, color: Colors.black87),
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.colors.onSurface),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -412,7 +452,8 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Boundary Radius', style: Theme.of(context).textTheme.titleSmall),
+                Text('Boundary Radius',
+                    style: Theme.of(context).textTheme.titleSmall),
                 Text(
                   '${_radius.toInt()} meters',
                   style: TextStyle(
@@ -438,7 +479,8 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
               spacing: 8,
               children: [100, 250, 500, 1000, 2000].map((preset) {
                 return ActionChip(
-                  label: Text(preset >= 1000 ? '${preset ~/ 1000}km' : '${preset}m'),
+                  label: Text(
+                      preset >= 1000 ? '${preset ~/ 1000}km' : '${preset}m'),
                   onPressed: () {
                     setState(() => _radius = preset.toDouble());
                   },
@@ -475,9 +517,13 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                     height: 38,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: isSelected ? theme.colorScheme.primary : theme.colorScheme.surfaceContainerHighest,
+                      color: isSelected
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.surfaceContainerHighest,
                       border: Border.all(
-                        color: isSelected ? theme.colorScheme.primary : theme.colorScheme.outlineVariant,
+                        color: isSelected
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.outlineVariant,
                         width: 1.5,
                       ),
                     ),
@@ -485,8 +531,11 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                     child: Text(
                       dayNames[i],
                       style: TextStyle(
-                        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurfaceVariant,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        color: isSelected
+                            ? theme.colorScheme.onPrimary
+                            : theme.colorScheme.onSurfaceVariant,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.w500,
                         fontSize: 14,
                       ),
                     ),
@@ -513,10 +562,15 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
               ),
               onPressed: _saving ? null : _save,
               icon: _saving
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.check),
               label: Text(
-                _saving ? 'Saving...' : (isEditing ? 'Update Boundary' : 'Create Boundary'),
+                _saving
+                    ? 'Saving...'
+                    : (isEditing ? 'Update Boundary' : 'Create Boundary'),
                 style: const TextStyle(fontSize: 16),
               ),
             ),

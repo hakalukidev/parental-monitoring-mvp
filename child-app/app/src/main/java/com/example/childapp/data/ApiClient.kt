@@ -17,10 +17,6 @@ class ApiClient(private val session: SessionStore) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .hostnameVerifier { hostname, session ->
-            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev") true
-            else javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
-        }
         .build()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
@@ -70,7 +66,7 @@ class ApiClient(private val session: SessionStore) {
             client.newCall(req).execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    android.util.Log.e("ApiClient", "Token refresh failed (${resp.code}): $text")
+                    android.util.Log.e("ApiClient", "Token refresh failed (${resp.code})")
                     return false
                 }
                 val json = JSONObject(text)
@@ -83,9 +79,16 @@ class ApiClient(private val session: SessionStore) {
                 return true
             }
         } catch (e: Exception) {
-            android.util.Log.e("ApiClient", "Error refreshing token: ${e.message}", e)
+            android.util.Log.e("ApiClient", "Token refresh unavailable")
             return false
         }
+    }
+
+    fun logout(accessToken: String) {
+        val request = Request.Builder().url(url("/api/auth/logout"))
+            .header("Authorization", "Bearer $accessToken")
+            .post(JSONObject().toString().toRequestBody(jsonMedia)).build()
+        execute(request, retryOn401 = false)
     }
 
     /** POST /api/children/:childId/apps/sync */
@@ -125,9 +128,14 @@ class ApiClient(private val session: SessionStore) {
 
     /** POST /api/devices/register */
     fun registerDevice(deviceName: String, platform: String = "Android"): JSONObject {
-        val payload = JSONObject().put("deviceName", deviceName).put("platform", platform)
+        val payload = JSONObject().put("deviceName", deviceName).put("platform", platform).put("timeZone", java.util.TimeZone.getDefault().id).put("mediaConsentVersion", 2)
         val req = authedRequest("/api/devices/register", "POST", payload).build()
         return execute(req)
+    }
+
+    fun getMediaSession(kind: String, sessionId: String): JSONObject {
+        val path = if (kind == "screen") "screen-share" else "camera-stream"
+        return execute(authedRequest("/api/$path/$sessionId", "GET").build())
     }
 
     /** GET /api/config -> ICE servers */
@@ -187,14 +195,13 @@ class ApiClient(private val session: SessionStore) {
     }
 
     private fun execute(req: Request, retryOn401: Boolean = true): JSONObject {
-        android.util.Log.d("ApiClient", "HTTP ${req.method} -> ${req.url}")
+        android.util.Log.d("ApiClient", "HTTP ${req.method} request")
         try {
             client.newCall(req).execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
-                android.util.Log.d("ApiClient", "Response (${resp.code}) for ${req.url}: $text")
 
                 if (resp.code == 401 && retryOn401 && !req.url.encodedPath.contains("/api/auth/")) {
-                    android.util.Log.w("ApiClient", "Received 401 for ${req.url}, attempting token refresh...")
+                    android.util.Log.w("ApiClient", "Session expired; refreshing access")
                     val refreshed = refreshAccessToken()
                     if (refreshed) {
                         val newToken = session.accessToken
@@ -212,7 +219,7 @@ class ApiClient(private val session: SessionStore) {
                 return json
             }
         } catch (e: Exception) {
-            android.util.Log.e("ApiClient", "Error during request ${req.url}: ${e.message}", e)
+            android.util.Log.e("ApiClient", "Request failed (${e::class.simpleName})")
             throw e
         }
     }

@@ -22,6 +22,9 @@ data class PolicyCheckResult(
 object AppUsageTracker {
 
     private const val TAG = "AppUsageTracker"
+    private var cachedTotals: UsageTotals? = null
+    private var cachedStart = 0L
+    private var cachedAt = 0L
 
     fun hasUsageStatsPermission(context: Context): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
@@ -48,31 +51,35 @@ object AppUsageTracker {
         val startTime = cal.timeInMillis
         val endTime = System.currentTimeMillis()
 
-        val stats = usageStatsManager.queryUsageStats(
-            UsageStatsManager.INTERVAL_DAILY,
-            startTime,
-            endTime
-        )
-
-        if (stats.isNullOrEmpty()) return 0
-
-        for (u in stats) {
-            if (u.packageName == packageName) {
-                return (u.totalTimeInForeground / 60000L).toInt()
-            }
-        }
-
-        return 0
+        val totals = collectUsage(usageStatsManager, startTime, endTime)
+        return ((totals.perPackageSeconds[packageName] ?: 0L) / 60).toInt()
     }
 
-    fun evaluatePackage(context: Context, packageName: String): PolicyCheckResult {
+    @Synchronized private fun collectUsage(manager: UsageStatsManager, start: Long, end: Long): UsageTotals {
+        val cached = cachedTotals
+        if (cached != null && cachedStart == start && end - cachedAt in 0..4999) return cached
+        val stream = manager.queryEvents(start - 86_400_000, end)
+        val event = UsageEvents.Event()
+        val events = mutableListOf<UsageEventPoint>()
+        while (stream.hasNextEvent()) {
+            stream.getNextEvent(event)
+            events.add(UsageEventPoint(event.timeStamp, event.eventType, event.packageName))
+        }
+        return UsageTimeline.aggregate(events, start, end, java.time.ZoneId.systemDefault()).also {
+            cachedTotals = it; cachedStart = start; cachedAt = end
+        }
+    }
+
+    fun evaluatePackage(context: Context, packageName: String, recordAttempt: Boolean = true): PolicyCheckResult {
         val db = LocalDatabase.getInstance(context)
+
+        if (isVitalPackage(context, packageName)) return PolicyCheckResult(false)
 
         // 1. Check if the device is paused in instant lockdown
         if (db.isDevicePaused()) {
             val isVitalSystem = isVitalPackage(context, packageName)
             if (!isVitalSystem) {
-                db.recordBlockedAttempt(packageName, packageName, "Device is paused by your parent.")
+                if (recordAttempt) db.recordBlockedAttempt(packageName, packageName, "Device is paused by your parent.")
                 return PolicyCheckResult(
                     isBlocked = true,
                     reason = "Device is paused by your parent."
@@ -95,7 +102,7 @@ object AppUsageTracker {
         when (policy.status) {
             "BLOCKED" -> {
                 val reason = "This app is blocked by your parent."
-                db.recordBlockedAttempt(packageName, policy.appName, reason)
+                if (recordAttempt) db.recordBlockedAttempt(packageName, policy.appName, reason)
                 return PolicyCheckResult(
                     isBlocked = true,
                     reason = reason,
@@ -103,11 +110,14 @@ object AppUsageTracker {
                 )
             }
             "TIME_LIMITED" -> {
-                val limit = policy.dailyLimitMinutes ?: 60
-                val used = getTodayUsageMinutes(context, packageName)
+                val limit = policy.dailyLimitMinutes
+                if (limit == null || limit <= 0 || !hasUsageStatsPermission(context)) return PolicyCheckResult(true, "Ask your parent to review usage access and this app’s time limit.", policy)
+                val used = try { getTodayUsageMinutes(context, packageName) } catch (_: Exception) {
+                    return PolicyCheckResult(true, "App activity is unavailable. Ask your parent to review setup.", policy)
+                }
                 if (used >= limit) {
                     val reason = "Daily time limit of $limit min reached (Used: $used min)."
-                    db.recordBlockedAttempt(packageName, policy.appName, reason)
+                    if (recordAttempt) db.recordBlockedAttempt(packageName, policy.appName, reason)
                     return PolicyCheckResult(
                         isBlocked = true,
                         reason = reason,
@@ -119,7 +129,7 @@ object AppUsageTracker {
                 val inSchedule = isCurrentlyInSchedule(policy.schedulesJson)
                 if (inSchedule != null) {
                     val reason = "Blocked during schedule ($inSchedule)."
-                    db.recordBlockedAttempt(packageName, policy.appName, reason)
+                    if (recordAttempt) db.recordBlockedAttempt(packageName, policy.appName, reason)
                     return PolicyCheckResult(
                         isBlocked = true,
                         reason = reason,
@@ -161,67 +171,14 @@ object AppUsageTracker {
         val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
         val hasPermission = hasUsageStatsPermission(context)
 
-        val launchCounts = mutableMapOf<String, Int>()
-        val hourlyBuckets = LongArray(24) { 0L }
-        val perPackageUsageSeconds = mutableMapOf<String, Long>()
-        val perPackageLastUsed = mutableMapOf<String, Long>()
-
-        if (hasPermission && usageStatsManager != null) {
-            try {
-                // 1. Query Usage Stats
-                val stats = usageStatsManager.queryUsageStats(
-                    UsageStatsManager.INTERVAL_DAILY,
-                    startTime,
-                    endTime
-                )
-
-                if (!stats.isNullOrEmpty()) {
-                    for (u in stats) {
-                        val sec = u.totalTimeInForeground / 1000L
-                        if (sec > 0 || scannedApps.containsKey(u.packageName) || policies.containsKey(u.packageName)) {
-                            perPackageUsageSeconds[u.packageName] = sec
-                            if (u.lastTimeUsed > 0) {
-                                perPackageLastUsed[u.packageName] = u.lastTimeUsed
-                            }
-                        }
-                    }
-                }
-
-                // 2. Query Usage Events for App Launches & Hourly Distribution
-                val events = usageStatsManager.queryEvents(startTime, endTime)
-                val event = UsageEvents.Event()
-                var lastResumedPkg: String? = null
-                var lastResumedTime = 0L
-
-                val hourCal = Calendar.getInstance()
-                while (events.hasNextEvent()) {
-                    events.getNextEvent(event)
-                    val pkg = event.packageName ?: continue
-                    val eventTime = event.timeStamp
-
-                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
-                        event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                        launchCounts[pkg] = (launchCounts[pkg] ?: 0) + 1
-                        lastResumedPkg = pkg
-                        lastResumedTime = eventTime
-                    } else if (event.eventType == UsageEvents.Event.ACTIVITY_PAUSED ||
-                        event.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND) {
-                        if (lastResumedPkg == pkg && lastResumedTime > 0 && eventTime >= lastResumedTime) {
-                            val durationSec = (eventTime - lastResumedTime) / 1000L
-                            if (durationSec in 1..14400) {
-                                hourCal.timeInMillis = lastResumedTime
-                                val hour = hourCal.get(Calendar.HOUR_OF_DAY).coerceIn(0, 23)
-                                hourlyBuckets[hour] += durationSec
-                            }
-                        }
-                        lastResumedPkg = null
-                        lastResumedTime = 0L
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error collecting detailed usage events: ${e.message}")
-            }
-        }
+        var collected = false
+        val totals = if (hasPermission && usageStatsManager != null) {
+            try { collectUsage(usageStatsManager, startTime, endTime).also { collected = true } } catch (_: Exception) { null }
+        } else null
+        val launchCounts = totals?.launches ?: emptyMap()
+        val hourlyBuckets = totals?.hourlySeconds ?: List(24) { 0L }
+        val perPackageUsageSeconds = totals?.perPackageSeconds ?: emptyMap()
+        val perPackageLastUsed = totals?.lastUsed ?: emptyMap()
 
         // 3. Assemble all known apps (scanned launcher apps + policies + recorded stats)
         val allPackageNames = mutableSetOf<String>()
@@ -253,7 +210,7 @@ object AppUsageTracker {
             val isSystem = policy?.isSystemWhitelisted ?: scanned?.isSystemApp ?: false
             val usageSec = perPackageUsageSeconds[pkg] ?: 0L
             val lastUsedMs = perPackageLastUsed[pkg]
-            val launches = launchCounts[pkg] ?: (if (usageSec > 0) 1 else 0)
+            val launches = launchCounts[pkg] ?: 0
 
             if (!isSystem || usageSec > 0) {
                 totalScreenTimeSeconds += usageSec
@@ -282,10 +239,9 @@ object AppUsageTracker {
             appsJsonArray.put(appObj)
         }
 
-        // 4. Calculate Downtime Metrics
-        val elapsedDaySeconds = (endTime - startTime) / 1000L
-        val totalDowntimeSeconds = (elapsedDaySeconds - totalScreenTimeSeconds).coerceAtLeast(0L)
-        val screenOffTimeSeconds = totalDowntimeSeconds
+        // Screen-off is measured from SCREEN_INTERACTIVE/NON_INTERACTIVE events.
+        // Scheduled downtime and pause duration are not measured by this collector.
+        val screenOffTimeSeconds = totals?.screenOffSeconds
 
         // 5. Category Breakdown Array
         val categoryBreakdownArray = JSONArray()
@@ -319,8 +275,11 @@ object AppUsageTracker {
         return JSONObject().apply {
             put("date", todayStr)
             put("totalScreenTimeSeconds", totalScreenTimeSeconds)
-            put("totalDowntimeSeconds", totalDowntimeSeconds)
-            put("screenOffTimeSeconds", screenOffTimeSeconds)
+            put("totalDowntimeSeconds", JSONObject.NULL)
+            put("screenOffTimeSeconds", screenOffTimeSeconds ?: JSONObject.NULL)
+            put("metricsVersion", 2)
+            put("usageAvailable", collected)
+            put("timeZone", TimeZone.getDefault().id)
             put("isDevicePaused", isPaused)
             if (activeDowntimeSchedule != null) {
                 put("activeScheduleDowntime", activeDowntimeSchedule)
@@ -356,20 +315,6 @@ object AppUsageTracker {
             for (i in 0 until schedules.length()) {
                 val s = schedules.getJSONObject(i)
                 val days = s.optJSONArray("daysOfWeek")
-                var dayMatch = false
-                if (days != null) {
-                    for (d in 0 until days.length()) {
-                        if (days.getInt(d) == dayOfWeek) {
-                            dayMatch = true
-                            break
-                        }
-                    }
-                } else {
-                    dayMatch = true
-                }
-
-                if (!dayMatch) continue
-
                 val startStr = s.getString("startTime") // "21:00"
                 val endStr = s.getString("endTime")     // "07:00"
 
@@ -379,17 +324,9 @@ object AppUsageTracker {
                 val startMin = sH * 60 + sM
                 val endMin = eH * 60 + eM
 
-                if (startMin < endMin) {
-                    // Normal range e.g. 08:00 - 14:00
-                    if (currentMinutes in startMin until endMin) {
-                        return "$startStr - $endStr"
-                    }
-                } else {
-                    // Overnight range e.g. 21:00 - 07:00
-                    if (currentMinutes >= startMin || currentMinutes < endMin) {
-                        return "$startStr - $endStr"
-                    }
-                }
+                val selectedDays = if (days == null) (0..6).toSet() else (0 until days.length()).map { days.getInt(it) }.toSet()
+                if (PolicySchedule.active(selectedDays, startMin, endMin, dayOfWeek, currentMinutes)) return "$startStr - $endStr"
+
             }
         } catch (_: Exception) {}
         return null
@@ -397,6 +334,10 @@ object AppUsageTracker {
 
     private fun isVitalPackage(context: Context, packageName: String): Boolean {
         if (packageName == context.packageName) return true
+        val dialer = (context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager)?.defaultDialerPackage
+        if (packageName == dialer) return true
+        val home = context.packageManager.resolveActivity(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
+        if (packageName == home) return true
         val vitalPrefixes = listOf(
             "com.android.dialer",
             "com.google.android.dialer",
@@ -407,6 +348,6 @@ object AppUsageTracker {
             "com.android.mms",
             "com.samsung.android.messaging"
         )
-        return vitalPrefixes.any { packageName.startsWith(it) }
+        return vitalPrefixes.any { packageName == it } || packageName == "com.android.settings" || packageName in setOf("com.google.android.permissioncontroller", "com.android.permissioncontroller")
     }
 }

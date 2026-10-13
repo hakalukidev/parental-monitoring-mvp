@@ -1,3 +1,5 @@
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -94,7 +96,6 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
       ),
     );
 
-    widget.socketService?.requestUsageSync(widget.childId);
     try {
       await ApiService.instance.requestUsageSync(widget.childId);
     } catch (_) {}
@@ -138,13 +139,15 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
 
     switch (_sortBy) {
       case 'USAGE':
-        list.sort((a, b) => b.foregroundTimeSeconds.compareTo(a.foregroundTimeSeconds));
+        list.sort((a, b) =>
+            b.foregroundTimeSeconds.compareTo(a.foregroundTimeSeconds));
         break;
       case 'LAUNCHES':
         list.sort((a, b) => b.launchCount.compareTo(a.launchCount));
         break;
       case 'NAME':
-        list.sort((a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()));
+        list.sort((a, b) =>
+            a.appName.toLowerCase().compareTo(b.appName.toLowerCase()));
         break;
     }
 
@@ -154,15 +157,22 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final todayFormatted = DateFormat('EEEE, MMMM d, y').format(DateTime.now());
+    final todayFormatted = DateFormat('EEEE, MMMM d, y')
+        .format(DateTime.tryParse(_report?.date ?? '') ?? DateTime.now());
 
-    return Scaffold(
+    return SeftlyScaffold(
+      title: 'Time, well spent',
+      subtitle: 'Review foreground app activity reported by this device.',
+      icon: Icons.bar_chart_rounded,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("${widget.childName}'s Usage Report", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Text("Present Day (1-Day Details)", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            Text("${widget.childName}'s Usage Report",
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text("Present Day (1-Day Details)",
+                style: TextStyle(fontSize: 12, color: context.muted)),
           ],
         ),
         actions: [
@@ -187,11 +197,16 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                        Icon(Icons.error_outline,
+                            size: 48, color: context.colors.error),
                         const SizedBox(height: 12),
-                        Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                        Text(_error!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: context.colors.error)),
                         const SizedBox(height: 16),
-                        FilledButton(onPressed: _loadReport, child: const Text('Try Again')),
+                        FilledButton(
+                            onPressed: _loadReport,
+                            child: const Text('Try Again')),
                       ],
                     ),
                   ),
@@ -244,14 +259,17 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                           alignment: Alignment.center,
                           child: Column(
                             children: [
-                              Icon(Icons.search_off, size: 48, color: Colors.grey.shade400),
+                              Icon(Icons.search_off,
+                                  size: 48, color: context.muted),
                               const SizedBox(height: 8),
-                              Text('No apps found for selected filter', style: TextStyle(color: Colors.grey.shade600)),
+                              Text('No apps found for selected filter',
+                                  style: TextStyle(color: context.muted)),
                             ],
                           ),
                         )
                       else
-                        ..._filteredApps.map((app) => _buildAppItemCard(theme, app)),
+                        ..._filteredApps
+                            .map((app) => _buildAppItemCard(theme, app)),
 
                       const SizedBox(height: 32),
                     ],
@@ -261,15 +279,18 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
   }
 
   Widget _buildHeaderCard(ThemeData theme, String todayFormatted) {
-    final syncedAt = _report?.lastSyncedAt ?? DateTime.now();
-    final timeStr = DateFormat('h:mm a').format(syncedAt.toLocal());
+    final syncedAt = _report?.lastSyncedAt;
+    final timeStr = syncedAt == null
+        ? "Not synchronized"
+        : "Synced at ${DateFormat('MMM d, h:mm a').format(syncedAt.toLocal())}";
 
     return Card(
       elevation: 0,
       color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.2)),
+        side:
+            BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.2)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -278,7 +299,8 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             CircleAvatar(
               radius: 24,
               backgroundColor: theme.colorScheme.primary,
-              child: const Icon(Icons.analytics_outlined, color: Colors.white, size: 26),
+              child: const Icon(Icons.analytics_outlined,
+                  color: Colors.white, size: 26),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -287,7 +309,8 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                 children: [
                   Text(
                     todayFormatted,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15),
                   ),
                   const SizedBox(height: 2),
                   Row(
@@ -295,12 +318,14 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                       Container(
                         width: 8,
                         height: 8,
-                        decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.green),
+                        decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: context.colors.primary),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        'Synced at $timeStr',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        timeStr,
+                        style: TextStyle(fontSize: 12, color: context.muted),
                       ),
                     ],
                   ),
@@ -338,22 +363,24 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             Expanded(
               child: _MetricCard(
                 icon: Icons.timer,
-                iconColor: Colors.blue.shade700,
-                bgColor: Colors.blue.shade50,
-                title: 'Total Screen Time',
+                iconColor: context.colors.primary,
+                bgColor: context.colors.primaryContainer,
+                title: 'Foreground app usage',
                 value: summary.formattedScreenTime,
-                subtitle: '${summary.appsWithUsageCount} active apps today',
+                subtitle: summary.usageAvailable
+                    ? '${summary.appsWithUsageCount} apps with recorded use'
+                    : 'Usage access or a device report is needed',
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _MetricCard(
                 icon: Icons.nightlight_round,
-                iconColor: Colors.indigo.shade700,
-                bgColor: Colors.indigo.shade50,
-                title: 'Total Downtime',
-                value: summary.formattedDowntime,
-                subtitle: 'Screen off & rest time',
+                iconColor: context.colors.primary,
+                bgColor: context.colors.primaryContainer,
+                title: 'Measured screen-off',
+                value: summary.formattedScreenOff,
+                subtitle: 'From device screen-state events',
               ),
             ),
           ],
@@ -364,8 +391,8 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             Expanded(
               child: _MetricCard(
                 icon: Icons.star_rounded,
-                iconColor: Colors.amber.shade800,
-                bgColor: Colors.amber.shade50,
+                iconColor: context.colors.onTertiaryContainer,
+                bgColor: context.colors.tertiaryContainer,
                 title: 'Most Used App',
                 value: summary.mostUsedApp?.appName ?? 'None',
                 subtitle: summary.mostUsedApp != null
@@ -377,12 +404,14 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             Expanded(
               child: _MetricCard(
                 icon: Icons.shield_outlined,
-                iconColor: summary.limitsReachedCount > 0 || summary.blockedAttemptsCount > 0
-                    ? Colors.red.shade700
-                    : Colors.teal.shade700,
-                bgColor: summary.limitsReachedCount > 0 || summary.blockedAttemptsCount > 0
-                    ? Colors.red.shade50
-                    : Colors.teal.shade50,
+                iconColor: summary.limitsReachedCount > 0 ||
+                        summary.blockedAttemptsCount > 0
+                    ? context.colors.error
+                    : context.colors.primary,
+                bgColor: summary.limitsReachedCount > 0 ||
+                        summary.blockedAttemptsCount > 0
+                    ? context.colors.errorContainer
+                    : context.colors.primaryContainer,
                 title: 'Restrictions & Limits',
                 value: '${summary.limitsReachedCount} Limits Hit',
                 subtitle: summary.isDevicePaused
@@ -398,101 +427,30 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
 
   Widget _buildDowntimeVsScreenTimeCard(ThemeData theme) {
     final summary = _report!.summary;
-    final screenPct = (summary.screenTimePercentage * 100).toInt();
-    final downPct = (summary.downtimePercentage * 100).toInt();
-
     return Card(
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Screen Time vs Downtime',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                Text(
-                  'Today\'s Balance',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // Segmented Progress Bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                height: 16,
-                child: Row(
-                  children: [
-                    if (summary.screenTimePercentage > 0)
-                      Flexible(
-                        flex: (summary.screenTimePercentage * 1000).toInt(),
-                        child: Container(color: Colors.blue.shade600),
-                      ),
-                    if (summary.downtimePercentage > 0)
-                      Flexible(
-                        flex: (summary.downtimePercentage * 1000).toInt(),
-                        child: Container(color: Colors.indigo.shade300),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            Wrap(
-              spacing: 12,
-              runSpacing: 6,
-              alignment: WrapAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(color: Colors.blue.shade600, borderRadius: BorderRadius.circular(3)),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Active Screen: ${summary.formattedScreenTime} ($screenPct%)',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(color: Colors.indigo.shade300, borderRadius: BorderRadius.circular(3)),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Downtime: ${summary.formattedDowntime} ($downPct%)',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+        child: Padding(
+            padding: const EdgeInsets.all(20),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('What these numbers mean',
+                  style: theme.textTheme.titleMedium),
+              const SizedBox(height: 10),
+              Text(summary.usageAvailable
+                  ? 'Foreground app usage counts reported app intervals. It is different from the time the display was on. Screen-off time is shown only when the device has sufficient screen-state events.'
+                  : 'This device has not supplied a usable activity report. Enable usage access on Seftly Child and request a refresh.'),
+              const SizedBox(height: 8),
+              Text(
+                  'Scheduled downtime and device pause duration are not measured by this report.',
+                  style: TextStyle(color: context.muted)),
+            ])));
   }
 
   Widget _buildHourlyActivityCard(ThemeData theme) {
     final hourly = _report!.hourlyUsage;
-    final maxSec = hourly.fold<int>(0, (prev, elem) => elem.screenTimeSeconds > prev ? elem.screenTimeSeconds : prev);
+    final maxSec = hourly.fold<int>(
+        0,
+        (prev, elem) =>
+            elem.screenTimeSeconds > prev ? elem.screenTimeSeconds : prev);
 
     return Card(
       elevation: 1,
@@ -505,8 +463,11 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Hourly Activity Timeline', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                Text('Today (0h - 23h)', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                const Text('Hourly Activity Timeline',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                Text('Today (0h - 23h)',
+                    style: TextStyle(fontSize: 12, color: context.muted)),
               ],
             ),
             const SizedBox(height: 16),
@@ -515,15 +476,18 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: hourly.map((h) {
-                  final ratio = maxSec > 0 ? (h.screenTimeSeconds / maxSec) : 0.0;
+                  final ratio =
+                      maxSec > 0 ? (h.screenTimeSeconds / maxSec) : 0.0;
                   final height = (ratio * 70).clamp(4.0, 70.0);
-                  final isPeak = maxSec > 0 && h.screenTimeSeconds == maxSec && maxSec > 0;
+                  final isPeak =
+                      maxSec > 0 && h.screenTimeSeconds == maxSec && maxSec > 0;
 
                   return Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 1.5),
                       child: Tooltip(
-                        message: '${h.formattedHour}: ${h.screenTimeMinutes} min',
+                        message:
+                            '${h.formattedHour}: ${h.screenTimeMinutes} min',
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
@@ -531,8 +495,11 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                               height: height,
                               decoration: BoxDecoration(
                                 color: isPeak
-                                    ? Colors.amber.shade700
-                                    : (h.screenTimeSeconds > 0 ? Colors.blue.shade600 : Colors.grey.shade200),
+                                    ? context.colors.onTertiaryContainer
+                                    : (h.screenTimeSeconds > 0
+                                        ? context.colors.primary
+                                        : context
+                                            .colors.surfaceContainerHighest),
                                 borderRadius: BorderRadius.circular(3),
                               ),
                             ),
@@ -540,7 +507,8 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                             if (h.hour % 4 == 0)
                               Text(
                                 '${h.hour}h',
-                                style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
+                                style: TextStyle(
+                                    fontSize: 9, color: context.muted),
                               )
                             else
                               const SizedBox(height: 11),
@@ -559,7 +527,9 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
   }
 
   Widget _buildCategoryBreakdownCard(ThemeData theme) {
-    final categories = _report!.categoryBreakdown.where((c) => c.totalTimeSeconds > 0).toList();
+    final categories = _report!.categoryBreakdown
+        .where((c) => c.totalTimeSeconds > 0)
+        .toList();
 
     return Card(
       elevation: 1,
@@ -569,12 +539,14 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('App Categories Breakdown', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const Text('App Categories Breakdown',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             const SizedBox(height: 14),
             if (categories.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('No categorized usage recorded today yet.', style: TextStyle(color: Colors.grey)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text('No categorized usage recorded today yet.',
+                    style: TextStyle(color: context.muted)),
               )
             else
               ...categories.map((cat) {
@@ -586,11 +558,17 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                         children: [
                           Icon(cat.iconData, size: 18, color: cat.color),
                           const SizedBox(width: 8),
-                          Text(cat.category, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          Text(cat.category,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13)),
                           const Spacer(),
-                          Text(cat.formattedTime, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text(cat.formattedTime,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13)),
                           const SizedBox(width: 6),
-                          Text('(${cat.percentage}%)', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                          Text('(${cat.percentage}%)',
+                              style: TextStyle(
+                                  fontSize: 11, color: context.muted)),
                         ],
                       ),
                       const SizedBox(height: 6),
@@ -617,10 +595,10 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
 
     return Card(
       elevation: 1,
-      color: Colors.indigo.shade50.withValues(alpha: 0.6),
+      color: context.colors.primaryContainer.withValues(alpha: 0.6),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.indigo.shade200),
+        side: BorderSide(color: context.colors.primaryContainer),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -629,41 +607,53 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.bedtime_outlined, color: Colors.indigo.shade800),
+                Icon(Icons.bedtime_outlined, color: context.colors.primary),
                 const SizedBox(width: 8),
                 Text(
-                  'Downtime & Safety Rules',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.indigo.shade900),
+                  'Current family rules',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: context.colors.primary),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             _insightRow(
               icon: Icons.nightlight_round,
-              title: 'Scheduled Bedtime Downtime:',
-              value: hasBedtime ? summary.activeScheduleDowntime! : 'None active',
-              valueColor: hasBedtime ? Colors.indigo.shade900 : Colors.grey.shade700,
+              title: 'Active restriction schedule:',
+              value:
+                  hasBedtime ? summary.activeScheduleDowntime! : 'None active',
+              valueColor: hasBedtime ? context.colors.primary : context.muted,
             ),
             const Divider(height: 14),
             _insightRow(
               icon: Icons.pause_circle_outline,
               title: 'Instant Device Lockdown:',
-              value: summary.isDevicePaused ? 'ACTIVE (Paused)' : 'Normal (Unpaused)',
-              valueColor: summary.isDevicePaused ? Colors.red : Colors.green.shade800,
+              value: summary.isDevicePaused
+                  ? 'ACTIVE (Paused)'
+                  : 'Normal (Unpaused)',
+              valueColor: summary.isDevicePaused
+                  ? context.colors.error
+                  : context.colors.primary,
             ),
             const Divider(height: 14),
             _insightRow(
               icon: Icons.block_outlined,
               title: 'Blocked App Open Attempts Today:',
               value: '${summary.blockedAttemptsCount} attempts',
-              valueColor: summary.blockedAttemptsCount > 0 ? Colors.orange.shade900 : Colors.teal.shade800,
+              valueColor: summary.blockedAttemptsCount > 0
+                  ? context.colors.onTertiaryContainer
+                  : context.colors.primary,
             ),
             const Divider(height: 14),
             _insightRow(
               icon: Icons.timelapse,
               title: 'Apps Exceeding Daily Limits:',
               value: '${summary.limitsReachedCount} apps reached limit',
-              valueColor: summary.limitsReachedCount > 0 ? Colors.red.shade800 : Colors.green.shade800,
+              valueColor: summary.limitsReachedCount > 0
+                  ? context.colors.error
+                  : context.colors.primary,
             ),
           ],
         ),
@@ -679,10 +669,14 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
   }) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: Colors.indigo.shade700),
+        Icon(icon, size: 16, color: context.colors.primary),
         const SizedBox(width: 8),
-        Expanded(child: Text(title, style: TextStyle(fontSize: 12, color: Colors.grey.shade800))),
-        Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: valueColor)),
+        Expanded(
+            child: Text(title,
+                style: TextStyle(fontSize: 12, color: context.muted))),
+        Text(value,
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.bold, color: valueColor)),
       ],
     );
   }
@@ -696,13 +690,17 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
           children: [
             Text(
               'Detailed App Usage (${_filteredApps.length})',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             DropdownButton<String>(
               value: _sortBy,
               underline: const SizedBox(),
               icon: const Icon(Icons.sort, size: 18),
-              style: TextStyle(fontSize: 12, color: theme.colorScheme.primary, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold),
               items: const [
                 DropdownMenuItem(value: 'USAGE', child: Text('Most Used')),
                 DropdownMenuItem(value: 'LAUNCHES', child: Text('Most Opened')),
@@ -725,8 +723,11 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                     onPressed: () => setState(() => _searchQuery = ''),
                   )
                 : null,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none),
             filled: true,
           ),
           onChanged: (val) => setState(() => _searchQuery = val),
@@ -769,34 +770,35 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
   Widget _buildAppItemCard(ThemeData theme, AppUsageItem app) {
     final totalScreenTime = _report?.summary.totalScreenTimeSeconds ?? 0;
     final pct = totalScreenTime > 0
-        ? ((app.foregroundTimeSeconds / totalScreenTime) * 100).toStringAsFixed(1)
+        ? ((app.foregroundTimeSeconds / totalScreenTime) * 100)
+            .toStringAsFixed(1)
         : '0';
 
     Color categoryColor;
     IconData categoryIcon;
     switch (app.category.toUpperCase()) {
       case 'GAME':
-        categoryColor = Colors.deepPurple;
+        categoryColor = context.colors.secondary;
         categoryIcon = Icons.sports_esports;
         break;
       case 'SOCIAL':
-        categoryColor = Colors.blue;
+        categoryColor = context.colors.primary;
         categoryIcon = Icons.people;
         break;
       case 'ENTERTAINMENT':
-        categoryColor = Colors.amber.shade800;
+        categoryColor = context.colors.onTertiaryContainer;
         categoryIcon = Icons.movie;
         break;
       case 'EDUCATION':
-        categoryColor = Colors.teal;
+        categoryColor = context.colors.primary;
         categoryIcon = Icons.school;
         break;
       case 'PRODUCTIVITY':
-        categoryColor = Colors.indigo;
+        categoryColor = context.colors.primary;
         categoryIcon = Icons.work;
         break;
       default:
-        categoryColor = Colors.blueGrey;
+        categoryColor = context.muted;
         categoryIcon = Icons.apps;
     }
 
@@ -817,15 +819,23 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                   CircleAvatar(
                     radius: 20,
                     backgroundColor: categoryColor.withValues(alpha: 0.12),
-                    child: Icon(categoryIcon, color: categoryColor, size: 20),
+                    child: AppThumbnail(
+                        encoded: app.iconPngBase64,
+                        fallback: categoryIcon,
+                        color: categoryColor),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(app.appName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                        Text(app.packageName, style: TextStyle(fontSize: 11, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
+                        Text(app.appName,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text(app.packageName,
+                            style:
+                                TextStyle(fontSize: 11, color: context.muted),
+                            overflow: TextOverflow.ellipsis),
                       ],
                     ),
                   ),
@@ -833,15 +843,21 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        app.formattedUsageTime,
+                        _report!.summary.usageAvailable
+                            ? app.formattedUsageTime
+                            : "Unavailable",
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 15,
-                          color: app.foregroundTimeSeconds > 0 ? theme.colorScheme.primary : Colors.grey,
+                          color: app.foregroundTimeSeconds > 0
+                              ? theme.colorScheme.primary
+                              : context.muted,
                         ),
                       ),
                       if (app.foregroundTimeSeconds > 0)
-                        Text('$pct% of screen time', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                        Text('$pct% of screen time',
+                            style:
+                                TextStyle(fontSize: 10, color: context.muted)),
                     ],
                   ),
                 ],
@@ -851,7 +867,8 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
               // Progress Bar
               if (totalScreenTime > 0 && app.foregroundTimeSeconds > 0) ...[
                 LinearProgressIndicator(
-                  value: (app.foregroundTimeSeconds / totalScreenTime).clamp(0.0, 1.0),
+                  value: (app.foregroundTimeSeconds / totalScreenTime)
+                      .clamp(0.0, 1.0),
                   color: categoryColor,
                   backgroundColor: categoryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(3),
@@ -863,16 +880,17 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
               // Metadata Row (Launches, Last Used, Status)
               Row(
                 children: [
-                  Icon(Icons.touch_app, size: 13, color: Colors.grey.shade600),
+                  Icon(Icons.touch_app, size: 13, color: context.muted),
                   const SizedBox(width: 3),
-                  Text('${app.launchCount} opens', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+                  Text('${app.launchCount} opens',
+                      style: TextStyle(fontSize: 11, color: context.muted)),
                   const SizedBox(width: 12),
-                  Icon(Icons.access_time, size: 13, color: Colors.grey.shade600),
+                  Icon(Icons.access_time, size: 13, color: context.muted),
                   const SizedBox(width: 3),
                   Expanded(
                     child: Text(
                       app.formattedLastUsed,
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                      style: TextStyle(fontSize: 11, color: context.muted),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -892,31 +910,34 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
     String label;
 
     if (app.status == 'BLOCKED') {
-      bg = Colors.red.shade50;
-      fg = Colors.red.shade800;
+      bg = context.colors.errorContainer;
+      fg = context.colors.error;
       label = 'BLOCKED';
     } else if (app.isLimitExceeded) {
-      bg = Colors.red.shade100;
-      fg = Colors.red.shade900;
+      bg = context.colors.errorContainer;
+      fg = context.colors.error;
       label = 'LIMIT HIT (${app.dailyLimitMinutes}m)';
     } else if (app.status == 'TIME_LIMITED') {
-      bg = Colors.orange.shade50;
-      fg = Colors.orange.shade900;
+      bg = context.colors.tertiaryContainer;
+      fg = context.colors.onTertiaryContainer;
       label = 'LIMIT: ${app.dailyLimitMinutes}m';
     } else if (app.status == 'SCHEDULED') {
-      bg = Colors.purple.shade50;
-      fg = Colors.purple.shade900;
+      bg = context.colors.secondaryContainer;
+      fg = context.colors.secondary;
       label = 'SCHEDULED';
     } else {
-      bg = Colors.green.shade50;
-      fg = Colors.green.shade800;
+      bg = context.colors.primaryContainer;
+      fg = context.colors.primary;
       label = 'ALLOWED';
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
-      child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fg)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      child: Text(label,
+          style:
+              TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fg)),
     );
   }
 }
@@ -952,14 +973,18 @@ class _MetricCard extends StatelessWidget {
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(
+                      color: bgColor, borderRadius: BorderRadius.circular(8)),
                   child: Icon(icon, size: 18, color: iconColor),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     title,
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: context.muted),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -975,7 +1000,7 @@ class _MetricCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               subtitle,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 11, color: context.muted),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1020,10 +1045,12 @@ class _QuickAppConfigSheetState extends State<_QuickAppConfigSheet> {
         'appName': widget.app.appName,
         'category': widget.app.category,
         'status': _status,
-        'dailyLimitMinutes': _status == 'TIME_LIMITED' ? _dailyMinutes.toInt() : null,
+        'dailyLimitMinutes':
+            _status == 'TIME_LIMITED' ? _dailyMinutes.toInt() : null,
       };
 
-      await ApiService.instance.updateAppPolicy(widget.childId, widget.app.packageName, payload);
+      await ApiService.instance
+          .updateAppPolicy(widget.childId, widget.app.packageName, payload);
       if (mounted) {
         Navigator.pop(context);
         widget.onUpdated();
@@ -1034,7 +1061,9 @@ class _QuickAppConfigSheetState extends State<_QuickAppConfigSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Failed to update: $e'),
+              backgroundColor: context.colors.error),
         );
       }
     } finally {
@@ -1066,21 +1095,27 @@ class _QuickAppConfigSheetState extends State<_QuickAppConfigSheet> {
                     children: [
                       Text(
                         widget.app.appName,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       Text(
                         'Today: ${widget.app.formattedUsageTime} • ${widget.app.launchCount} opens',
-                        style: const TextStyle(fontSize: 12, color: Colors.blue),
+                        style: TextStyle(
+                            fontSize: 12, color: context.colors.primary),
                       ),
                     ],
                   ),
                 ),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context)),
               ],
             ),
             const Divider(height: 20),
-
-            const Text('Access Rule:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Access Rule:',
+                style: TextStyle(fontWeight: FontWeight.bold)),
             const RadioListTile<String>(
               title: Text('Always Allowed'),
               value: 'ALWAYS_ALLOWED',
@@ -1101,7 +1136,9 @@ class _QuickAppConfigSheetState extends State<_QuickAppConfigSheet> {
                         const Text('Daily Limit:'),
                         Text(
                           '${_dailyMinutes.toInt()} min (${(_dailyMinutes / 60).toStringAsFixed(1)} hrs)',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: context.colors.primary),
                         ),
                       ],
                     ),
@@ -1121,13 +1158,14 @@ class _QuickAppConfigSheetState extends State<_QuickAppConfigSheet> {
               subtitle: Text('Lock this app completely'),
               value: 'BLOCKED',
             ),
-
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: _saving ? null : _save,
-                child: _saving ? const CircularProgressIndicator(color: Colors.white) : const Text('Save Rule'),
+                child: _saving
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text('Save Rule'),
               ),
             ),
           ],

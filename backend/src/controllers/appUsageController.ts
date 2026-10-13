@@ -1,3 +1,5 @@
+import { dateInZone } from "../services/calendar";
+import { retentionExpiry } from "../services/retention";
 import { Response } from "express";
 import { asyncHandler, AppError } from "../utils/http";
 import { AuthedRequest } from "../middleware/auth";
@@ -8,16 +10,8 @@ import { AppPolicy, AppCategory } from "../models/AppPolicy";
 import { Device } from "../models/Device";
 import { User } from "../models/User";
 import { getIO } from "../socket/io";
-import { getChildSocketIds, getParentSocketIds, getAllParentSocketIds } from "../socket/presence";
+import { getChildSocketIds, getParentSocketIds } from "../socket/presence";
 import { syncAppUsageReportSchema, usageReportQuerySchema } from "../utils/validation";
-
-function getTodayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 // POST /api/children/:childId/usage/sync (Child or Parent)
 export const syncDailyUsage = asyncHandler(async (req: AuthedRequest, res: Response) => {
@@ -34,8 +28,8 @@ export const syncDailyUsage = asyncHandler(async (req: AuthedRequest, res: Respo
   const device = await Device.findOne({ childId }).sort({ updatedAt: -1 }).lean();
 
   // Calculate or ensure category breakdown
-  let categoryBreakdown = data.categoryBreakdown;
-  if (!categoryBreakdown || categoryBreakdown.length === 0) {
+  let categoryBreakdown;
+  {
     const categoryTotals: Record<AppCategory, number> = {
       GAME: 0,
       SOCIAL: 0,
@@ -78,9 +72,12 @@ export const syncDailyUsage = asyncHandler(async (req: AuthedRequest, res: Respo
         childId,
         deviceId: device?._id ?? null,
         date: data.date,
-        totalScreenTimeSeconds: data.totalScreenTimeSeconds,
-        totalDowntimeSeconds: data.totalDowntimeSeconds,
-        screenOffTimeSeconds: data.screenOffTimeSeconds,
+        totalScreenTimeSeconds: data.apps.reduce((total, app) => total + app.foregroundTimeSeconds, 0),
+        totalDowntimeSeconds: data.metricsVersion === 2 ? data.totalDowntimeSeconds : null,
+        screenOffTimeSeconds: data.metricsVersion === 2 ? data.screenOffTimeSeconds : null,
+        metricsVersion: data.metricsVersion,
+        usageAvailable: data.usageAvailable,
+        timeZone: data.timeZone,
         isDevicePaused: data.isDevicePaused,
         activeScheduleDowntime: data.activeScheduleDowntime ?? null,
         blockedAttemptsCount: data.blockedAttemptsCount,
@@ -89,6 +86,7 @@ export const syncDailyUsage = asyncHandler(async (req: AuthedRequest, res: Respo
         categoryBreakdown,
         hourlyUsage: data.hourlyUsage ?? [],
         lastSyncedAt: new Date(),
+        expiresAt: retentionExpiry("USAGE"),
       },
     },
     { new: true, upsert: true }
@@ -100,7 +98,7 @@ export const syncDailyUsage = asyncHandler(async (req: AuthedRequest, res: Respo
     const child = await User.findById(childId).select("parentId").lean();
     const parentSocketIds = child?.parentId
       ? getParentSocketIds(String(child.parentId))
-      : getAllParentSocketIds();
+      : [];
 
     for (const parentSocketId of parentSocketIds) {
       io.to(parentSocketId).emit("usage_updated", {
@@ -109,7 +107,7 @@ export const syncDailyUsage = asyncHandler(async (req: AuthedRequest, res: Respo
         report,
       });
     }
-  } catch {}
+  } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
 
   res.json({ success: true, report });
 });
@@ -124,11 +122,12 @@ export const getTodayUsageReport = asyncHandler(async (req: AuthedRequest, res: 
   }
 
   const query = usageReportQuerySchema.parse(req.query);
-  const targetDate = query.date || getTodayDateString();
+  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 }).lean();
+  const targetDate = query.date || dateInZone(new Date(), query.timeZone ?? device?.timeZone ?? "UTC");
 
   const report = await AppUsageReport.findOne({ childId, date: targetDate }).lean();
-  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 }).lean();
   const installedApps = await InstalledApp.find({ childId }).sort({ appName: 1 }).lean();
+  const icons = new Map(installedApps.map((app) => [app.packageName, app.iconPngBase64]));
   const policies = await AppPolicy.find({ childId }).lean();
   const policyMap = new Map(policies.map((p) => [p.packageName, p]));
 
@@ -147,6 +146,7 @@ export const getTodayUsageReport = asyncHandler(async (req: AuthedRequest, res: 
     const pol = policyMap.get(recorded.packageName);
     combinedApps.push({
       packageName: recorded.packageName,
+      iconPngBase64: icons.get(recorded.packageName),
       appName: recorded.appName,
       category: (pol?.category || recorded.category || "OTHER") as AppCategory,
       foregroundTimeSeconds: recorded.foregroundTimeSeconds || 0,
@@ -164,6 +164,7 @@ export const getTodayUsageReport = asyncHandler(async (req: AuthedRequest, res: 
       const pol = policyMap.get(app.packageName);
       combinedApps.push({
         packageName: app.packageName,
+        iconPngBase64: app.iconPngBase64,
         appName: app.appName,
         category: (pol?.category || app.category || "OTHER") as AppCategory,
         foregroundTimeSeconds: 0,
@@ -190,12 +191,8 @@ export const getTodayUsageReport = asyncHandler(async (req: AuthedRequest, res: 
   const totalScreenTimeSeconds = report?.totalScreenTimeSeconds ??
     combinedApps.reduce((acc, app) => acc + app.foregroundTimeSeconds, 0);
 
-  // Calculate total seconds elapsed today
-  const now = new Date();
-  const elapsedDaySeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-  const totalDowntimeSeconds = report?.totalDowntimeSeconds ??
-    Math.max(0, elapsedDaySeconds - totalScreenTimeSeconds);
-  const screenOffTimeSeconds = report?.screenOffTimeSeconds ?? totalDowntimeSeconds;
+  const totalDowntimeSeconds = report?.metricsVersion === 2 ? report.totalDowntimeSeconds : null;
+  const screenOffTimeSeconds = report?.metricsVersion === 2 ? report.screenOffTimeSeconds : null;
 
   // Most used app
   const mostUsedApp = combinedApps.length > 0 && combinedApps[0].foregroundTimeSeconds > 0
@@ -246,9 +243,13 @@ export const getTodayUsageReport = asyncHandler(async (req: AuthedRequest, res: 
   const responsePayload = {
     date: targetDate,
     childId,
-    lastSyncedAt: report?.lastSyncedAt ?? device?.lastSeen ?? new Date(),
+    lastSyncedAt: report?.lastSyncedAt ?? null,
+    dataAvailable: report?.metricsVersion === 2 && report.usageAvailable === true,
+    timeZone: report?.timeZone ?? query.timeZone ?? device?.timeZone ?? "UTC",
+    metricsVersion: report?.metricsVersion ?? 1,
     summary: {
       totalScreenTimeSeconds,
+      usageAvailable: report?.metricsVersion === 2 && report.usageAvailable === true,
       totalDowntimeSeconds,
       screenOffTimeSeconds,
       isDevicePaused,
@@ -267,7 +268,7 @@ export const getTodayUsageReport = asyncHandler(async (req: AuthedRequest, res: 
           id: device._id,
           deviceName: device.deviceName,
           platform: device.platform,
-          status: device.status,
+          status: getChildSocketIds(childId).length ? "ONLINE" : "OFFLINE",
           isPaused: device.isPaused,
           lastSeen: device.lastSeen,
         }
@@ -285,6 +286,7 @@ export const requestUsageSync = asyncHandler(async (req: AuthedRequest, res: Res
   const socketIds = getChildSocketIds(childId);
   const isOnline = socketIds.length > 0;
 
+  if (!isOnline) throw new AppError("Child device is offline", 409);
   if (isOnline) {
     try {
       const io = getIO();
@@ -294,7 +296,7 @@ export const requestUsageSync = asyncHandler(async (req: AuthedRequest, res: Res
           requestedAt: new Date().toISOString(),
         });
       }
-    } catch {}
+    } catch { console.error("[socket] update delivery unavailable; clients must resynchronize"); }
   }
 
   res.json({

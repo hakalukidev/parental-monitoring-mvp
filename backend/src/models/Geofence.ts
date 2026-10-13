@@ -17,6 +17,7 @@ export interface IGeofence extends Document {
   triggerType: GeofenceTriggerType;
   isEnabled: boolean;
   colorHex?: string;
+  timeZone?: string;
   lastState: GeofenceState;
   lastStateChangedAt?: Date;
   lastTriggeredAt?: Date;
@@ -41,6 +42,7 @@ const geofenceSchema = new Schema<IGeofence>(
     zoneType: { type: String, enum: ["SAFE_ZONE", "RESTRICTED_ZONE"], default: "SAFE_ZONE" },
     triggerType: { type: String, enum: ["EXIT", "ENTRY", "BOTH"], default: "EXIT" },
     isEnabled: { type: Boolean, default: true, index: true },
+    timeZone: { type: String, default: null },
     colorHex: { type: String, default: "#2196F3" },
     lastState: { type: String, enum: ["INSIDE", "OUTSIDE", "UNKNOWN"], default: "UNKNOWN" },
     lastStateChangedAt: { type: Date, default: null },

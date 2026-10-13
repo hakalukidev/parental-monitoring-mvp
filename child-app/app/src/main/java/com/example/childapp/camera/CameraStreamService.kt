@@ -13,6 +13,8 @@ import com.example.childapp.data.SessionStore
 import com.example.childapp.service.ChildMonitoringService
 import com.example.childapp.socket.SocketManager
 import com.example.childapp.webrtc.CameraWebRtcManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import org.webrtc.PeerConnection
 import java.util.concurrent.atomic.AtomicBoolean
@@ -39,16 +41,19 @@ class CameraStreamService : Service() {
         val token = intent?.getStringExtra(EXTRA_ACCESS_TOKEN)
         val sid = intent?.getStringExtra(EXTRA_SESSION_ID)
         val cameraFacing = intent?.getStringExtra(EXTRA_CAMERA_FACING) ?: "BACK"
-        val withAudio = intent?.getBooleanExtra(EXTRA_WITH_AUDIO, true) ?: true
+        val withAudio = intent?.getBooleanExtra(EXTRA_WITH_AUDIO, false) ?: false
 
         if (token == null || sid == null) {
             stopSelf()
             return START_NOT_STICKY
         }
 
+        audioEnabled = withAudio
         sessionId = sid
         currentSessionId = sid
         isSessionRunning.set(true)
+        currentSessionId = sid
+        statusState.value = "CONNECTING"
         isStopping.set(false)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -61,15 +66,8 @@ class CameraStreamService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
 
-        val activeSock = ChildMonitoringService.activeSocket
-        val isShared = activeSock != null && activeSock.isConnected
-        val socket = if (isShared) {
-            Log.i(TAG, "Reusing persistent connected socket from ChildMonitoringService")
-            activeSock!!
-        } else {
-            Log.i(TAG, "Creating dedicated socket connection")
-            SocketManager(token).also { socketManager = it }
-        }
+        val socket = SocketManager(token).also { socketManager = it }
+        socket.onDisconnected = { android.os.Handler(android.os.Looper.getMainLooper()).post { stopStreaming() } }
 
         socket.onCameraStreamStopped = { stoppedId ->
             if (stoppedId == sessionId) stopStreaming()
@@ -80,37 +78,42 @@ class CameraStreamService : Service() {
             }
         }
         socket.onWebrtcAnswer = { sdpSessionId, sdp ->
-            Log.i(TAG, "Received onWebrtcAnswer for session $sdpSessionId")
+            Log.i(TAG, "Received onWebrtcAnswer")
             if (sdpSessionId == sessionId) cameraWebRtcManager?.applyRemoteAnswer(sdp)
         }
         socket.onIceCandidate = { iceSessionId, candidate ->
-            Log.i(TAG, "Received onIceCandidate for session $iceSessionId")
+            Log.i(TAG, "Received onIceCandidate")
             if (iceSessionId == sessionId) cameraWebRtcManager?.addRemoteIceCandidate(candidate)
         }
 
         val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        ) + getFallbackTurnServers()
+        )
 
         val webRtc = CameraWebRtcManager(
             context = applicationContext,
             onLocalOffer = { sdp ->
-                Log.i(TAG, "Sending local WebRTC offer for session $sid")
+                Log.i(TAG, "Sending local WebRTC offer")
                 socket.sendOffer(sid, sdp)
             },
             onIceCandidate = { candidate ->
-                Log.i(TAG, "Sending local ICE candidate for session $sid")
+                Log.i(TAG, "Sending local ICE candidate")
                 socket.sendIceCandidate(sid, candidate)
             },
             onStateChange = { state ->
+                if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                    statusState.value = "LIVE"
+                    socket.notifyMediaConnected(sid)
+                }
                 Log.d(TAG, "Camera WebRTC state changed: $state")
                 if (state == PeerConnection.PeerConnectionState.CLOSED ||
-                    state == PeerConnection.PeerConnectionState.FAILED
+                    state == PeerConnection.PeerConnectionState.FAILED ||
+                    state == PeerConnection.PeerConnectionState.DISCONNECTED
                 ) {
                     if (!isStopping.get()) {
                         Log.i(TAG, "Stopping camera stream due to connection state: $state")
-                        stopStreaming()
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { stopStreaming() }
                     }
                 }
             },
@@ -123,14 +126,15 @@ class CameraStreamService : Service() {
         webRtc.init()
 
         fun beginCapture(iceServers: List<PeerConnection.IceServer>) {
+            if (isStopping.get()) return
             Log.i(TAG, "Beginning WebRTC camera capture with ${iceServers.size} ICE servers")
-            socket.joinSession(sid)
-            socket.acceptCameraStream(sid)
-            webRtc.startStreaming(
-                cameraFacing = cameraFacing,
-                withAudio = withAudio,
-                iceServers = iceServers
-            )
+            socket.acceptCameraStream(sid) { accepted ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (!accepted) stopStreaming()
+                    else if (!isStopping.get()) try { webRtc.startStreaming(cameraFacing = cameraFacing, withAudio = withAudio, iceServers = iceServers) } catch (_: Exception) { stopStreaming() }
+                }
+            }
+
         }
 
         // Fetch server ICE configuration asynchronously in background thread
@@ -163,12 +167,16 @@ class CameraStreamService : Service() {
             }
         }.start()
 
-        return START_STICKY
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (currentSessionId == sid && statusState.value != "LIVE") stopStreaming()
+        }, 45_000)
+        return START_NOT_STICKY
     }
 
     private fun stopStreaming() {
         if (isStopping.getAndSet(true)) return
         isSessionRunning.set(false)
+        statusState.value = "OFF"
         currentSessionId = null
         val sid = sessionId
         sessionId = null
@@ -232,49 +240,24 @@ class CameraStreamService : Service() {
             .build()
     }
 
-    private fun getFallbackTurnServers(): List<PeerConnection.IceServer> {
-        return listOf(
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer()
-        )
-    }
-
     private fun parseIceServers(config: JSONObject): List<PeerConnection.IceServer> {
         val arr = config.optJSONArray("iceServers") ?: org.json.JSONArray()
         val list = mutableListOf<PeerConnection.IceServer>()
-        var hasTurn = false
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             val urlStr = obj.optString("urls")
-            if (urlStr.startsWith("turn:") || urlStr.startsWith("turns:")) {
-                hasTurn = true
-            }
             val builder = PeerConnection.IceServer.builder(urlStr)
             if (obj.has("username")) builder.setUsername(obj.optString("username"))
             if (obj.has("credential")) builder.setPassword(obj.optString("credential"))
             list.add(builder.createIceServer())
         }
-        if (!hasTurn) {
-            list.addAll(getFallbackTurnServers())
-        }
         return list
     }
 
     companion object {
+        @Volatile var audioEnabled = false
+        private val statusState = MutableStateFlow("OFF")
+        val status = statusState.asStateFlow()
         private const val TAG = "CameraStreamService"
         val isSessionRunning = AtomicBoolean(false)
         @Volatile var currentSessionId: String? = null
@@ -290,7 +273,7 @@ class CameraStreamService : Service() {
             accessToken: String,
             sessionId: String,
             cameraFacing: String = "BACK",
-            withAudio: Boolean = true
+            withAudio: Boolean = false
         ) {
             currentSessionId = sessionId
             val intent = Intent(context, CameraStreamService::class.java).apply {
@@ -307,10 +290,7 @@ class CameraStreamService : Service() {
         }
 
         fun stop(context: Context) {
-            isSessionRunning.set(false)
-            currentSessionId = null
-            val intent = Intent(context, CameraStreamService::class.java).apply { action = ACTION_STOP }
-            context.startService(intent)
+            context.stopService(Intent(context, CameraStreamService::class.java))
         }
     }
 }

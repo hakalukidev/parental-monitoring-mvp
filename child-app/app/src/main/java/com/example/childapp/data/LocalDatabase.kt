@@ -53,10 +53,11 @@ data class CachedGeofence(
 
 class LocalDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
+    private val appContext = context.applicationContext
 
     companion object {
         private const val DATABASE_NAME = "child_monitoring.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 6
 
         @Volatile
         private var instance: LocalDatabase? = null
@@ -69,9 +70,10 @@ class LocalDatabase private constructor(context: Context) :
     }
 
     override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS pending_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)")
         db.execSQL(
             """
-            CREATE TABLE app_policies (
+            CREATE TABLE IF NOT EXISTS app_policies (
                 package_name TEXT PRIMARY KEY,
                 app_name TEXT,
                 category TEXT,
@@ -85,7 +87,7 @@ class LocalDatabase private constructor(context: Context) :
 
         db.execSQL(
             """
-            CREATE TABLE web_rules (
+            CREATE TABLE IF NOT EXISTS web_rules (
                 id TEXT PRIMARY KEY,
                 rule_type TEXT,
                 target TEXT,
@@ -97,7 +99,7 @@ class LocalDatabase private constructor(context: Context) :
 
         db.execSQL(
             """
-            CREATE TABLE browsing_history (
+            CREATE TABLE IF NOT EXISTS browsing_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT,
                 domain TEXT,
@@ -115,16 +117,18 @@ class LocalDatabase private constructor(context: Context) :
 
         db.execSQL(
             """
-            CREATE TABLE unblock_grants (
+            CREATE TABLE IF NOT EXISTS unblock_grants (
                 package_name TEXT PRIMARY KEY,
-                expires_at INTEGER
+                expires_at INTEGER,
+                expires_elapsed INTEGER,
+                boot_count INTEGER
             )
             """.trimIndent()
         )
 
         db.execSQL(
             """
-            CREATE TABLE device_state (
+            CREATE TABLE IF NOT EXISTS device_state (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
@@ -133,7 +137,7 @@ class LocalDatabase private constructor(context: Context) :
 
         db.execSQL(
             """
-            CREATE TABLE geofences (
+            CREATE TABLE IF NOT EXISTS geofences (
                 id TEXT PRIMARY KEY,
                 name TEXT,
                 latitude REAL,
@@ -149,7 +153,7 @@ class LocalDatabase private constructor(context: Context) :
 
         db.execSQL(
             """
-            CREATE TABLE blocked_events (
+            CREATE TABLE IF NOT EXISTS blocked_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 package_name TEXT,
                 app_name TEXT,
@@ -161,14 +165,31 @@ class LocalDatabase private constructor(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS app_policies")
-        db.execSQL("DROP TABLE IF EXISTS web_rules")
-        db.execSQL("DROP TABLE IF EXISTS browsing_history")
-        db.execSQL("DROP TABLE IF EXISTS unblock_grants")
-        db.execSQL("DROP TABLE IF EXISTS device_state")
-        db.execSQL("DROP TABLE IF EXISTS geofences")
-        db.execSQL("DROP TABLE IF EXISTS blocked_events")
-        onCreate(db)
+        onCreate(db) // All CREATE statements are additive and idempotent.
+        val columns = mutableSetOf<String>()
+        db.rawQuery("PRAGMA table_info(unblock_grants)", null).use { c -> while (c.moveToNext()) columns.add(c.getString(1)) }
+        if ("expires_elapsed" !in columns) db.execSQL("ALTER TABLE unblock_grants ADD COLUMN expires_elapsed INTEGER")
+        if ("boot_count" !in columns) db.execSQL("ALTER TABLE unblock_grants ADD COLUMN boot_count INTEGER")
+    }
+    @Synchronized fun queueLocation(payload: JSONObject) {
+        writableDatabase.insert("pending_locations", null, ContentValues().apply { put("payload", payload.toString()) })
+        // Bound offline storage; retain the latest 2,000 fixes.
+        writableDatabase.execSQL("DELETE FROM pending_locations WHERE id NOT IN (SELECT id FROM pending_locations ORDER BY id DESC LIMIT 2000)")
+    }
+    @Synchronized fun pendingLocations(): List<Pair<Long, JSONObject>> {
+        val result = mutableListOf<Pair<Long, JSONObject>>()
+        readableDatabase.rawQuery("SELECT id, payload FROM pending_locations ORDER BY id ASC LIMIT 100", null).use { c -> while (c.moveToNext()) result.add(c.getLong(0) to JSONObject(c.getString(1))) }
+        return result
+    }
+    @Synchronized fun markLocationsSynced(ids: List<Long>) {
+        for (id in ids) writableDatabase.delete("pending_locations", "id = ?", arrayOf(id.toString()))
+    }
+    @Synchronized fun clearAccountData() {
+        val db = writableDatabase; db.beginTransaction()
+        try {
+            for (table in listOf("app_policies", "web_rules", "browsing_history", "unblock_grants", "device_state", "geofences", "blocked_events", "pending_locations")) db.delete(table, null, null)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     // ==========================================
@@ -200,11 +221,13 @@ class LocalDatabase private constructor(context: Context) :
     // ==========================================
     @Synchronized
     fun grantTemporaryUnblock(packageName: String, durationMinutes: Int) {
-        val expiresAt = System.currentTimeMillis() + (durationMinutes * 60 * 1000L)
+        val expiresAt = System.currentTimeMillis() + (durationMinutes.coerceIn(1, 120) * 60 * 1000L)
         val db = writableDatabase
         val cv = ContentValues().apply {
             put("package_name", packageName)
             put("expires_at", expiresAt)
+            put("expires_elapsed", android.os.SystemClock.elapsedRealtime() + durationMinutes.coerceIn(1, 120) * 60_000L)
+            put("boot_count", android.provider.Settings.Global.getInt(appContext.contentResolver, "boot_count", -1))
         }
         db.insertWithOnConflict("unblock_grants", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -214,12 +237,12 @@ class LocalDatabase private constructor(context: Context) :
         val now = System.currentTimeMillis()
         val db = readableDatabase
         db.rawQuery(
-            "SELECT expires_at FROM unblock_grants WHERE package_name = ?",
+            "SELECT expires_at, expires_elapsed, boot_count FROM unblock_grants WHERE package_name = ?",
             arrayOf(packageName)
         ).use { cursor ->
             if (cursor.moveToFirst()) {
                 val expiresAt = cursor.getLong(0)
-                return expiresAt > now
+                return expiresAt > now && !cursor.isNull(1) && cursor.getLong(1) > android.os.SystemClock.elapsedRealtime() && !cursor.isNull(2) && cursor.getInt(2) == android.provider.Settings.Global.getInt(appContext.contentResolver, "boot_count", -1)
             }
         }
         return false
@@ -395,11 +418,13 @@ class LocalDatabase private constructor(context: Context) :
     // ==========================================
     @Synchronized
     fun insertBrowsingHistory(entry: CachedBrowsingHistory): Long {
+        if (entry.isIncognito) return -1L
+        val safeUrl = entry.url.replace(Regex("^(https?://)[^/@]*@"), "$1").substringBefore('?').substringBefore('#')
         val db = writableDatabase
         val cv = ContentValues().apply {
-            put("url", entry.url)
+            put("url", safeUrl)
             put("domain", entry.domain)
-            put("title", entry.title)
+            put("title", entry.title.take(300))
             put("browser", entry.browser)
             put("is_incognito", if (entry.isIncognito) 1 else 0)
             put("category", entry.category)
@@ -445,7 +470,7 @@ class LocalDatabase private constructor(context: Context) :
         if (ids.isEmpty()) return
         val db = writableDatabase
         val inClause = ids.joinToString(",") { it.toString() }
-        db.execSQL("UPDATE browsing_history SET is_synced = 1 WHERE id IN ($inClause)")
+        db.execSQL("DELETE FROM browsing_history WHERE id IN ($inClause)")
     }
 
     // ==========================================

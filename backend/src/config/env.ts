@@ -1,9 +1,10 @@
+import { retentionExpiry } from "../services/retention";
 import dotenv from "dotenv";
 dotenv.config();
 
 function required(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
-  if (v === undefined) {
+  if (v === undefined || !v.trim()) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return v;
@@ -21,7 +22,7 @@ export const env = {
 
   jwtAccessSecret: required("JWT_ACCESS_SECRET"),
   jwtRefreshSecret: required("JWT_REFRESH_SECRET"),
-  jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "7d",
+  jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
 
   sessionTokenSecret: required("SESSION_TOKEN_SECRET"),
@@ -36,3 +37,15 @@ export const env = {
   turnUsername: process.env.TURN_USERNAME,
   turnCredential: process.env.TURN_CREDENTIAL,
 };
+
+
+if (!Number.isInteger(env.port) || env.port < 1 || env.port > 65535) throw new Error("Invalid PORT");
+if (env.nodeEnv === "production") {
+  required("MONGO_URI"); required("CORS_ORIGINS");
+  const secrets = [env.jwtAccessSecret, env.jwtRefreshSecret, env.sessionTokenSecret];
+  if (secrets.some((s) => s.length < 32 || /replace|change.?me|example/i.test(s)) || new Set(secrets).size !== secrets.length) throw new Error("Production requires distinct strong authentication secrets");
+  if (env.corsOrigins.some((o) => !o.startsWith("https://") || o.includes("*"))) throw new Error("Production CORS origins must be explicit HTTPS origins");
+}
+if (env.turnUrl && (!env.turnUsername || !env.turnCredential)) throw new Error("TURN requires runtime credentials");
+
+for (const kind of ["LOCATION", "BROWSING", "USAGE"] as const) retentionExpiry(kind);

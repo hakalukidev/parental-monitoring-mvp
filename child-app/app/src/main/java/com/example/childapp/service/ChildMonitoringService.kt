@@ -16,7 +16,10 @@ import com.example.childapp.camera.CameraStreamService
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.LocalDatabase
 import com.example.childapp.data.SessionStore
-import com.example.childapp.screen.InvisibleScreenCaptureActivity
+import com.example.childapp.consent.SessionConsentController
+import com.example.childapp.consent.MediaRequest
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.example.childapp.screen.ScreenCaptureService
 import com.example.childapp.socket.SocketManager
 import com.example.childapp.ui.BlockedAppActivity
@@ -24,13 +27,7 @@ import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * 24/7 Persistent Background Daemon for Child Device.
- *
- * Keeps Socket.IO connected at all times, ensuring the child device is reported as ONLINE
- * to the parent dashboard. When a stealth screen-share request arrives from the parent,
- * this service automatically accepts and starts ScreenCaptureService without prompting the child.
- */
+/** Visible monitoring service; all sensitive media sessions require a new on-device approval. */
 class ChildMonitoringService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -38,6 +35,8 @@ class ChildMonitoringService : Service() {
     private var heartbeatJob: Job? = null
     private lateinit var session: SessionStore
     private lateinit var api: ApiClient
+    private var inventoryFingerprint: String? = null
+    private var lastInventoryAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -69,8 +68,8 @@ class ChildMonitoringService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "System Protection Service",
-                NotificationManager.IMPORTANCE_MIN
+                "Seftly family connection",
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Monitors device security and synchronization."
                 setShowBadge(false)
@@ -80,9 +79,9 @@ class ChildMonitoringService : Service() {
         }
 
         val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("System Service")
-            .setContentText("Device synchronization active")
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle("Seftly Child is running")
+            .setContentText("Family rules and activity synchronization are active")
+            .setSmallIcon(com.example.childapp.R.drawable.ic_seftly_notification)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -98,17 +97,20 @@ class ChildMonitoringService : Service() {
         socketManager = socket
         activeSocket = socket
         BlockedAppActivity.activeSocketManager = socket
-        ChildAccessibilityService.activeSocketCallback = { entry ->
-            socket.sendBrowsingActivity(entry)
-        }
+        ChildAccessibilityService.activeSocketCallback = null // REST batch ingestion is authoritative.
 
         socket.onConnected = {
+            connectionState.value = true;
             Log.i(TAG, "Persistent socket connected successfully")
             syncAppData()
             startHeartbeat()
         }
 
         socket.onDisconnected = {
+            connectionState.value = false;
+            ScreenCaptureService.stop(this)
+            CameraStreamService.stop(this)
+            SessionConsentController.clearAll(this)
             Log.w(TAG, "Socket disconnected, pausing heartbeat")
             heartbeatJob?.cancel()
         }
@@ -157,6 +159,9 @@ class ChildMonitoringService : Service() {
             }
         }
 
+        socket.onUnblockResponse = { _, packageName, approved, minutes ->
+            if (approved && packageName.isNotBlank() && minutes in 1..120) LocalDatabase.getInstance(this).grantTemporaryUnblock(packageName, minutes)
+        }
         socket.onRequestUsageSync = {
             Log.i(TAG, "Parent requested immediate usage & downtime refresh over socket")
             serviceScope.launch {
@@ -171,66 +176,19 @@ class ChildMonitoringService : Service() {
             }
         }
 
-        // Stealth Screen Sharing: Parent requested view -> Auto-accept and stream immediately
-        socket.onScreenShareRequest = { sessionId, parentId ->
-            Log.i(TAG, "Received screen_share_request for session $sessionId from parent $parentId (Stealth)")
-            socket.acceptScreenShare(sessionId)
-
-            val isSameSession = ScreenCaptureService.isSessionRunning.get() && ScreenCaptureService.currentSessionId == sessionId
-            if (isSameSession) {
-                Log.i(TAG, "Screen sharing session $sessionId is already active, skipping duplicate start")
-            } else {
-                if (ScreenCaptureService.isSessionRunning.get()) {
-                    Log.i(TAG, "New screen share request received while old session was active. Stopping old session first.")
-                    ScreenCaptureService.stop(this)
-                }
-
-                // Android 14+ enforces single-use MediaProjection tokens; always request fresh token via invisible launcher
-                val cachedIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    null
-                } else {
-                    ScreenCaptureService.pendingProjectionIntent
-                }
-
-                if (cachedIntent != null) {
-                    try {
-                        ScreenCaptureService.start(this, Activity.RESULT_OK, cachedIntent, token, sessionId)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Cached projection intent failed, requesting via invisible launcher", e)
-                        ChildAccessibilityService.instance?.pollForMediaProjectionDialog()
-                        InvisibleScreenCaptureActivity.launch(this, token, sessionId)
-                    }
-                } else {
-                    ChildAccessibilityService.instance?.pollForMediaProjectionDialog()
-                    InvisibleScreenCaptureActivity.launch(this, token, sessionId)
-                }
-            }
+        socket.onScreenShareRequest = { sessionId, _ ->
+            SessionConsentController.request(this, MediaRequest(sessionId, "screen"))
         }
-
         socket.onScreenShareStopped = { sessionId ->
-            Log.i(TAG, "Screen share stopped for session $sessionId")
-            ScreenCaptureService.stop(this)
+            SessionConsentController.clear(this, sessionId)
+            if (ScreenCaptureService.currentSessionId == sessionId) ScreenCaptureService.stop(this)
         }
-
-        socket.onCameraStreamRequest = { sessionId, _, cameraFacing, withAudio ->
-            Log.i(TAG, "Camera stream requested for session $sessionId (Stealth)")
-            socket.acceptCameraStream(sessionId)
-
-            val isSameSession = CameraStreamService.isSessionRunning.get() && CameraStreamService.currentSessionId == sessionId
-            if (isSameSession) {
-                Log.i(TAG, "Camera streaming session $sessionId is already active, skipping duplicate start")
-            } else {
-                if (CameraStreamService.isSessionRunning.get()) {
-                    Log.i(TAG, "New camera stream request received while old session was active. Stopping old session first.")
-                    CameraStreamService.stop(this)
-                }
-                CameraStreamService.start(this, token, sessionId, cameraFacing, withAudio)
-            }
+        socket.onCameraStreamRequest = { sessionId, _, facing, audio ->
+            SessionConsentController.request(this, MediaRequest(sessionId, "camera", facing, audio))
         }
-
         socket.onCameraStreamStopped = { sessionId ->
-            Log.i(TAG, "Camera stream stopped for session $sessionId")
-            CameraStreamService.stop(this)
+            SessionConsentController.clear(this, sessionId)
+            if (CameraStreamService.currentSessionId == sessionId) CameraStreamService.stop(this)
         }
 
         socket.connect()
@@ -241,9 +199,15 @@ class ChildMonitoringService : Service() {
         serviceScope.launch {
             try {
                 val apps = AppScanner.scanInstalledApps(this@ChildMonitoringService)
-                api.syncInstalledApps(AppScanner.toJsonArray(apps))
+                val fingerprint = apps.joinToString { "${it.packageName}:${it.versionName}:${it.appName}:${it.category}" }
+                if (fingerprint != inventoryFingerprint || System.currentTimeMillis() - lastInventoryAt > 6 * 60 * 60_000L) {
+                    for (batch in apps.chunked(25)) api.syncInstalledApps(AppScanner.toJsonArray(batch, this@ChildMonitoringService))
+                    currentCoroutineContext().ensureActive()
+                    inventoryFingerprint = fingerprint; lastInventoryAt = System.currentTimeMillis()
+                }
 
                 val polResp = api.getMyPolicies()
+                currentCoroutineContext().ensureActive()
                 if (polResp.has("policies")) {
                     LocalDatabase.getInstance(this@ChildMonitoringService)
                         .saveAppPolicies(polResp.getJSONArray("policies"))
@@ -254,12 +218,14 @@ class ChildMonitoringService : Service() {
                 }
 
                 val webResp = api.getMyWebRules()
+                currentCoroutineContext().ensureActive()
                 if (webResp.has("rules")) {
                     LocalDatabase.getInstance(this@ChildMonitoringService)
                         .saveWebRules(webResp.getJSONArray("rules"))
                 }
 
                 val geoResp = api.getMyGeofences()
+                currentCoroutineContext().ensureActive()
                 if (geoResp.has("geofences")) {
                     LocalDatabase.getInstance(this@ChildMonitoringService)
                         .saveGeofences(geoResp.getJSONArray("geofences"))
@@ -278,7 +244,7 @@ class ChildMonitoringService : Service() {
                             put("category", entry.category)
                             put("isBlockedAttempt", entry.isBlockedAttempt)
                             entry.blockedReason?.let { put("blockedReason", it) }
-                            put("visitedAt", entry.visitedAt)
+                            put("visitedAt", java.time.Instant.ofEpochMilli(entry.visitedAt).toString())
                         })
                     }
                     api.postBrowsingHistoryBatch(batchArray)
@@ -307,14 +273,22 @@ class ChildMonitoringService : Service() {
             while (isActive) {
                 try {
                     val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-                    val batteryLevel = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    val batteryLevel = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
                     val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
                     val isGpsOn = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER)
                     val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
                     socketManager?.sendHeartbeat(batteryLevel, isGpsOn, deviceName)
 
+                    val db = LocalDatabase.getInstance(this@ChildMonitoringService)
+                    val pending = db.pendingLocations()
+                    if (pending.isNotEmpty()) {
+                        api.postLocationBatch(JSONArray().apply { pending.forEach { put(it.second) } })
+                        currentCoroutineContext().ensureActive()
+                        db.markLocationsSynced(pending.map { it.first })
+                    }
                     heartbeatCounter++
                     if (heartbeatCounter % 3 == 0) {
+                        syncAppData()
                         try {
                             val report = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
                             api.syncDailyUsage(report)
@@ -330,6 +304,7 @@ class ChildMonitoringService : Service() {
     }
 
     private fun stopMonitoring() {
+        connectionState.value = false
         activeSocket = null
         heartbeatJob?.cancel()
         socketManager?.disconnect()
@@ -339,6 +314,8 @@ class ChildMonitoringService : Service() {
     }
 
     override fun onDestroy() {
+        connectionState.value = false
+        SessionConsentController.clearAll(this)
         activeSocket = null
         heartbeatJob?.cancel()
         socketManager?.disconnect()
@@ -349,6 +326,8 @@ class ChildMonitoringService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private val connectionState = MutableStateFlow(false)
+        val connected = connectionState.asStateFlow()
         private const val TAG = "ChildMonitoringService"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "com.example.childapp.action.STOP_MONITORING"
@@ -365,10 +344,7 @@ class ChildMonitoringService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, ChildMonitoringService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
+            context.stopService(Intent(context, ChildMonitoringService::class.java))
         }
     }
 }

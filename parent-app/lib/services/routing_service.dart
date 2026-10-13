@@ -44,8 +44,10 @@ class RoutingService {
           final firstRoute = routes[0] as Map<String, dynamic>;
           final geometry = firstRoute['geometry'] as Map<String, dynamic>?;
           final coords = geometry?['coordinates'] as List?;
-          final distanceMeters = (firstRoute['distance'] as num?)?.toDouble() ?? 0.0;
-          final durationSeconds = (firstRoute['duration'] as num?)?.toDouble() ?? 0.0;
+          final distanceMeters =
+              (firstRoute['distance'] as num?)?.toDouble() ?? 0.0;
+          final durationSeconds =
+              (firstRoute['duration'] as num?)?.toDouble() ?? 0.0;
 
           if (coords != null && coords.isNotEmpty) {
             final points = coords.map((c) {
@@ -63,7 +65,7 @@ class RoutingService {
         }
       }
     } catch (e) {
-      debugPrint('RoutingService error: $e');
+      debugPrint('Route lookup unavailable.');
     }
     return null;
   }

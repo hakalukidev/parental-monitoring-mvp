@@ -10,7 +10,8 @@ class NotificationService {
   NotificationService._internal();
   static final NotificationService instance = NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notificationsPlugin =
+      FlutterLocalNotificationsPlugin();
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _isInitialized = false;
 
@@ -21,11 +22,12 @@ class NotificationService {
     if (_isInitialized) return;
     _navigatorKey = navigatorKey;
 
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwinSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
     );
 
     const initSettings = InitializationSettings(
@@ -40,13 +42,21 @@ class NotificationService {
     );
 
     await _createNotificationChannels();
-    await requestPermissions();
     _isInitialized = true;
   }
 
   Future<void> requestPermissions() async {
-    final androidImpl = _notificationsPlugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    await _notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>()
+        ?.requestPermissions(alert: true, badge: true, sound: true);
+    await _notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin>()
+        ?.requestPermissions(alert: true, badge: true, sound: true);
+    final androidImpl =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
     if (androidImpl != null) {
       await androidImpl.requestNotificationsPermission();
     }
@@ -64,8 +74,9 @@ class NotificationService {
       showBadge: true,
     );
 
-    final androidImpl = _notificationsPlugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final androidImpl =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
     if (androidImpl != null) {
       await androidImpl.createNotificationChannel(androidChannel);
     }
@@ -89,7 +100,8 @@ class NotificationService {
 
         if (childId != null) {
           final timestamp = tsStr != null ? DateTime.tryParse(tsStr) : null;
-          final focusLocation = (lat != null && lon != null) ? LatLng(lat, lon) : null;
+          final focusLocation =
+              (lat != null && lon != null) ? LatLng(lat, lon) : null;
 
           _navigatorKey?.currentState?.push(
             MaterialPageRoute(
@@ -107,7 +119,7 @@ class NotificationService {
         }
       }
     } catch (e) {
-      debugPrint('Error routing notification tap: $e');
+      debugPrint('Notification navigation failed.');
     }
   }
 
@@ -118,7 +130,7 @@ class NotificationService {
     required String geofenceId,
     required String geofenceName,
     required String eventType, // EXIT | ENTRY
-    required String zoneType,  // SAFE_ZONE | RESTRICTED_ZONE
+    required String zoneType, // SAFE_ZONE | RESTRICTED_ZONE
     required double latitude,
     required double longitude,
     required DateTime timestamp,
@@ -134,11 +146,16 @@ class NotificationService {
 
     final notifTitle = title ??
         (isSafeZone
-            ? (isExit ? '🚨 Safe Zone Left: $geofenceName' : '✅ Safe Zone Reached: $geofenceName')
-            : (isExit ? '🛡️ Restricted Area Exited: $geofenceName' : '⚠️ Restricted Area Entered: $geofenceName'));
+            ? (isExit
+                ? '🚨 Safe Zone Left: $geofenceName'
+                : '✅ Safe Zone Reached: $geofenceName')
+            : (isExit
+                ? '🛡️ Restricted Area Exited: $geofenceName'
+                : '⚠️ Restricted Area Entered: $geofenceName'));
 
     final actionText = isExit ? 'left' : 'entered';
-    final notifBody = body ?? '$childName $actionText $geofenceName. Tap to view route trail.';
+    final notifBody = body ??
+        '$childName $actionText $geofenceName. Tap to view route trail.';
 
     final payload = jsonEncode({
       'type': 'GEOFENCE_ALERT',
@@ -154,12 +171,16 @@ class NotificationService {
       'timestamp': timestamp.toIso8601String(),
     });
 
-    final notificationId = (eventId.isNotEmpty ? eventId.hashCode : timestamp.millisecondsSinceEpoch) & 0x7FFFFFFF;
+    final notificationId = (eventId.isNotEmpty
+            ? eventId.hashCode
+            : timestamp.millisecondsSinceEpoch) &
+        0x7FFFFFFF;
 
     const androidDetails = AndroidNotificationDetails(
       'geofence_alerts_channel',
       'Safety Boundary Alerts',
-      channelDescription: 'Instant alerts when child enters or leaves boundaries',
+      channelDescription:
+          'Instant alerts when child enters or leaves boundaries',
       importance: Importance.max,
       priority: Priority.high,
       ticker: 'Safety Boundary Alert',
@@ -171,7 +192,8 @@ class NotificationService {
 
     const notificationDetails = NotificationDetails(
       android: androidDetails,
-      iOS: DarwinNotificationDetails(presentAlert: true, presentSound: true, presentBadge: true),
+      iOS: DarwinNotificationDetails(
+          presentAlert: true, presentSound: true, presentBadge: true),
     );
 
     await _notificationsPlugin.show(

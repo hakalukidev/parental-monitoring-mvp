@@ -9,7 +9,7 @@ import { requireAuth, requireRole } from "../middleware/auth";
 const router = Router();
 
 // Child or Parent can sync usage data
-router.post("/:childId/usage/sync", requireAuth, syncDailyUsage);
+router.post("/:childId/usage/sync", requireAuth, requireRole("CHILD"), syncDailyUsage);
 
 // Parent (or Child) can view today's detailed usage and downtime report
 router.get("/:childId/usage/today", requireAuth, getTodayUsageReport);

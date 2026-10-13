@@ -56,7 +56,8 @@ class GeofenceEvent {
       longitude: (json['longitude'] as num).toDouble(),
       accuracy: (json['accuracy'] as num?)?.toDouble(),
       speed: (json['speed'] as num?)?.toDouble(),
-      distanceFromCenter: (json['distanceFromCenter'] as num?)?.toDouble() ?? 0.0,
+      distanceFromCenter:
+          (json['distanceFromCenter'] as num?)?.toDouble() ?? 0.0,
       geofenceRadius: (json['geofenceRadius'] as num?)?.toDouble() ?? 200.0,
       address: json['address'] as String? ?? '',
       isRead: json['isRead'] as bool? ?? false,

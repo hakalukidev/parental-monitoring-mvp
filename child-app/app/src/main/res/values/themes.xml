@@ -1,3 +1,8 @@
 <resources>
-    <style name="Theme.ChildApp" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.ChildApp" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F5F7F5</item>
+        <item name="android:navigationBarColor">#F5F7F5</item>
+        <item name="android:windowBackground">@drawable/ic_launcher_background</item>
+    </style>
 </resources>

@@ -15,7 +15,10 @@ data class WebCheckResult(
 
 object WebFilterEvaluator {
 
-    fun evaluateUrl(context: Context, rawUrl: String, title: String = ""): WebCheckResult {
+    fun evaluateUrl(context: Context, rawUrl: String, title: String = ""): WebCheckResult =
+        evaluateRules(rawUrl, title, LocalDatabase.getInstance(context).getAllActiveWebRules())
+
+    fun evaluateRules(rawUrl: String, title: String = "", rules: List<CachedWebRule>): WebCheckResult {
         val trimmedRaw = rawUrl.trim()
         val decodedRaw = safeDecode(trimmedRaw)
 
@@ -48,17 +51,16 @@ object WebFilterEvaluator {
         val lowerTitle = safeDecode(title).lowercase()
         val lowerQuery = searchQuery.lowercase()
 
-        val rules = LocalDatabase.getInstance(context).getAllActiveWebRules()
 
         // 1. Check direct ALLOW rules first
-        for (rule in rules) {
+        for (rule in rules.filter { it.isEnabled }) {
             if (rule.action == "ALLOW" && matchesRule(rule, lowerUrl, lowerRaw, lowerDomain, lowerTitle, lowerQuery)) {
                 return WebCheckResult(isBlocked = false, matchedRule = rule)
             }
         }
 
         // 2. Check BLOCK rules
-        for (rule in rules) {
+        for (rule in rules.filter { it.isEnabled }) {
             if (rule.action == "BLOCK" && matchesRule(rule, lowerUrl, lowerRaw, lowerDomain, lowerTitle, lowerQuery)) {
                 val cat = resolveCategory(rule, lowerUrl, lowerDomain)
                 return WebCheckResult(
@@ -140,22 +142,22 @@ object WebFilterEvaluator {
 
     private fun isAdultContent(url: String, domain: String, query: String): Boolean {
         val adultKeywords = listOf("porn", "xxx", "adult", "sex", "hentai", "xvideos", "pornhub", "xnxx", "erotic")
-        return adultKeywords.any { url.contains(it) || domain.contains(it) || query.contains(it) }
+        return adultKeywords.any { url.contains(it) || (domain == it || domain.endsWith(".$it")) || query.contains(it) }
     }
 
     private fun isGamblingContent(url: String, domain: String, query: String): Boolean {
         val gamblingKeywords = listOf("casino", "betting", "poker", "slots", "roulette", "blackjack", "jackpot", "lottery", "1xbet", "bet365")
-        return gamblingKeywords.any { url.contains(it) || domain.contains(it) || query.contains(it) }
+        return gamblingKeywords.any { url.contains(it) || (domain == it || domain.endsWith(".$it")) || query.contains(it) }
     }
 
     private fun isGamingContent(domain: String, query: String): Boolean {
         val gamingDomains = listOf("roblox.com", "steampowered.com", "epicgames.com", "discord.com", "twitch.tv", "minecraft.net")
-        return gamingDomains.any { domain.contains(it) || query.contains(it) }
+        return gamingDomains.any { (domain == it || domain.endsWith(".$it")) || query.contains(it) }
     }
 
     private fun isSocialContent(domain: String, query: String): Boolean {
         val socialDomains = listOf("tiktok.com", "instagram.com", "facebook.com", "snapchat.com", "twitter.com", "x.com", "reddit.com")
-        return socialDomains.any { domain.contains(it) }
+        return socialDomains.any { (domain == it || domain.endsWith(".$it")) }
     }
 
     private fun isViolenceContent(url: String, query: String): Boolean {

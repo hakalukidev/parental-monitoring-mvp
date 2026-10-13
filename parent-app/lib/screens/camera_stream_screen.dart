@@ -1,9 +1,20 @@
+import 'dart:async';
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 
-enum _CameraViewState { waiting, rejected, offline, live, ended, error }
+enum _CameraViewState {
+  waiting,
+  connecting,
+  rejected,
+  offline,
+  live,
+  ended,
+  error
+}
 
 /// Parent-side live camera stream viewer.
 /// Flow: POST /api/camera-stream/request -> wait for child's `camera_stream_accept`
@@ -20,7 +31,7 @@ class CameraStreamScreen extends StatefulWidget {
     required this.childId,
     required this.childName,
     this.initialFacing = 'BACK',
-    this.withAudio = true,
+    this.withAudio = false,
   });
 
   @override
@@ -32,12 +43,17 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _pc;
   String? _sessionId;
+  bool _closing = false, _transportConnected = false;
+  Timer? _requestTimeout;
+  bool _matches(Map<String, dynamic> data) =>
+      _sessionId != null && data["sessionId"] == _sessionId;
   _CameraViewState _state = _CameraViewState.waiting;
   String? _errorMessage;
   bool _remoteDescriptionSet = false;
   bool _isStreamReady = false;
   bool _isRendererInitialized = false;
   bool _isMuted = false;
+  late bool _requestedAudio;
   late String _currentFacing;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
@@ -45,12 +61,31 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   void initState() {
     super.initState();
     _currentFacing = widget.initialFacing;
+    _requestedAudio = widget.withAudio;
     _start();
   }
 
   Future<void> _start() async {
+    try {
+      await _initialize();
+    } catch (_) {
+      await _teardown(notifyBackend: true);
+      if (mounted) {
+        setState(() {
+          _state = _CameraViewState.error;
+          _errorMessage = 'Unable to initialize sharing. Please try again.';
+        });
+      }
+    }
+  }
+
+  Future<void> _initialize() async {
     await _remoteRenderer.initialize();
     _isRendererInitialized = true;
+    if (!mounted || _closing) {
+      await _remoteRenderer.dispose();
+      return;
+    }
 
     final token = await ApiService.instance.accessToken;
     if (token == null) {
@@ -63,9 +98,83 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       return;
     }
 
-    _socketService.connect(token);
+    if (!await ApiService.instance.supportsExplicitMediaConsent()) {
+      throw StateError(
+          'The backend must be updated before approved check-ins can be requested.');
+    }
+    if (!mounted || _closing) {
+      return;
+    }
+    final proceed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) => StatefulBuilder(
+            builder: (ctx, update) => SafeArea(
+                child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('Camera check-in',
+                              style: Theme.of(ctx).textTheme.titleLarge),
+                          const SizedBox(height: 12),
+                          const Text(
+                              'Choose what to request. The child device will ask for approval before anything is shared.'),
+                          const SizedBox(height: 20),
+                          DropdownButtonFormField<String>(
+                              initialValue: _currentFacing,
+                              decoration: const InputDecoration(
+                                  labelText: 'Requested camera'),
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'BACK', child: Text('Back camera')),
+                                DropdownMenuItem(
+                                    value: 'FRONT', child: Text('Front camera'))
+                              ],
+                              onChanged: (value) => update(
+                                  () => _currentFacing = value ?? 'BACK')),
+                          SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Include microphone audio'),
+                              value: _requestedAudio,
+                              onChanged: (value) =>
+                                  update(() => _requestedAudio = value)),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('Send check-in request')),
+                          TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Cancel')),
+                        ])))));
+    if (proceed != true || !mounted) {
+      await _teardown(notifyBackend: false);
+      return;
+    }
+    if (_closing || !mounted) {
+      return;
+    }
+    final freshToken = await ApiService.instance.accessToken;
+    _socketService.connect(freshToken ?? token,
+        onAuthError: () => _teardown(notifyBackend: true));
+    _socketService.onDisconnect(() => _teardown(notifyBackend: true));
+    _socketService.socket.on('operation_error', (_) async {
+      await _teardown(notifyBackend: true);
+      if (mounted) {
+        setState(() {
+          _state = _CameraViewState.error;
+          _errorMessage =
+              'This session could not be authorized. Please request a new check-in.';
+        });
+      }
+    });
     _socketService.onCameraStreamAccept(_onAccept);
     _socketService.onCameraStreamReject((data) {
+      if (!_matches(data)) {
+        return;
+      }
+      _teardown(notifyBackend: false);
       final reason = data['reason']?.toString();
       if (mounted) {
         setState(() {
@@ -78,22 +187,49 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
         });
       }
     });
-    _socketService.onCameraStreamStarted((_) {
-      if (mounted && _isStreamReady) setState(() => _state = _CameraViewState.live);
+    _socketService.onCameraStreamStarted((data) {
+      if (!_matches(data)) {
+        return;
+      }
+      if (mounted && _isStreamReady && _transportConnected) {
+        setState(() => _state = _CameraViewState.live);
+      }
     });
-    _socketService.onCameraStreamStopped((_) => _teardown(notifyBackend: false));
+    _socketService.onCameraStreamStopped((data) {
+      if (_matches(data)) {
+        _teardown(notifyBackend: false);
+      }
+    });
     _socketService.onWebrtcOffer(_onOffer);
     _socketService.onIceCandidate(_onRemoteIceCandidate);
 
     await _setupPeerConnection();
+    if (_closing || !mounted) {
+      return;
+    }
 
     try {
       final res = await ApiService.instance.requestCameraStream(
         widget.childId,
-        cameraFacing: widget.initialFacing,
-        withAudio: widget.withAudio,
+        cameraFacing: _currentFacing,
+        withAudio: _requestedAudio,
       );
-      _sessionId = res['sessionId'] as String;
+      final id = res['sessionId'] as String;
+      if (!mounted || _closing) {
+        await ApiService.instance.stopCameraStream(id);
+        return;
+      }
+      setState(() => _sessionId = id);
+      _requestTimeout = Timer(const Duration(minutes: 2), () async {
+        await _teardown(notifyBackend: true);
+        if (mounted) {
+          setState(() {
+            _state = _CameraViewState.error;
+            _errorMessage =
+                'The check-in timed out. Ask your child to open Seftly and try again.';
+          });
+        }
+      });
       _socketService.joinSession(_sessionId!);
     } catch (e) {
       if (mounted) {
@@ -109,8 +245,12 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
 
   Future<void> _onAccept(Map<String, dynamic> data) async {
     final incomingSid = data['sessionId']?.toString();
-    if (_sessionId != null && incomingSid != _sessionId) return;
-    _sessionId ??= incomingSid;
+    if (_sessionId == null || incomingSid != _sessionId || _closing) {
+      return;
+    }
+    if (mounted) {
+      setState(() => _state = _CameraViewState.connecting);
+    }
     if (_sessionId != null) {
       _socketService.joinSession(_sessionId!);
     }
@@ -120,24 +260,12 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   }
 
   Future<void> _setupPeerConnection() async {
-    if (_pc != null) return;
-    final fallbackTurnServers = [
-      {
-        'urls': [
-          'turn:openrelay.metered.ca:80',
-          'turn:openrelay.metered.ca:443',
-          'turns:openrelay.metered.ca:443',
-          'turn:openrelay.metered.ca:80?transport=tcp',
-          'turn:openrelay.metered.ca:443?transport=tcp',
-        ],
-        'username': 'openrelayproject',
-        'credential': 'openrelayproject',
-      },
-    ];
+    if (_pc != null) {
+      return;
+    }
     List<Map<String, dynamic>> iceServers = [
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
-      ...fallbackTurnServers,
     ];
     try {
       final iceServersRaw = await ApiService.instance.getIceServers();
@@ -145,13 +273,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
         final fetched = iceServersRaw
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
-        final hasTurn = fetched.any((s) {
-          final u = s['urls'];
-          if (u is String) return u.startsWith('turn:') || u.startsWith('turns:');
-          if (u is List) return u.any((x) => x.toString().startsWith('turn:') || x.toString().startsWith('turns:'));
-          return false;
-        });
-        iceServers = hasTurn ? fetched : [...fetched, ...fallbackTurnServers];
+        iceServers = fetched;
       }
     } catch (_) {}
 
@@ -159,9 +281,16 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       'iceServers': iceServers,
       'sdpSemantics': 'unified-plan',
     });
+    if (_closing || !mounted) {
+      await pc.close();
+      return;
+    }
     _pc = pc;
 
     pc.onTrack = (RTCTrackEvent event) {
+      if (_closing) {
+        return;
+      }
       if (event.track.kind == 'video') {
         if (event.streams.isNotEmpty) {
           final stream = event.streams.first;
@@ -170,6 +299,10 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
           }
         } else {
           createLocalMediaStream('remote_camera_stream').then((stream) {
+            if (_closing || !mounted) {
+              stream.dispose();
+              return;
+            }
             stream.addTrack(event.track);
             _remoteRenderer.srcObject = stream;
           });
@@ -177,7 +310,10 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
         if (mounted) {
           setState(() {
             _isStreamReady = true;
-            _state = _CameraViewState.live;
+            if (_transportConnected) {
+              _state = _CameraViewState.live;
+              _requestTimeout?.cancel();
+            }
           });
         }
       } else if (event.track.kind == 'audio') {
@@ -188,27 +324,28 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     };
 
     pc.onConnectionState = (state) {
-      debugPrint('WebRTC Connection state: $state');
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
-        if (mounted && _state == _CameraViewState.live) {
-          _teardown(notifyBackend: false);
-        }
+      if (_closing) {
+        return;
       }
-    };
-
-    pc.onIceConnectionState = (state) {
-      debugPrint('WebRTC ICE Connection state: $state');
-      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
-          state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
-        if (mounted && _state == _CameraViewState.live) {
-          _teardown(notifyBackend: false);
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _transportConnected = true;
+        if (mounted && _isStreamReady && _transportConnected) {
+          setState(() {
+            _state = _CameraViewState.live;
+            _requestTimeout?.cancel();
+          });
         }
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        _teardown(notifyBackend: true);
       }
     };
 
     pc.onIceCandidate = (candidate) {
-      if (_sessionId == null) return;
+      if (_sessionId == null) {
+        return;
+      }
       _socketService.sendIceCandidate(_sessionId!, candidate.toMap());
     };
   }
@@ -216,8 +353,9 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   Future<void> _onOffer(Map<String, dynamic> data) async {
     try {
       final incomingSid = data['sessionId']?.toString();
-      if (_sessionId != null && incomingSid != _sessionId) return;
-      _sessionId ??= incomingSid;
+      if (_closing || _sessionId == null || incomingSid != _sessionId) {
+        return;
+      }
 
       if (_pc == null) {
         await _setupPeerConnection();
@@ -243,12 +381,14 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
         });
       }
     } catch (e) {
-      debugPrint('Error handling camera webrtc_offer: $e');
+      debugPrint('Video negotiation failed.');
     }
   }
 
   Future<void> _onRemoteIceCandidate(Map<String, dynamic> data) async {
-    if (_sessionId != null && data['sessionId'] != _sessionId) return;
+    if (!_matches(data) || _closing) {
+      return;
+    }
     final c = Map<String, dynamic>.from(data['candidate']);
     final iceCandidate = RTCIceCandidate(
       c['candidate']?.toString(),
@@ -266,7 +406,9 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   }
 
   void _switchCamera() {
-    if (_sessionId == null) return;
+    if (_sessionId == null) {
+      return;
+    }
     final nextFacing = _currentFacing == 'BACK' ? 'FRONT' : 'BACK';
     _socketService.switchCamera(_sessionId!, cameraFacing: nextFacing);
     setState(() {
@@ -274,7 +416,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Switched to $nextFacing camera'),
+        content: Text('Requested $nextFacing camera'),
         duration: const Duration(seconds: 1),
       ),
     );
@@ -291,16 +433,21 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     }
   }
 
-  Future<void> _stopStream() async {
-    if (_sessionId != null) {
-      try {
-        await ApiService.instance.stopCameraStream(_sessionId!);
-      } catch (_) {}
-    }
-    await _teardown(notifyBackend: false);
-  }
+  Future<void> _stopStream() => _teardown(notifyBackend: true);
 
   Future<void> _teardown({required bool notifyBackend}) async {
+    if (_closing) {
+      return;
+    }
+    _closing = true;
+    _requestTimeout?.cancel();
+    final id = _sessionId;
+    if (notifyBackend && id != null) {
+      if (_socketService.isConnected) {
+        _socketService.socket.emit('camera_stream_stopped', {'sessionId': id});
+      }
+      unawaited(ApiService.instance.stopCameraStream(id).catchError((_) {}));
+    }
     if (mounted) {
       setState(() {
         _isStreamReady = false;
@@ -308,18 +455,33 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       });
     }
     _remoteDescriptionSet = false;
+    _transportConnected = false;
     _pendingIceCandidates.clear();
-    try {
-      _remoteRenderer.srcObject = null;
-    } catch (_) {}
-    try {
-      await _pc?.close();
-    } catch (_) {}
+    final stream = _remoteRenderer.srcObject;
+    _remoteRenderer.srcObject = null;
+    final pc = _pc;
     _pc = null;
+    await pc?.close();
+    if (stream != null) {
+      for (final track in stream.getTracks()) {
+        await track.stop();
+      }
+      await stream.dispose();
+    }
   }
 
   @override
   void dispose() {
+    _requestTimeout?.cancel();
+    if (!_closing && _sessionId != null) {
+      if (_socketService.isConnected) {
+        _socketService.socket
+            .emit('camera_stream_stopped', {'sessionId': _sessionId});
+      }
+      unawaited(
+          ApiService.instance.stopCameraStream(_sessionId!).catchError((_) {}));
+    }
+    _closing = true;
     _isStreamReady = false;
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
@@ -341,13 +503,23 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black87,
+    return SeftlyScaffold(
+      title: 'Check in together',
+      subtitle:
+          'The child device must approve each camera and microphone session.',
+      icon: Icons.videocam_outlined,
+      backgroundColor: context.colors.surface,
       appBar: AppBar(
         title: Text("${widget.childName}'s Camera"),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: context.colors.surface,
+        foregroundColor: context.colors.onSurface,
         actions: [
+          if (_sessionId != null && !_closing)
+            IconButton(
+              tooltip: 'Stop Camera',
+              icon: const Icon(Icons.stop_circle_outlined),
+              onPressed: _stopStream,
+            ),
           if (_state == _CameraViewState.live) ...[
             IconButton(
               icon: Icon(_isMuted ? Icons.volume_off : Icons.volume_up),
@@ -363,20 +535,26 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
         ],
       ),
       body: Center(child: _buildBody()),
-      bottomNavigationBar: _state == _CameraViewState.live
+      bottomNavigationBar: _sessionId != null && !_closing
           ? SafeArea(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: [
                     FilledButton.tonalIcon(
-                      onPressed: _switchCamera,
+                      onPressed: _state == _CameraViewState.live
+                          ? _switchCamera
+                          : null,
                       icon: const Icon(Icons.flip_camera_android),
-                      label: Text('Facing: $_currentFacing'),
+                      label: Text('Requested lens: $_currentFacing'),
                     ),
                     FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: context.colors.error),
                       onPressed: _stopStream,
                       icon: const Icon(Icons.stop),
                       label: const Text('Stop Camera'),
@@ -392,92 +570,51 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   Widget _buildBody() {
     switch (_state) {
       case _CameraViewState.waiting:
-        return const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 16),
-            Text(
-              'Connecting to child camera...',
-              style: TextStyle(color: Colors.white),
-            ),
-            SizedBox(height: 4),
-            Text(
-              'Initializing stream on device.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ],
-        );
+        return const Column(mainAxisSize: MainAxisSize.min, children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Waiting for approval on the child device'),
+          SizedBox(height: 4),
+          Text('Camera and microphone stay off until approved.'),
+        ]);
+      case _CameraViewState.connecting:
+        return const Column(mainAxisSize: MainAxisSize.min, children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Approval received. Connecting video…'),
+        ]);
       case _CameraViewState.rejected:
-        return Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.videocam_off, size: 64, color: Colors.amber),
-              const SizedBox(height: 16),
-              Text(
-                _errorMessage ?? 'Camera stream was rejected.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ],
-          ),
-        );
+        return SeftlyStateView(
+            icon: Icons.videocam_off_outlined,
+            title: 'Request declined',
+            message: _errorMessage ??
+                'Camera sharing was not approved on the child device.');
       case _CameraViewState.offline:
-        return const Padding(
-          padding: EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.cloud_off, size: 64, color: Colors.grey),
-              SizedBox(height: 16),
-              Text(
-                'Child device is currently offline.',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ],
-          ),
-        );
+        return const SeftlyStateView(
+            icon: Icons.cloud_off_outlined,
+            title: 'Device offline',
+            message: 'Reconnect Seftly Child before requesting a check-in.');
       case _CameraViewState.error:
-        return Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 64, color: Colors.redAccent),
-              const SizedBox(height: 16),
-              Text(
-                _errorMessage ?? 'Something went wrong.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ],
-          ),
-        );
+        return SeftlyStateView(
+            icon: Icons.error_outline_rounded,
+            title: 'Check-in unavailable',
+            message: _errorMessage ?? 'Please request a new session.',
+            error: true);
       case _CameraViewState.ended:
-        return const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.check_circle_outline, size: 64, color: Colors.white60),
-            SizedBox(height: 16),
-            Text(
-              'Camera stream session ended.',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-          ],
-        );
+        return const SeftlyStateView(
+            icon: Icons.check_circle_outline,
+            title: 'Camera stopped',
+            message: 'The camera-sharing session has ended.');
       case _CameraViewState.live:
-        if (!_isStreamReady || !_isRendererInitialized || _remoteRenderer.srcObject == null) {
+        if (!_isStreamReady ||
+            !_isRendererInitialized ||
+            _remoteRenderer.srcObject == null) {
           return const Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(color: Colors.white),
+              CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text(
-                'Receiving camera frames...',
-                style: TextStyle(color: Colors.white),
-              ),
+              Text('Receiving camera frames...'),
             ],
           );
         }
@@ -493,15 +630,17 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
               top: 16,
               left: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.red.withAlpha(217),
+                  color: context.colors.error.withAlpha(217),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.fiber_manual_record, color: Colors.white, size: 12),
+                    Icon(Icons.fiber_manual_record,
+                        color: Colors.white, size: 12),
                     SizedBox(width: 4),
                     Text(
                       'LIVE CAMERA',

@@ -19,7 +19,8 @@ class MostUsedAppInfo {
       packageName: json['packageName'] as String? ?? '',
       appName: json['appName'] as String? ?? 'App',
       category: json['category'] as String? ?? 'OTHER',
-      foregroundTimeSeconds: (json['foregroundTimeSeconds'] as num?)?.toInt() ?? 0,
+      foregroundTimeSeconds:
+          (json['foregroundTimeSeconds'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -34,9 +35,10 @@ class MostUsedAppInfo {
 
 class UsageSummary {
   final int totalScreenTimeSeconds;
-  final int totalDowntimeSeconds;
-  final int screenOffTimeSeconds;
+  final int? totalDowntimeSeconds;
+  final int? screenOffTimeSeconds;
   final bool isDevicePaused;
+  final bool usageAvailable;
   final String? activeScheduleDowntime;
   final int blockedAttemptsCount;
   final int limitsReachedCount;
@@ -49,6 +51,7 @@ class UsageSummary {
     required this.totalDowntimeSeconds,
     required this.screenOffTimeSeconds,
     required this.isDevicePaused,
+    this.usageAvailable = false,
     this.activeScheduleDowntime,
     required this.blockedAttemptsCount,
     required this.limitsReachedCount,
@@ -59,22 +62,27 @@ class UsageSummary {
 
   factory UsageSummary.fromJson(Map<String, dynamic> json) {
     return UsageSummary(
-      totalScreenTimeSeconds: (json['totalScreenTimeSeconds'] as num?)?.toInt() ?? 0,
-      totalDowntimeSeconds: (json['totalDowntimeSeconds'] as num?)?.toInt() ?? 0,
-      screenOffTimeSeconds: (json['screenOffTimeSeconds'] as num?)?.toInt() ?? 0,
+      totalScreenTimeSeconds:
+          (json['totalScreenTimeSeconds'] as num?)?.toInt() ?? 0,
+      totalDowntimeSeconds: (json['totalDowntimeSeconds'] as num?)?.toInt(),
+      screenOffTimeSeconds: (json['screenOffTimeSeconds'] as num?)?.toInt(),
       isDevicePaused: json['isDevicePaused'] as bool? ?? false,
+      usageAvailable: json['usageAvailable'] as bool? ?? false,
       activeScheduleDowntime: json['activeScheduleDowntime'] as String?,
-      blockedAttemptsCount: (json['blockedAttemptsCount'] as num?)?.toInt() ?? 0,
+      blockedAttemptsCount:
+          (json['blockedAttemptsCount'] as num?)?.toInt() ?? 0,
       limitsReachedCount: (json['limitsReachedCount'] as num?)?.toInt() ?? 0,
       totalAppsTracked: (json['totalAppsTracked'] as num?)?.toInt() ?? 0,
       appsWithUsageCount: (json['appsWithUsageCount'] as num?)?.toInt() ?? 0,
       mostUsedApp: json['mostUsedApp'] != null
-          ? MostUsedAppInfo.fromJson(json['mostUsedApp'] as Map<String, dynamic>)
+          ? MostUsedAppInfo.fromJson(
+              json['mostUsedApp'] as Map<String, dynamic>)
           : null,
     );
   }
 
   String get formattedScreenTime {
+    if (!usageAvailable) return "Unavailable";
     final hours = totalScreenTimeSeconds ~/ 3600;
     final minutes = (totalScreenTimeSeconds % 3600) ~/ 60;
     if (hours > 0) return '${hours}h ${minutes}m';
@@ -83,26 +91,16 @@ class UsageSummary {
     return '0m';
   }
 
-  String get formattedDowntime {
-    final hours = totalDowntimeSeconds ~/ 3600;
-    final minutes = (totalDowntimeSeconds % 3600) ~/ 60;
+  static String duration(int? seconds) {
+    if (seconds == null) return 'Unavailable';
+    final hours = seconds ~/ 3600, minutes = (seconds % 3600) ~/ 60;
     if (hours > 0) return '${hours}h ${minutes}m';
     if (minutes > 0) return '${minutes}m';
-    if (totalDowntimeSeconds > 0) return '${totalDowntimeSeconds}s';
-    return '0m';
+    return '${seconds}s';
   }
 
-  double get screenTimePercentage {
-    final total = totalScreenTimeSeconds + totalDowntimeSeconds;
-    if (total <= 0) return 0.0;
-    return (totalScreenTimeSeconds / total).clamp(0.0, 1.0);
-  }
-
-  double get downtimePercentage {
-    final total = totalScreenTimeSeconds + totalDowntimeSeconds;
-    if (total <= 0) return 1.0;
-    return (totalDowntimeSeconds / total).clamp(0.0, 1.0);
-  }
+  String get formattedDowntime => duration(totalDowntimeSeconds);
+  String get formattedScreenOff => duration(screenOffTimeSeconds);
 }
 
 class CategoryUsage {
@@ -196,6 +194,7 @@ class HourlyUsage {
 
 class AppUsageItem {
   final String packageName;
+  final String? iconPngBase64;
   final String appName;
   final String category;
   final int foregroundTimeSeconds;
@@ -207,6 +206,7 @@ class AppUsageItem {
 
   AppUsageItem({
     required this.packageName,
+    this.iconPngBase64,
     required this.appName,
     required this.category,
     required this.foregroundTimeSeconds,
@@ -224,9 +224,11 @@ class AppUsageItem {
     }
     return AppUsageItem(
       packageName: json['packageName'] as String? ?? '',
+      iconPngBase64: json['iconPngBase64'] as String?,
       appName: json['appName'] as String? ?? 'App',
       category: json['category'] as String? ?? 'OTHER',
-      foregroundTimeSeconds: (json['foregroundTimeSeconds'] as num?)?.toInt() ?? 0,
+      foregroundTimeSeconds:
+          (json['foregroundTimeSeconds'] as num?)?.toInt() ?? 0,
       lastTimeUsed: lastUsed,
       launchCount: (json['launchCount'] as num?)?.toInt() ?? 0,
       status: json['status'] as String? ?? 'ALWAYS_ALLOWED',
@@ -246,11 +248,13 @@ class AppUsageItem {
   }
 
   String get formattedLastUsed {
-    if (lastTimeUsed == null) return 'Not opened today';
+    if (lastTimeUsed == null) return 'No opening reported';
     final diff = DateTime.now().difference(lastTimeUsed!.toLocal());
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return DateFormat('h:mm a').format(lastTimeUsed!.toLocal());
+    if (diff.inHours < 24) {
+      return DateFormat('h:mm a').format(lastTimeUsed!.toLocal());
+    }
     return DateFormat('MMM d, h:mm a').format(lastTimeUsed!.toLocal());
   }
 
@@ -262,8 +266,9 @@ class AppUsageItem {
 
 class AppUsageReport {
   final String date;
+  final String timeZone;
   final String childId;
-  final DateTime lastSyncedAt;
+  final DateTime? lastSyncedAt;
   final UsageSummary summary;
   final List<CategoryUsage> categoryBreakdown;
   final List<HourlyUsage> hourlyUsage;
@@ -271,6 +276,7 @@ class AppUsageReport {
 
   AppUsageReport({
     required this.date,
+    this.timeZone = "UTC",
     required this.childId,
     required this.lastSyncedAt,
     required this.summary,
@@ -285,13 +291,14 @@ class AppUsageReport {
     final hourlyList = (json['hourlyUsage'] as List<dynamic>?) ?? [];
     final appsList = (json['apps'] as List<dynamic>?) ?? [];
 
-    DateTime syncedAt = DateTime.now();
+    DateTime? syncedAt;
     if (json['lastSyncedAt'] != null) {
-      syncedAt = DateTime.tryParse(json['lastSyncedAt'].toString()) ?? DateTime.now();
+      syncedAt = DateTime.tryParse(json['lastSyncedAt'].toString());
     }
 
     return AppUsageReport(
       date: json['date'] as String? ?? '',
+      timeZone: json['timeZone'] as String? ?? 'UTC',
       childId: json['childId'] as String? ?? '',
       lastSyncedAt: syncedAt,
       summary: UsageSummary.fromJson(summaryRaw),

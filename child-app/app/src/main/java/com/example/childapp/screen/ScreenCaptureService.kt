@@ -13,6 +13,8 @@ import com.example.childapp.data.SessionStore
 import com.example.childapp.service.ChildMonitoringService
 import com.example.childapp.socket.SocketManager
 import com.example.childapp.webrtc.WebRtcManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import org.webrtc.PeerConnection
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,7 +42,7 @@ class ScreenCaptureService : Service() {
         }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity_RESULT_CANCELED) ?: Activity_RESULT_CANCELED
-        val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA) ?: pendingProjectionIntent
+        val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
         val token = intent?.getStringExtra(EXTRA_ACCESS_TOKEN)
         val sid = intent?.getStringExtra(EXTRA_SESSION_ID)
 
@@ -52,6 +54,8 @@ class ScreenCaptureService : Service() {
         sessionId = sid
         isStopping.set(false)
         isSessionRunning.set(true)
+        currentSessionId = sid
+        statusState.value = "CONNECTING"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -62,51 +66,49 @@ class ScreenCaptureService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
 
-        val activeSock = ChildMonitoringService.activeSocket
-        val isShared = activeSock != null && activeSock.isConnected
-        val socket = if (isShared) {
-            Log.i("ScreenCaptureService", "Reusing persistent connected socket from ChildMonitoringService")
-            activeSock!!
-        } else {
-            Log.i("ScreenCaptureService", "Creating dedicated socket connection")
-            SocketManager(token).also { socketManager = it }
-        }
+        val socket = SocketManager(token).also { socketManager = it }
+        socket.onDisconnected = { android.os.Handler(android.os.Looper.getMainLooper()).post { stopSharing() } }
 
         socket.onScreenShareStopped = { stoppedId ->
             if (stoppedId == sessionId) stopSharing()
         }
         socket.onWebrtcAnswer = { sdpSessionId, sdp ->
-            Log.i("ScreenCaptureService", "Received onWebrtcAnswer for session $sdpSessionId")
+            Log.i("ScreenCaptureService", "Received onWebrtcAnswer")
             if (sdpSessionId == sessionId) webRtcManager?.applyRemoteAnswer(sdp)
         }
         socket.onIceCandidate = { iceSessionId, candidate ->
-            Log.i("ScreenCaptureService", "Received onIceCandidate for session $iceSessionId")
+            Log.i("ScreenCaptureService", "Received onIceCandidate")
             if (iceSessionId == sessionId) webRtcManager?.addRemoteIceCandidate(candidate)
         }
 
         val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        ) + getFallbackTurnServers()
+        )
 
         val webRtc = WebRtcManager(
             context = applicationContext,
             onLocalOffer = { sdp ->
-                Log.i("ScreenCaptureService", "Sending local WebRTC offer for session $sid")
+                Log.i("ScreenCaptureService", "Sending local WebRTC offer")
                 socket.sendOffer(sid, sdp)
             },
             onIceCandidate = { candidate ->
-                Log.i("ScreenCaptureService", "Sending local ICE candidate for session $sid")
+                Log.i("ScreenCaptureService", "Sending local ICE candidate")
                 socket.sendIceCandidate(sid, candidate)
             },
             onStateChange = { state ->
+                if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                    statusState.value = "LIVE"
+                    socket.notifyMediaConnected(sid)
+                }
                 Log.i("ScreenCaptureService", "PeerConnection state changed: $state")
                 if (state == PeerConnection.PeerConnectionState.CLOSED ||
-                    state == PeerConnection.PeerConnectionState.FAILED
+                    state == PeerConnection.PeerConnectionState.FAILED ||
+                    state == PeerConnection.PeerConnectionState.DISCONNECTED
                 ) {
                     if (!isStopping.get()) {
                         Log.i("ScreenCaptureService", "Stopping session due to connection state: $state")
-                        stopSharing()
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { stopSharing() }
                     }
                 }
             }
@@ -116,10 +118,15 @@ class ScreenCaptureService : Service() {
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         fun beginCapture(iceServers: List<PeerConnection.IceServer>) {
+            if (isStopping.get()) return
             Log.i("ScreenCaptureService", "Beginning WebRTC capture with ${iceServers.size} ICE servers")
-            socket.joinSession(sid)
-            socket.acceptScreenShare(sid)
-            webRtc.startSharing(mgr, resultCode, resultData, iceServers)
+            socket.acceptScreenShare(sid) { accepted ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (!accepted) stopSharing()
+                    else if (!isStopping.get()) try { webRtc.startSharing(mgr, resultCode, resultData, iceServers) } catch (_: Exception) { stopSharing() }
+                }
+            }
+
         }
 
         // Fetch server ICE configuration asynchronously in background thread
@@ -152,12 +159,16 @@ class ScreenCaptureService : Service() {
             }
         }.start()
 
-        return START_STICKY
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (currentSessionId == sid && statusState.value != "LIVE") stopSharing()
+        }, 45_000)
+        return START_NOT_STICKY
     }
 
     private fun stopSharing() {
         if (isStopping.getAndSet(true)) return
         isSessionRunning.set(false)
+        statusState.value = "OFF"
         currentSessionId = null
         val sid = sessionId
         sessionId = null
@@ -193,71 +204,46 @@ class ScreenCaptureService : Service() {
         val channelId = "screen_share_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                channelId, "System Protection", NotificationManager.IMPORTANCE_LOW
+                channelId, "Seftly screen sharing", NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors device security and synchronization."
+                description = "Visible notice while your screen is shared."
                 setShowBadge(false)
             }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(channel)
         }
 
+        val stopIntent = Intent(this, ScreenCaptureService::class.java).apply { action = ACTION_STOP }
+        val stop = PendingIntent.getService(this, 42, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("System Service")
-            .setContentText("Device synchronization active")
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .build()
+            .setContentTitle("Seftly screen sharing")
+            .setContentText("Your screen is being shared with your parent. Tap Stop to end.")
+            .setSmallIcon(com.example.childapp.R.drawable.ic_seftly_notification)
+            .setOngoing(true).setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(0, "Stop sharing", stop).build()
     }
 
-    private fun getFallbackTurnServers(): List<PeerConnection.IceServer> {
-        return listOf(
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayproject")
-                .createIceServer()
-        )
-    }
 
     private fun parseIceServers(config: JSONObject): List<PeerConnection.IceServer> {
         val arr = config.optJSONArray("iceServers") ?: org.json.JSONArray()
         val list = mutableListOf<PeerConnection.IceServer>()
-        var hasTurn = false
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             val urlStr = obj.optString("urls")
-            if (urlStr.startsWith("turn:") || urlStr.startsWith("turns:")) {
-                hasTurn = true
-            }
             val builder = PeerConnection.IceServer.builder(urlStr)
             if (obj.has("username")) builder.setUsername(obj.optString("username"))
             if (obj.has("credential")) builder.setPassword(obj.optString("credential"))
             list.add(builder.createIceServer())
         }
-        if (!hasTurn) {
-            list.addAll(getFallbackTurnServers())
-        }
         return list
     }
 
     companion object {
+        private val statusState = MutableStateFlow("OFF")
+        val status = statusState.asStateFlow()
         val isSessionRunning = AtomicBoolean(false)
         @Volatile var currentSessionId: String? = null
-        var pendingProjectionIntent: Intent? = null
         const val ACTION_STOP = "com.example.childapp.action.STOP_SHARING"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
@@ -282,10 +268,7 @@ class ScreenCaptureService : Service() {
         }
 
         fun stop(context: Context) {
-            isSessionRunning.set(false)
-            currentSessionId = null
-            val intent = Intent(context, ScreenCaptureService::class.java).apply { action = ACTION_STOP }
-            context.startService(intent)
+            context.stopService(Intent(context, ScreenCaptureService::class.java))
         }
     }
 }

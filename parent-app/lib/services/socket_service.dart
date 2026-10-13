@@ -6,10 +6,13 @@ class SocketService {
   io.Socket? _socket;
 
   void connect(String accessToken, {void Function()? onAuthError}) {
+    if (_socket != null) return;
     _socket = io.io(
       AppConfig.socketUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
+          .enableForceNew()
+          .disableMultiplex()
           .setAuth({'token': accessToken})
           .disableAutoConnect()
           .build(),
@@ -23,13 +26,22 @@ class SocketService {
     _socket!.connect();
   }
 
-  void updateTokenAndReconnect(String newToken, {void Function()? onAuthError}) {
-    disconnect();
-    connect(newToken, onAuthError: onAuthError);
+  void updateTokenAndReconnect(String newToken,
+      {void Function()? onAuthError}) {
+    final current = _socket;
+    if (current == null) {
+      connect(newToken, onAuthError: onAuthError);
+      return;
+    }
+    current.auth = {'token': newToken};
+    current.disconnect();
+    current.connect();
   }
 
   io.Socket get socket {
-    if (_socket == null) throw StateError('Socket not connected. Call connect() first.');
+    if (_socket == null) {
+      throw StateError('Socket not connected. Call connect() first.');
+    }
     return _socket!;
   }
 
@@ -44,20 +56,23 @@ class SocketService {
   }
 
   void disconnect() {
-    _socket?.disconnect();
+    _socket?.dispose();
     _socket = null;
   }
 
   void onInitialChildrenPresence(void Function(Map<String, dynamic>) cb) {
-    socket.on('initial_children_presence', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on('initial_children_presence',
+        (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onChildStatusChanged(void Function(Map<String, dynamic>) cb) {
-    socket.on('child_status_changed', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'child_status_changed', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onChildLocationUpdate(void Function(Map<String, dynamic>) cb) {
-    socket.on('child_location_update', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'child_location_update', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void off(String event) {
@@ -65,35 +80,43 @@ class SocketService {
   }
 
   void onScreenShareAccept(void Function(Map<String, dynamic>) cb) {
-    socket.on('screen_share_accept', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'screen_share_accept', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onScreenShareReject(void Function(Map<String, dynamic>) cb) {
-    socket.on('screen_share_reject', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'screen_share_reject', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onScreenShareStarted(void Function(Map<String, dynamic>) cb) {
-    socket.on('screen_share_started', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'screen_share_started', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onScreenShareStopped(void Function(Map<String, dynamic>) cb) {
-    socket.on('screen_share_stopped', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'screen_share_stopped', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onCameraStreamAccept(void Function(Map<String, dynamic>) cb) {
-    socket.on('camera_stream_accept', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'camera_stream_accept', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onCameraStreamReject(void Function(Map<String, dynamic>) cb) {
-    socket.on('camera_stream_reject', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'camera_stream_reject', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onCameraStreamStarted(void Function(Map<String, dynamic>) cb) {
-    socket.on('camera_stream_started', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'camera_stream_started', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onCameraStreamStopped(void Function(Map<String, dynamic>) cb) {
-    socket.on('camera_stream_stopped', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'camera_stream_stopped', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void switchCamera(String sessionId, {String? cameraFacing}) {
@@ -124,7 +147,8 @@ class SocketService {
   }
 
   void sendIceCandidate(String sessionId, Map<String, dynamic> candidate) {
-    socket.emit('ice_candidate', {'sessionId': sessionId, 'candidate': candidate});
+    socket.emit(
+        'ice_candidate', {'sessionId': sessionId, 'candidate': candidate});
   }
 
   void joinSession(String sessionId) {
@@ -170,11 +194,13 @@ class SocketService {
   // ==========================================
 
   void onNewBrowsingActivity(void Function(Map<String, dynamic>) cb) {
-    socket.on('new_browsing_activity', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'new_browsing_activity', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   void onSuspiciousWebAlert(void Function(Map<String, dynamic>) cb) {
-    socket.on('suspicious_web_alert', (data) => cb(Map<String, dynamic>.from(data)));
+    socket.on(
+        'suspicious_web_alert', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
   // ==========================================
@@ -197,4 +223,3 @@ class SocketService {
     socket.emit('request_usage_sync', {'childId': childId});
   }
 }
-

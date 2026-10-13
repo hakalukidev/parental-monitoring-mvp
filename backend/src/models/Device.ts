@@ -17,7 +17,9 @@ export interface IDevice extends Document {
   _id: Types.ObjectId;
   childId: Types.ObjectId;
   deviceName: string;
-  platform: string; // e.g. "Android"
+  platform: string;
+  timeZone?: string;
+  mediaConsentVersion?: number;
   status: DeviceStatus;
   lastSeen: Date;
   socketId?: string | null; // current active socket connection id, if online
@@ -31,6 +33,8 @@ const deviceSchema = new Schema<IDevice>(
   {
     childId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     deviceName: { type: String, required: true },
+    mediaConsentVersion: { type: Number, default: 1 },
+    timeZone: { type: String, default: "UTC" },
     platform: { type: String, default: "Android" },
     status: { type: String, enum: ["ONLINE", "OFFLINE"], default: "OFFLINE" },
     lastSeen: { type: Date, default: Date.now },

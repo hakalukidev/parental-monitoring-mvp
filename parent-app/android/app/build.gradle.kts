@@ -1,3 +1,16 @@
+import java.util.Properties
+
+val releaseSecrets = Properties().apply {
+    val secretsFile = rootProject.file("key.properties")
+    if (secretsFile.exists()) secretsFile.inputStream().use { load(it) }
+}
+fun signingValue(name: String): String? = System.getenv("SEFTLY_" + name.replace(Regex("([a-z])([A-Z])"), "$1_$2").uppercase())
+    ?: releaseSecrets.getProperty(name)
+val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !signingValue(it).isNullOrBlank() }
+if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) } && !hasReleaseSigning) {
+    throw GradleException("Release signing requires an ignored key.properties file or SEFTLY_STORE_FILE / STORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD environment variables.")
+}
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -24,17 +37,18 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("../parentapp-release-key.jks")
-            storePassword = "123457"
-            keyAlias = "parentapp"
-            keyPassword = "123457"
+        if (hasReleaseSigning) create("release") {
+            storeFile = file(signingValue("storeFile")!!)
+            storePassword = signingValue("storePassword")
+            keyAlias = signingValue("keyAlias")
+            keyPassword = signingValue("keyPassword")
         }
     }
 
     buildTypes {
+        debug { applicationIdSuffix = ".debug" }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
 }

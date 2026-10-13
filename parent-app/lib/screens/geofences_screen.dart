@@ -1,3 +1,5 @@
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -26,7 +28,8 @@ class GeofencesScreen extends StatefulWidget {
   State<GeofencesScreen> createState() => _GeofencesScreenState();
 }
 
-class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProviderStateMixin {
+class _GeofencesScreenState extends State<GeofencesScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
   List<Geofence> _geofences = [];
@@ -72,7 +75,9 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
       final raw = await ApiService.instance.listGeofences(widget.childId);
       if (mounted) {
         setState(() {
-          _geofences = raw.map((e) => Geofence.fromJson(e as Map<String, dynamic>)).toList();
+          _geofences = raw
+              .map((e) => Geofence.fromJson(e as Map<String, dynamic>))
+              .toList();
           _loadingGeofences = false;
         });
       }
@@ -97,7 +102,9 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
       if (mounted) {
         final rawEvents = (res['events'] as List<dynamic>?) ?? [];
         setState(() {
-          _events = rawEvents.map((e) => GeofenceEvent.fromJson(e as Map<String, dynamic>)).toList();
+          _events = rawEvents
+              .map((e) => GeofenceEvent.fromJson(e as Map<String, dynamic>))
+              .toList();
           _unreadEventsCount = (res['unreadCount'] as num?)?.toInt() ?? 0;
           _loadingEvents = false;
         });
@@ -134,7 +141,11 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SeftlyScaffold(
+      title: 'Places that matter',
+      subtitle:
+          'Manage safety zones and review recorded arrival and departure alerts.',
+      icon: Icons.shield_outlined,
       appBar: AppBar(
         title: Text('${widget.childName}\'s Safe Boundaries'),
         bottom: TabBar(
@@ -193,9 +204,11 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(_geofenceError!, style: const TextStyle(color: Colors.red)),
+            Text(_geofenceError!,
+                style: TextStyle(color: context.colors.error)),
             const SizedBox(height: 12),
-            ElevatedButton(onPressed: _loadGeofences, child: const Text('Retry')),
+            ElevatedButton(
+                onPressed: _loadGeofences, child: const Text('Retry')),
           ],
         ),
       );
@@ -210,7 +223,8 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.shield_moon_outlined, size: 72, color: Colors.grey.shade400),
+                    Icon(Icons.shield_moon_outlined,
+                        size: 72, color: context.muted),
                     const SizedBox(height: 16),
                     Text(
                       'No Geofences Configured',
@@ -220,7 +234,7 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                     Text(
                       'Create safety zones like Home, School, or Sports Club. You\'ll receive instant alerts when ${widget.childName} enters or leaves.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade600),
+                      style: TextStyle(color: context.muted),
                     ),
                     const SizedBox(height: 24),
                     FilledButton.icon(
@@ -244,12 +258,14 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
               ),
             )
           : ListView.builder(
-              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 80),
+              padding: const EdgeInsets.only(
+                  left: 16, right: 16, top: 16, bottom: 80),
               itemCount: _geofences.length,
               itemBuilder: (ctx, i) {
                 final g = _geofences[i];
                 final isSafe = g.zoneType == GeofenceZoneType.safeZone;
-                final zoneColor = isSafe ? Colors.teal : Colors.red;
+                final zoneColor =
+                    isSafe ? context.colors.primary : context.colors.error;
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -286,8 +302,11 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                                     ),
                                   ),
                                   Text(
-                                    isSafe ? 'Safe Zone (${g.radius.toInt()}m radius)' : 'Restricted Zone (${g.radius.toInt()}m radius)',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                    isSafe
+                                        ? 'Safe Zone (${g.radius.toInt()}m radius)'
+                                        : 'Restricted Zone (${g.radius.toInt()}m radius)',
+                                    style: TextStyle(
+                                        fontSize: 12, color: context.muted),
                                   ),
                                 ],
                               ),
@@ -302,12 +321,14 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              const Icon(Icons.place_outlined, size: 14, color: Colors.grey),
+                              Icon(Icons.place_outlined,
+                                  size: 14, color: context.muted),
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   g.address,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                  style: TextStyle(
+                                      fontSize: 12, color: context.muted),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -321,20 +342,23 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                           children: [
                             // State status
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: g.lastState == 'INSIDE'
-                                    ? Colors.green.shade50
+                                    ? context.colors.primaryContainer
                                     : g.lastState == 'OUTSIDE'
-                                        ? Colors.orange.shade50
-                                        : Colors.grey.shade100,
+                                        ? context.colors.tertiaryContainer
+                                        : context
+                                            .colors.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
                                   color: g.lastState == 'INSIDE'
-                                      ? Colors.green.shade300
+                                      ? context.colors.primary
                                       : g.lastState == 'OUTSIDE'
-                                          ? Colors.orange.shade300
-                                          : Colors.grey.shade300,
+                                          ? context.colors.onTertiaryContainer
+                                          : context
+                                              .colors.surfaceContainerHighest,
                                 ),
                               ),
                               child: Row(
@@ -345,7 +369,9 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                                         ? Icons.check_circle_outline
                                         : Icons.location_off_outlined,
                                     size: 14,
-                                    color: g.lastState == 'INSIDE' ? Colors.green : Colors.orange,
+                                    color: g.lastState == 'INSIDE'
+                                        ? context.colors.primary
+                                        : context.colors.onTertiaryContainer,
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
@@ -354,8 +380,8 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
                                       color: g.lastState == 'INSIDE'
-                                          ? Colors.green.shade800
-                                          : Colors.orange.shade800,
+                                          ? context.colors.primary
+                                          : context.colors.onTertiaryContainer,
                                     ),
                                   ),
                                 ],
@@ -371,7 +397,8 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                                   icon: const Icon(Icons.edit_outlined),
                                   tooltip: 'Edit Boundary',
                                   onPressed: () async {
-                                    final updated = await Navigator.of(context).push<bool>(
+                                    final updated =
+                                        await Navigator.of(context).push<bool>(
                                       MaterialPageRoute(
                                         builder: (_) => EditGeofenceScreen(
                                           childId: widget.childId,
@@ -406,7 +433,7 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(_eventsError!, style: const TextStyle(color: Colors.red)),
+            Text(_eventsError!, style: TextStyle(color: context.colors.error)),
             const SizedBox(height: 12),
             ElevatedButton(onPressed: _loadEvents, child: const Text('Retry')),
           ],
@@ -421,13 +448,15 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.notifications_off_outlined, size: 64, color: Colors.grey.shade400),
+                  Icon(Icons.notifications_off_outlined,
+                      size: 64, color: context.muted),
                   const SizedBox(height: 16),
-                  Text('No Boundary Alerts Yet', style: Theme.of(context).textTheme.titleMedium),
+                  Text('No Boundary Alerts Yet',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 6),
                   Text(
                     'Transitions and boundary exit alerts will appear here in real-time.',
-                    style: TextStyle(color: Colors.grey.shade600),
+                    style: TextStyle(color: context.muted),
                   ),
                 ],
               ),
@@ -436,8 +465,9 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
               children: [
                 if (_unreadEventsCount > 0)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    color: Colors.amber.shade50,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: context.colors.tertiaryContainer,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -445,7 +475,7 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                           '$_unreadEventsCount new unread alert${_unreadEventsCount > 1 ? "s" : ""}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.amber.shade900,
+                            color: context.colors.onTertiaryContainer,
                             fontSize: 13,
                           ),
                         ),
@@ -464,11 +494,16 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                       final ev = _events[i];
                       final isExit = ev.isExit;
                       final isRestricted = ev.isRestricted;
-                      final alertColor = isRestricted || isExit ? Colors.red : Colors.green;
+                      final alertColor = isRestricted || isExit
+                          ? context.colors.error
+                          : context.colors.primary;
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 10),
-                        color: ev.isRead ? null : Colors.red.shade50.withValues(alpha: 0.3),
+                        color: ev.isRead
+                            ? null
+                            : context.colors.errorContainer
+                                .withValues(alpha: 0.3),
                         child: ListTile(
                           leading: CircleAvatar(
                             backgroundColor: alertColor.withValues(alpha: 0.15),
@@ -488,15 +523,16 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                                   isExit
                                       ? 'Left ${ev.geofenceName}'
                                       : 'Entered ${ev.geofenceName}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ),
                               if (!ev.isRead)
                                 Container(
                                   width: 8,
                                   height: 8,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.red,
+                                  decoration: BoxDecoration(
+                                    color: context.colors.error,
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -513,7 +549,8 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
                               if (ev.address.isNotEmpty)
                                 Text(
                                   ev.address,
-                                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                  style: TextStyle(
+                                      fontSize: 11, color: context.muted),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),

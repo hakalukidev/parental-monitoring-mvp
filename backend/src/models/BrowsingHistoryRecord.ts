@@ -1,3 +1,4 @@
+import { addRetention } from "../services/historyModels";
 import { Schema, model, Types, Document } from "mongoose";
 
 export type BrowserType =
@@ -61,6 +62,8 @@ const browsingHistoryRecordSchema = new Schema<IBrowsingHistoryRecord>(
 );
 
 browsingHistoryRecordSchema.index({ childId: 1, visitedAt: -1 });
+
+addRetention(browsingHistoryRecordSchema as unknown as Schema);
 
 export const BrowsingHistoryRecord = model<IBrowsingHistoryRecord>(
   "BrowsingHistoryRecord",

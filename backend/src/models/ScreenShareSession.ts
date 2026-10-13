@@ -15,6 +15,8 @@ export interface IScreenShareSession extends Document {
   deviceId: Types.ObjectId;
   status: ScreenShareStatus;
   requestedAt: Date;
+  offerSentAt?: Date | null;
+  answerReceivedAt?: Date | null;
   startedAt?: Date | null;
   endedAt?: Date | null;
   endedBy?: "PARENT" | "CHILD" | "SYSTEM" | null;
@@ -29,6 +31,8 @@ const screenShareSessionSchema = new Schema<IScreenShareSession>({
     enum: ["REQUESTED", "ACCEPTED", "REJECTED", "ACTIVE", "ENDED", "FAILED"],
     default: "REQUESTED",
   },
+  offerSentAt: { type: Date, default: null },
+  answerReceivedAt: { type: Date, default: null },
   requestedAt: { type: Date, default: Date.now },
   startedAt: { type: Date, default: null },
   endedAt: { type: Date, default: null },

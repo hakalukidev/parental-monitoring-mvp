@@ -13,6 +13,7 @@ async function main() {
   const httpServer = http.createServer(app);
 
   const io = new Server(httpServer, {
+    maxHttpBufferSize: 100_000,
     cors: {
       origin: env.corsOrigins,
       credentials: true,
@@ -35,8 +36,8 @@ async function main() {
   process.on("SIGTERM", shutdown);
 }
 
-main().catch((err) => {
+main().catch((_err) => {
   // eslint-disable-next-line no-console
-  console.error("[server] fatal startup error", err);
+  console.error("[server] startup failed; check configuration and database connectivity");
   process.exit(1);
 });

@@ -1,3 +1,4 @@
+import { User } from "../models/User";
 import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/jwt";
 import { AppError } from "../utils/http";
@@ -15,13 +16,13 @@ export function requireAuth(req: AuthedRequest, _res: Response, next: NextFuncti
     throw new AppError("Missing or invalid Authorization header", 401);
   }
   const token = header.slice("Bearer ".length);
-  try {
-    const payload = verifyAccessToken(token);
-    req.user = { id: payload.sub, role: payload.role };
-    next();
-  } catch {
-    throw new AppError("Invalid or expired access token", 401);
-  }
+  void (async () => {
+    let payload;
+    try { payload = verifyAccessToken(token); } catch { throw new AppError("Invalid or expired access token", 401); }
+    const user = await User.findById(payload.sub);
+    if (!user || user.role !== payload.role || user.refreshTokenVersion !== (payload.tokenVersion ?? 0)) throw new AppError("Session expired; please sign in again", 401);
+    req.user = { id: user.id, role: user.role };
+  })().then(() => next(), next);
 }
 
 export function requireRole(role: "PARENT" | "CHILD") {

@@ -63,7 +63,7 @@ object AppScanner {
         return apps.sortedBy { it.appName.lowercase() }
     }
 
-    fun toJsonArray(apps: List<ScannedAppInfo>): JSONArray {
+    fun toJsonArray(apps: List<ScannedAppInfo>, context: Context? = null): JSONArray {
         val jsonArray = JSONArray()
         for (app in apps) {
             val obj = JSONObject().apply {
@@ -72,6 +72,15 @@ object AppScanner {
                 put("category", app.category)
                 app.versionName?.let { put("versionName", it) }
                 put("isSystemApp", app.isSystemApp)
+                if (context != null) try {
+                    val icon = context.packageManager.getApplicationIcon(app.packageName)
+                    val bitmap = android.graphics.Bitmap.createBitmap(48, 48, android.graphics.Bitmap.Config.ARGB_8888)
+                    icon.setBounds(0, 0, 48, 48); icon.draw(android.graphics.Canvas(bitmap))
+                    val bytes = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bytes)
+                    bitmap.recycle()
+                    if (bytes.size() <= 16384) put("iconPngBase64", android.util.Base64.encodeToString(bytes.toByteArray(), android.util.Base64.NO_WRAP))
+                } catch (_: Exception) { /* App may have been removed; metadata still synchronizes. */ }
             }
             jsonArray.put(obj)
         }
@@ -93,7 +102,7 @@ object AppScanner {
         val lowerPkg = pkg.lowercase()
         val lowerName = name.lowercase()
 
-        val gameKeywords = listOf("game", "roblox", "minecraft", "fortnite", "pubg", "clash", "candy", "subway", "brawl", "pokemon", "among us", "play")
+        val gameKeywords = listOf("game", "roblox", "minecraft", "fortnite", "pubg", "clash", "candy", "subway", "brawl", "pokemon", "among us")
         for (k in gameKeywords) {
             if (lowerPkg.contains(k) || lowerName.contains(k)) return "GAME"
         }

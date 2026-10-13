@@ -26,13 +26,11 @@ class BootReceiver : BroadcastReceiver() {
 
             if (token != null && session.isSetupCompleted) {
                 Log.i("BootReceiver", "Starting ChildMonitoringService after reboot")
-                ChildMonitoringService.start(context)
+                try { ChildMonitoringService.start(context) } catch (_: Exception) { Log.w("BootReceiver", "Open Seftly to resume family connection") }
 
-                val fineLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-                val coarseLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
-                if (fineLoc == PackageManager.PERMISSION_GRANTED || coarseLoc == PackageManager.PERMISSION_GRANTED) {
-                    LocationService.start(context, token)
-                }
+                // While-in-use location permission cannot authorize a background boot start.
+                // The guardian can resume location from the visible app after reboot.
+
             }
         }
     }

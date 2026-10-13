@@ -11,7 +11,10 @@ class AppSchedule {
 
   factory AppSchedule.fromJson(Map<String, dynamic> json) {
     return AppSchedule(
-      daysOfWeek: (json['daysOfWeek'] as List<dynamic>?)?.map((e) => e as int).toList() ?? [],
+      daysOfWeek: (json['daysOfWeek'] as List<dynamic>?)
+              ?.map((e) => e as int)
+              .toList() ??
+          [],
       startTime: json['startTime'] as String? ?? '00:00',
       endTime: json['endTime'] as String? ?? '00:00',
     );
@@ -33,6 +36,7 @@ class InstalledAppInfo {
   List<AppSchedule> schedules;
   final bool isSystemWhitelisted;
   final String? versionName;
+  final String? iconPngBase64;
   final DateTime? syncedAt;
 
   InstalledAppInfo({
@@ -44,6 +48,7 @@ class InstalledAppInfo {
     this.schedules = const [],
     this.isSystemWhitelisted = false,
     this.versionName,
+    this.iconPngBase64,
     this.syncedAt,
   });
 
@@ -60,7 +65,9 @@ class InstalledAppInfo {
           [],
       isSystemWhitelisted: json['isSystemWhitelisted'] as bool? ?? false,
       versionName: json['versionName'] as String?,
-      syncedAt: json['syncedAt'] != null ? DateTime.tryParse(json['syncedAt']) : null,
+      iconPngBase64: json['iconPngBase64'] as String?,
+      syncedAt:
+          json['syncedAt'] != null ? DateTime.tryParse(json['syncedAt']) : null,
     );
   }
 
@@ -144,7 +151,8 @@ class BrowsingHistoryRecord {
       isBlockedAttempt: json['isBlockedAttempt'] as bool? ?? false,
       blockedReason: json['blockedReason'] as String?,
       visitedAt: json['visitedAt'] != null
-          ? DateTime.tryParse(json['visitedAt'] as String)?.toLocal() ?? DateTime.now()
+          ? DateTime.tryParse(json['visitedAt'] as String)?.toLocal() ??
+              DateTime.now()
           : DateTime.now(),
     );
   }
@@ -155,7 +163,8 @@ class TopDomain {
   final int count;
   final int percentage;
 
-  TopDomain({required this.domain, required this.count, required this.percentage});
+  TopDomain(
+      {required this.domain, required this.count, required this.percentage});
 
   factory TopDomain.fromJson(Map<String, dynamic> json) {
     return TopDomain(
@@ -187,9 +196,10 @@ class BrowsingAnalytics {
               ?.map((e) => TopDomain.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      categoryDistribution: (json['categoryDistribution'] as Map<String, dynamic>?)
-              ?.map((k, v) => MapEntry(k, (v as num).toInt())) ??
-          {},
+      categoryDistribution:
+          (json['categoryDistribution'] as Map<String, dynamic>?)
+                  ?.map((k, v) => MapEntry(k, (v as num).toInt())) ??
+              {},
     );
   }
 }

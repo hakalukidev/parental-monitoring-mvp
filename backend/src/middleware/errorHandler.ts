@@ -17,7 +17,13 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
+  if (err && typeof err === "object" && "code" in err && err.code === 11000) {
+    res.status(409).json({ error: "Record already exists" }); return;
+  }
+  if (err && typeof err === "object" && "name" in err && err.name === "CastError") {
+    res.status(422).json({ error: "Invalid identifier" }); return;
+  }
   // eslint-disable-next-line no-console
-  console.error("[unhandled error]", err);
+  console.error("[request] unexpected failure");
   res.status(500).json({ error: "Internal server error" });
 }

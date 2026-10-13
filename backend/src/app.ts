@@ -1,3 +1,6 @@
+import privacyRoutes from "./routes/privacyRoutes";
+import mongoose from "mongoose";
+import rateLimit from "express-rate-limit";
 import express, { Express } from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -22,7 +25,9 @@ import seftlyRoutes from "./routes/seftlyRoutes";
 export function createApp(): Express {
   const app = express();
 
-  app.set("trust proxy", 1);
+  app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 0));
+  app.disable("x-powered-by");
+  app.use("/api", rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
   app.use(helmet());
   app.use(
@@ -36,7 +41,10 @@ export function createApp(): Express {
 
   app.get("/health", (_req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 
+  app.get("/ready", (_req, res) => res.status(mongoose.connection.readyState === 1 ? 200 : 503).json({ status: mongoose.connection.readyState === 1 ? "ready" : "unavailable", revision: process.env.RELEASE_REVISION ?? "development" }));
+
   app.use("/api/auth", authRoutes);
+  app.use("/api/children", privacyRoutes);
   app.use("/api/children", appPolicyRoutes);
   app.use("/api/children", webRulesRoutes);
   app.use("/api/children", browsingHistoryRoutes);

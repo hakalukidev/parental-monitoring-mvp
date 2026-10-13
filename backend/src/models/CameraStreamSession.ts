@@ -19,6 +19,8 @@ export interface ICameraStreamSession extends Document {
   withAudio: boolean;
   status: CameraStreamStatus;
   requestedAt: Date;
+  offerSentAt?: Date | null;
+  answerReceivedAt?: Date | null;
   startedAt?: Date | null;
   endedAt?: Date | null;
   endedBy?: "PARENT" | "CHILD" | "SYSTEM" | null;
@@ -29,12 +31,14 @@ const cameraStreamSessionSchema = new Schema<ICameraStreamSession>({
   childId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
   deviceId: { type: Schema.Types.ObjectId, ref: "Device", required: true },
   cameraFacing: { type: String, enum: ["BACK", "FRONT"], default: "BACK" },
-  withAudio: { type: Boolean, default: true },
+  withAudio: { type: Boolean, default: false },
   status: {
     type: String,
     enum: ["REQUESTED", "ACCEPTED", "REJECTED", "ACTIVE", "ENDED", "FAILED"],
     default: "REQUESTED",
   },
+  offerSentAt: { type: Date, default: null },
+  answerReceivedAt: { type: Date, default: null },
   requestedAt: { type: Date, default: Date.now },
   startedAt: { type: Date, default: null },
   endedAt: { type: Date, default: null },

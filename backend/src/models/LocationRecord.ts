@@ -1,3 +1,4 @@
+import { addRetention } from "../services/historyModels";
 import { Schema, model, Types, Document } from "mongoose";
 
 export interface ILocationRecord extends Document {
@@ -35,5 +36,7 @@ const locationRecordSchema = new Schema<ILocationRecord>(
 // Compound index for efficient breadcrumb trail queries by child and time range
 locationRecordSchema.index({ childId: 1, recordedAt: -1 });
 locationRecordSchema.index({ childId: 1, createdAt: -1 });
+
+addRetention(locationRecordSchema as unknown as Schema);
 
 export const LocationRecord = model<ILocationRecord>("LocationRecord", locationRecordSchema);

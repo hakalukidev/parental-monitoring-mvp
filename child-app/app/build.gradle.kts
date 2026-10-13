@@ -1,3 +1,17 @@
+import java.net.URI
+import java.util.Properties
+
+val releaseSecrets = Properties().apply {
+    val secretsFile = rootProject.file("key.properties")
+    if (secretsFile.exists()) secretsFile.inputStream().use { load(it) }
+}
+fun signingValue(name: String): String? = System.getenv("SEFTLY_" + name.replace(Regex("([a-z])([A-Z])"), "$1_$2").uppercase())
+    ?: releaseSecrets.getProperty(name)
+val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !signingValue(it).isNullOrBlank() }
+if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) } && !hasReleaseSigning) {
+    throw GradleException("Release signing requires an ignored key.properties file or SEFTLY_STORE_FILE / STORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD environment variables.")
+}
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +25,8 @@ android {
         applicationId = "com.example.childapp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         // Backend
         buildConfigField(
@@ -32,30 +46,34 @@ android {
     // RELEASE SIGNING
     // =========================================================
     signingConfigs {
-        create("release") {
-            storeFile = file("../childapp-release-key.jks")
-            storePassword = "123457"
-            keyAlias = "childapp"
-            keyPassword = "123457"
+        if (hasReleaseSigning) create("release") {
+            storeFile = file(signingValue("storeFile")!!)
+            storePassword = signingValue("storePassword")
+            keyAlias = signingValue("keyAlias")
+            keyPassword = signingValue("keyPassword")
         }
     }
 
-    // =========================================================
-    // BUILD TYPES
-    // =========================================================
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            applicationIdSuffix = ".debug"
+            val developmentApi = providers.gradleProperty("developmentApiUrl").orNull
+            if (developmentApi != null) {
+                val host = URI(developmentApi).host
+                if (host !in listOf("10.0.2.2", "127.0.0.1", "localhost")) throw GradleException("Debug cleartext API override is restricted to loopback hosts")
+                buildConfigField("String", "API_BASE_URL", "\"$developmentApi\"")
+                buildConfigField("String", "SOCKET_URL", "\"$developmentApi\"")
+            }
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
 
     lint {
-        checkReleaseBuilds = false
-        abortOnError = false
+        checkReleaseBuilds = true
+        abortOnError = true
     }
 
     // =========================================================
@@ -87,6 +105,8 @@ android {
 }
 
 dependencies {
+    implementation("androidx.fragment:fragment-ktx:1.8.2")
+    testImplementation("junit:junit:4.13.2")
 
     // =========================================================
     // ANDROIDX

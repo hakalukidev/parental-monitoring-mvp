@@ -25,7 +25,7 @@ parent-app/ios/Flutter/Flutter.framework
 parent-app/ios/Flutter/Flutter.podspec
 parent-app/ios/Pods/
 parent-app/ios/.symlinks/
-parent-app/ios/Runner.xcworkspace/
+parent-app/ios/Runner.xcworkspace/xcuserdata/
 parent-app/ios/Runner.xcodeproj/xcuserdata/
 parent-app/windows/flutter/ephemeral/
 parent-app/linux/flutter/ephemeral/
@@ -42,7 +42,6 @@ child-app/.gradle/
 child-app/local.properties
 child-app/build/
 child-app/app/build/
-child-app/gradle/wrapper/gradle-wrapper.jar
 child-app/captures/
 child-app/.cxx/
 child-app/*.apk
@@ -63,7 +62,21 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+__pycache__/
+*.pyc
 release_apks/
 *.apk
 bug fix/
 repomix-output.xml
+
+# Private release and environment material (preserve locally)
+*.jks
+*.keystore
+**/key.properties
+**/.env
+**/.env.*
+!**/.env.example
+backend/coverage/
+backend/.test-data/
+release_artifacts/
+parent-app/test/failures/

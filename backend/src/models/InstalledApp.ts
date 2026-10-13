@@ -8,6 +8,7 @@ export interface IInstalledApp extends Document {
   category: string;
   versionName?: string;
   isSystemApp: boolean;
+  iconPngBase64?: string;
   syncedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +21,7 @@ const installedAppSchema = new Schema<IInstalledApp>(
     appName: { type: String, required: true },
     category: { type: String, default: "OTHER" },
     versionName: { type: String },
+    iconPngBase64: { type: String, maxlength: 24576 },
     isSystemApp: { type: Boolean, default: false },
     syncedAt: { type: Date, default: Date.now },
   },

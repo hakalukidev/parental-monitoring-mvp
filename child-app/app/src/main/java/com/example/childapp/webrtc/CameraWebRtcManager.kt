@@ -56,7 +56,7 @@ class CameraWebRtcManager(
      */
     fun startStreaming(
         cameraFacing: String = "BACK",
-        withAudio: Boolean = true,
+        withAudio: Boolean = false,
         iceServers: List<PeerConnection.IceServer>
     ) {
         isDisposed.set(false)

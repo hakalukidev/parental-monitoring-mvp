@@ -1,3 +1,9 @@
+import { disconnectUserSockets } from "../socket/io";
+import { timingSafeEqual } from "crypto";
+import { z } from "zod";
+import { objectIdSchema } from "../services/authorization";
+import { getChildSocketIds } from "../socket/presence";
+import { loginSchema, childLoginSchema } from "../utils/validation";
 import { Request, Response } from "express";
 import { Device } from "../models/Device";
 import { User } from "../models/User";
@@ -30,26 +36,24 @@ function profile(user: { _id: unknown; name: string; email: string; role: string
 
 // POST /api/parent/login - Seftly website compatibility route.
 export const seftlyParentLogin = asyncHandler(async (req: Request, res: Response) => {
-  const email = String(req.body?.email ?? "").trim().toLowerCase();
-  const password = String(req.body?.password ?? "");
+  const { email, password } = loginSchema.parse(req.body);
   const user = await User.findOne({ email, role: "PARENT" });
   if (!user || !(await verifyPassword(user.passwordHash, password))) {
     throw new AppError("Invalid parent email or password", 401);
   }
-  const token = signAccessToken({ sub: user.id, role: "PARENT" });
+  const token = signAccessToken({ sub: user.id, role: "PARENT", tokenVersion: user.refreshTokenVersion });
   const refreshToken = signRefreshToken({ sub: user.id, role: "PARENT", tokenVersion: user.refreshTokenVersion });
   res.json({ token, refreshToken, profile: profile(user) });
 });
 
 // POST /api/child/login - Seftly website compatibility route.
 export const seftlyChildLogin = asyncHandler(async (req: Request, res: Response) => {
-  const identifier = String(req.body?.identifier ?? req.body?.email ?? "").trim().toLowerCase();
-  const password = String(req.body?.password ?? "");
+  const { email: identifier, password } = childLoginSchema.parse({ email: req.body?.identifier ?? req.body?.email, password: req.body?.password });
   const user = await User.findOne({ email: identifier, role: "CHILD" });
   if (!user || !(await verifyPassword(user.passwordHash, password))) {
     throw new AppError("Invalid child username or password", 401);
   }
-  const token = signAccessToken({ sub: user.id, role: "CHILD" });
+  const token = signAccessToken({ sub: user.id, role: "CHILD", tokenVersion: user.refreshTokenVersion });
   const refreshToken = signRefreshToken({ sub: user.id, role: "CHILD", tokenVersion: user.refreshTokenVersion });
   res.json({ token, refreshToken, profile: profile(user) });
 });
@@ -61,7 +65,7 @@ function childResponse(child: any, device: any) {
     username: child.email,
     email: child.email,
     device: device
-      ? { id: device._id, deviceName: device.deviceName, platform: device.platform, status: device.status, lastSeen: device.lastSeen }
+      ? { id: device._id, deviceName: device.deviceName, platform: device.platform, status: getChildSocketIds(String(child._id)).length ? "ONLINE" : "OFFLINE", lastSeen: device.lastSeen }
       : null,
     ...premium(child.expireDate),
   };
@@ -95,7 +99,7 @@ export const seftlyLookupChild = asyncHandler(async (req: Request, res: Response
   const identifier = String(req.query.identifier ?? "").trim().toLowerCase();
   const child = await User.findOne({ role: "CHILD", email: identifier }).lean();
   if (!child) throw new AppError("Child not found", 404);
-  res.json({ valid: true, user: { id: child._id, name: child.name, username: child.email, email: child.email, ...premium(child.expireDate) } });
+  res.json({ valid: true, user: { id: child._id, username: child.email } });
 });
 
 // GET /api/child/dashboard - Child dashboard route for the Seftly website.
@@ -103,13 +107,12 @@ export const seftlyChildDashboard = asyncHandler(async (req: AuthedRequest, res:
   const child = await User.findOne({ _id: req.user!.id, role: "CHILD" }).lean();
   if (!child) throw new AppError("Child not found", 404);
   const device = await Device.findOne({ childId: child._id }).sort({ updatedAt: -1 }).lean();
-  res.json({ profile: { id: child._id, name: child.name, username: child.email, email: child.email }, device: { active: device?.status === "ONLINE", status: device?.status ?? "INACTIVE", message: device ? `${device.platform} device` : "No device registered." }, premium: premium(child.expireDate) });
+  res.json({ profile: { id: child._id, name: child.name, username: child.email, email: child.email }, device: { active: getChildSocketIds(req.user!.id).length > 0, status: getChildSocketIds(req.user!.id).length ? "ONLINE" : "OFFLINE", message: device ? `${device.platform} device` : "No device registered." }, premium: premium(child.expireDate) });
 });
 
 // PATCH /api/account/email - Account settings used by the Seftly dashboard.
 export const seftlyChangeEmail = asyncHandler(async (req: AuthedRequest, res: Response) => {
-  const newEmail = String(req.body?.newEmail ?? "").trim().toLowerCase();
-  const currentPassword = String(req.body?.currentPassword ?? "");
+  const { newEmail, currentPassword } = z.object({ newEmail: z.string().trim().email().max(254).toLowerCase(), currentPassword: z.string().min(1).max(128) }).parse(req.body);
   if (!newEmail || !newEmail.includes("@") || !currentPassword) throw new AppError("A valid email and current password are required", 400);
   const user = await User.findById(req.user!.id);
   if (!user || !(await verifyPassword(user.passwordHash, currentPassword))) throw new AppError("Current password is incorrect", 401);
@@ -122,22 +125,21 @@ export const seftlyChangeEmail = asyncHandler(async (req: AuthedRequest, res: Re
 
 // PATCH /api/account/password - Account settings used by the Seftly dashboard.
 export const seftlyChangePassword = asyncHandler(async (req: AuthedRequest, res: Response) => {
-  const currentPassword = String(req.body?.currentPassword ?? "");
-  const newPassword = String(req.body?.newPassword ?? "");
-  const confirmPassword = String(req.body?.confirmPassword ?? "");
+  const { currentPassword, newPassword, confirmPassword } = z.object({ currentPassword: z.string().min(1).max(128), newPassword: z.string().min(8).max(128), confirmPassword: z.string().max(128) }).parse(req.body);
   if (!currentPassword || newPassword.length < 8 || newPassword !== confirmPassword) throw new AppError("Password fields are invalid", 400);
   const user = await User.findById(req.user!.id);
   if (!user || !(await verifyPassword(user.passwordHash, currentPassword))) throw new AppError("Current password is incorrect", 401);
   user.passwordHash = await hashPassword(newPassword);
   user.refreshTokenVersion += 1;
   await user.save();
+  disconnectUserSockets(user.id);
   res.json({ message: "Password changed successfully." });
 });
 
 // Shared guard for private admin-dashboard synchronization routes.
 export function requireSeftlyServiceToken(req: Request, _res: Response, next: () => void) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (!env.serviceToken || token !== env.serviceToken) throw new AppError("Invalid service token", 401);
+  if (!env.serviceToken || !token || Buffer.byteLength(token) !== Buffer.byteLength(env.serviceToken) || !timingSafeEqual(Buffer.from(token), Buffer.from(env.serviceToken))) throw new AppError("Invalid service token", 401);
   next();
 }
 
@@ -165,10 +167,11 @@ export const seftlyAdminParentChildren = asyncHandler(async (_req: Request, res:
 
 // PATCH /api/child/:id/premium - Dashboard sync after local payment approval.
 export const seftlySyncPremium = asyncHandler(async (req: Request, res: Response) => {
-  const email = String(req.body?.email ?? "").trim().toLowerCase();
-  const expireDate = new Date(String(req.body?.expireDate ?? ""));
-  if (!email || Number.isNaN(expireDate.getTime())) throw new AppError("email and a valid expireDate are required", 400);
-  const child = await User.findOne({ role: "CHILD", email });
+  const id = objectIdSchema.parse(req.params.id);
+  const { email, expireDate: rawExpiry } = z.object({ email: z.string().trim().min(3).max(254).toLowerCase(), expireDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)) }).parse(req.body);
+  const expireDate = new Date(rawExpiry);
+  if (!Number.isFinite(expireDate.getTime())) throw new AppError("Invalid expiration", 422);
+  const child = await User.findOne({ _id: id, role: "CHILD", email });
   if (!child) throw new AppError("Child not found", 404);
   child.expireDate = expireDate;
   await child.save();

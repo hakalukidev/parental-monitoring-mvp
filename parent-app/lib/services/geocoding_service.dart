@@ -26,7 +26,8 @@ class GeocodingService {
         LatLng(_cachedLat!, _cachedLon!),
         LatLng(lat, lon),
       );
-      final secondsElapsed = DateTime.now().difference(_lastFetchTime!).inSeconds;
+      final secondsElapsed =
+          DateTime.now().difference(_lastFetchTime!).inSeconds;
 
       if (metersMoved < 50 && secondsElapsed < 60) {
         return _cachedAddress;
@@ -66,7 +67,8 @@ class GeocodingService {
           }
 
           // Priority 2: Road / Street
-          final road = address['road'] ?? address['pedestrian'] ?? address['street'];
+          final road =
+              address['road'] ?? address['pedestrian'] ?? address['street'];
           if (road != null && road.toString().isNotEmpty) {
             parts.add(road.toString());
           }
@@ -98,12 +100,17 @@ class GeocodingService {
           if (parts.isNotEmpty) {
             formattedAddress = parts.join(', ');
           } else {
-            formattedAddress = data['display_name']?.toString().split(',').take(3).join(', ') ??
+            formattedAddress = data['display_name']
+                    ?.toString()
+                    .split(',')
+                    .take(3)
+                    .join(', ') ??
                 'Location ($lat, $lon)';
           }
         } else {
-          formattedAddress = data['display_name']?.toString().split(',').take(3).join(', ') ??
-              'Location ($lat, $lon)';
+          formattedAddress =
+              data['display_name']?.toString().split(',').take(3).join(', ') ??
+                  'Location ($lat, $lon)';
         }
 
         _cachedLat = lat;
@@ -114,9 +121,10 @@ class GeocodingService {
         return formattedAddress;
       }
     } catch (e) {
-      debugPrint('GeocodingService error: $e');
+      debugPrint('Address lookup unavailable.');
     }
 
-    return _cachedAddress ?? 'Location (${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)})';
+    return _cachedAddress ??
+        'Location (${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)})';
   }
 }

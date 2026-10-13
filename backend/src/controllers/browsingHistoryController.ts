@@ -1,12 +1,12 @@
+import { Types } from "mongoose";
+import { Device } from "../models/Device";
+import { localDayBounds } from "../services/calendar";
+import { ingestBrowsing } from "../services/browsingIngestion";
 import { Response } from "express";
 import { asyncHandler, AppError } from "../utils/http";
 import { AuthedRequest } from "../middleware/auth";
 import { assertParentOwnsChild } from "./childrenController";
-import { BrowsingHistoryRecord, IBrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
-import { Device } from "../models/Device";
-import { User } from "../models/User";
-import { getIO } from "../socket/io";
-import { getParentSocketIds } from "../socket/presence";
+import { BrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
 import {
   recordBrowsingBatchSchema,
   browsingHistoryQuerySchema,
@@ -28,7 +28,7 @@ export const listBrowsingHistory = asyncHandler(async (req: AuthedRequest, res: 
   }
 
   if (query.search && query.search.trim()) {
-    const s = query.search.trim();
+    const s = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     filter.$or = [
       { url: { $regex: s, $options: "i" } },
       { domain: { $regex: s, $options: "i" } },
@@ -74,41 +74,7 @@ export const recordBatchHistory = asyncHandler(async (req: AuthedRequest, res: R
   }
 
   const data = recordBrowsingBatchSchema.parse(req.body);
-  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 }).lean();
-
-  const documents = data.records.map((r) => ({
-    childId,
-    deviceId: device?._id ?? null,
-    url: r.url,
-    domain: r.domain,
-    title: r.title || "",
-    browser: r.browser,
-    isIncognito: r.isIncognito,
-    category: r.category || "GENERAL",
-    isBlockedAttempt: r.isBlockedAttempt,
-    blockedReason: r.blockedReason,
-    visitedAt: r.visitedAt ? new Date(r.visitedAt) : new Date(),
-  }));
-
-  const inserted = await BrowsingHistoryRecord.insertMany(documents, { ordered: false });
-
-  // Real-time notification to parent for recent activity
-  try {
-    const child = await User.findById(childId);
-    if (child?.parentId) {
-      const parentSockets = getParentSocketIds(child.parentId.toString());
-      const io = getIO();
-      for (const pSocket of parentSockets) {
-        for (const doc of inserted.slice(-5)) {
-          io.to(pSocket).emit("new_browsing_activity", {
-            childId,
-            record: doc,
-          });
-        }
-      }
-    }
-  } catch {}
-
+  const inserted = await ingestBrowsing(childId, data.records);
   res.json({ success: true, count: inserted.length });
 });
 
@@ -118,10 +84,9 @@ export const getBrowsingAnalytics = asyncHandler(async (req: AuthedRequest, res:
   const childId = req.params.childId;
   await assertParentOwnsChild(parentId, childId);
 
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
-  const todayFilter = { childId, visitedAt: { $gte: startOfDay } };
+  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 }).select("timeZone").lean();
+  const { start, end } = localDayBounds(device?.timeZone ?? "UTC");
+  const todayFilter = { childId: new Types.ObjectId(childId), visitedAt: { $gte: start, $lt: end } };
 
   const [totalVisited, blockedAttempts, topDomainsRaw, categoryBreakdownRaw] = await Promise.all([
     BrowsingHistoryRecord.countDocuments(todayFilter),

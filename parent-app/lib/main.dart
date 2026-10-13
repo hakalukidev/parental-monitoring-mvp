@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'services/app_config.dart';
+import 'design/seftly_theme.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/dashboard_screen.dart';
@@ -6,21 +7,11 @@ import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 
-class MyHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        return host == '163.227.239.88' || host == 'api.hakaluki.dev';
-      };
-  }
-}
-
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
-  HttpOverrides.global = MyHttpOverrides();
   WidgetsFlutterBinding.ensureInitialized();
+  AppConfig.validate();
   await ApiService.instance.loadPersistedToken();
   await NotificationService.instance.init(rootNavigatorKey);
   runApp(const ParentApp());
@@ -35,10 +26,9 @@ class ParentApp extends StatelessWidget {
       navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Seftly Parent',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-      ),
+      theme: SeftlyTheme.light(),
+      darkTheme: SeftlyTheme.dark(),
+      themeMode: ThemeMode.system,
       home: FutureBuilder<String?>(
         future: ApiService.instance.accessToken,
         builder: (context, snapshot) {

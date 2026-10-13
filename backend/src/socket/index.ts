@@ -1,664 +1,260 @@
+import { MediaLease } from "../models/MediaLease";
+import { releaseMediaSession, notifySessionEnd } from "../services/mediaSessions";
+import { Model } from "mongoose";
+import { IScreenShareSession } from "../models/ScreenShareSession";
 import { Server, Socket } from "socket.io";
+import { z } from "zod";
 import { verifyAccessToken } from "../utils/jwt";
 import { Device } from "../models/Device";
 import { ScreenShareSession } from "../models/ScreenShareSession";
 import { CameraStreamSession } from "../models/CameraStreamSession";
-import { LocationRecord } from "../models/LocationRecord";
 import { User } from "../models/User";
-import { BrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
-import { evaluateChildGeofences } from "../services/geofenceService";
+import { AppUsageReport } from "../models/AppUsageReport";
+import { UnblockRequest } from "../models/UnblockRequest";
+import { AppError } from "../utils/http";
+import { recordLocationSchema, recordBrowsingHistorySchema } from "../utils/validation";
+import { ingestLocation } from "../services/locationIngestion";
+import { ingestBrowsing } from "../services/browsingIngestion";
+import { Actor, ownedChild, assertSessionParticipant, openSessionStates, sessionExpired } from "../services/authorization";
+import { EventBudget, sessionPayload, childPayload, heartbeatPayload, sdpPayload, icePayload, unblockRequestPayload, unblockResponsePayload } from "./validation";
+import { setChildSocket, removeChildSocket, getChildSocketIds, addParentSocket, removeParentSocket, getParentSocketIds } from "./presence";
 
-import {
-  setChildSocket,
-  removeChildSocket,
-  getChildSocketIds,
-  addParentSocket,
-  removeParentSocket,
-  getParentSocketIds,
-  findChildIdBySocket,
-} from "./presence";
-
-interface SocketAuthPayload {
-  userId: string;
-  role: "PARENT" | "CHILD";
-}
-
-function authenticateSocket(socket: Socket): SocketAuthPayload {
-  const token = socket.handshake.auth?.token as string | undefined;
-  if (!token) throw new Error("Missing auth token");
-  const payload = verifyAccessToken(token);
-  return { userId: payload.sub, role: payload.role };
-}
+type SocketActor = Actor & { token: string };
+type Ack = (result: { ok: boolean; code?: string }) => void;
+const sessionModels: Model<IScreenShareSession>[] = [ScreenShareSession, CameraStreamSession as unknown as Model<IScreenShareSession>];
 
 export function registerSocketHandlers(io: Server): void {
-  io.use((socket, next) => {
-    try {
-      const auth = authenticateSocket(socket);
-      (socket.data as SocketAuthPayload) = auth;
-      next();
-    } catch (err) {
-      next(new Error("Unauthorized"));
+  const emitParent = (parentId: string, event: string, data: unknown) => {
+    for (const id of getParentSocketIds(parentId)) io.to(id).emit(event, data);
+  };
+  async function endUserSessions(userId: string, role: Actor["role"], reason: string) {
+    for (const [index, Model] of sessionModels.entries()) {
+      const sessions = await Model.find({ [role === "CHILD" ? "childId" : "parentId"]: userId, status: { $in: openSessionStates } });
+      for (const session of sessions) {
+        const changed = await Model.updateOne({ _id: session._id, status: { $in: openSessionStates } }, { $set: { status: "ENDED", endedAt: new Date(), endedBy: "SYSTEM" } });
+        if (changed.modifiedCount) { await releaseMediaSession(session.id); notifySessionEnd(session, index === 0 ? "screen_share_stopped" : "camera_stream_stopped", "SYSTEM", reason); }
+      }
     }
+  }
+  // Sweep pending and active sessions. Timers are stopped when the server closes.
+  const sweep = setInterval(() => {
+    void (async () => {
+      for (const [index, Model] of sessionModels.entries()) {
+        const sessions = await Model.find({ status: { $in: openSessionStates } });
+        for (const session of sessions) if (sessionExpired(session)) {
+          const changed = await Model.updateOne({ _id: session._id, status: session.status }, { $set: { status: "ENDED", endedAt: new Date(), endedBy: "SYSTEM" } });
+          if (changed.modifiedCount) { await releaseMediaSession(session.id); notifySessionEnd(session, index === 0 ? "screen_share_stopped" : "camera_stream_stopped", "SYSTEM", "session_expired"); }
+        }
+      }
+    })().catch(() => console.error("[socket] session expiry check failed"));
+  }, 10_000);
+  sweep.unref();
+  io.engine.on("close", () => clearInterval(sweep));
+
+  io.use((socket, next) => {
+    void (async () => {
+      const token = socket.handshake.auth?.token;
+      if (typeof token !== "string" || token.length > 4096) throw new AppError("Unauthorized", 401);
+      const payload = verifyAccessToken(token);
+      const user = await User.findById(payload.sub);
+      if (!user || user.role !== payload.role || user.refreshTokenVersion !== (payload.tokenVersion ?? 0)) throw new AppError("Unauthorized", 401);
+      socket.data = { userId: user.id, role: user.role, token } satisfies SocketActor;
+    })().then(() => next(), () => next(new Error("Unauthorized")));
   });
 
-  io.on("connection", async (socket: Socket) => {
-    const { userId, role } = socket.data as SocketAuthPayload;
-
-    if (role === "CHILD") {
-      setChildSocket(userId, socket.id);
-      const now = new Date();
-      const updatedDev = await Device.findOneAndUpdate(
-        { childId: userId },
-        { status: "ONLINE", lastSeen: now, socketId: socket.id },
-        { sort: { updatedAt: -1 }, new: true }
-      );
-      // Let any connected parent dashboards know this child came online.
-      socket.broadcast.emit("child_status_changed", {
-        childId: userId,
-        status: "ONLINE",
-        lastSeen: now,
-        deviceName: updatedDev?.deviceName ?? "Child Device",
+  io.on("connection", (socket: Socket) => {
+    const actor = socket.data as SocketActor;
+    const { userId, role } = actor;
+    const budget = new EventBudget();
+    // Expired tokens cannot keep a privileged socket alive indefinitely.
+    const expiresAt = verifyAccessToken(actor.token).exp! * 1000;
+    const expiryTimer = setTimeout(() => socket.disconnect(true), Math.max(0, Math.min(expiresAt - Date.now(), 2_147_483_647)));
+    expiryTimer.unref();
+    const requireChild = () => { if (role !== "CHILD") throw new AppError("Forbidden", 403); };
+    const requireParent = () => { if (role !== "PARENT") throw new AppError("Forbidden", 403); };
+    function on<T>(event: string, schema: z.ZodType<T>, handler: (data: T) => Promise<void>) {
+      socket.on(event, (raw: unknown, ack?: Ack) => {
+        void (async () => {
+          if (!budget.take()) throw new AppError("Rate limited", 429);
+          const data = schema.parse(raw);
+          const payload = verifyAccessToken(actor.token);
+          const user = await User.findById(userId);
+          if (!user || user.role !== role || user.refreshTokenVersion !== (payload.tokenVersion ?? 0)) throw new AppError("Unauthorized", 401);
+          await handler(data);
+          if (typeof ack === "function") ack({ ok: true });
+        })().catch((error: unknown) => {
+          const code = error instanceof z.ZodError ? "INVALID_PAYLOAD" : error instanceof AppError ? String(error.statusCode) : "SERVER_ERROR";
+          if (typeof ack === "function") ack({ ok: false, code });
+          socket.emit("operation_error", { event, code });
+          if (code === "401") socket.disconnect(true);
+          if (code === "SERVER_ERROR") console.error(`[socket] ${event} failed`);
+        });
       });
-
-      // Immediately evaluate geofences when child connects / comes online
-      try {
-        const childUser = await User.findById(userId);
-        if (childUser?.parentId) {
-          let loc: any = updatedDev?.lastLocation;
-          if (!loc?.latitude) {
-            const locRec = await LocationRecord.findOne({ childId: userId }).sort({ recordedAt: -1 }).lean();
-            if (locRec) {
-              loc = {
-                latitude: locRec.latitude,
-                longitude: locRec.longitude,
-                accuracy: locRec.accuracy,
-                altitude: locRec.altitude,
-                speed: locRec.speed,
-                heading: locRec.heading,
-                batteryLevel: locRec.batteryLevel,
-                recordedAt: locRec.recordedAt,
-              };
-            }
-          }
-          if (loc?.latitude && loc?.longitude) {
-            evaluateChildGeofences(userId, childUser.parentId.toString(), loc).catch((e) =>
-              console.error("Error evaluating geofences on child connect:", e)
-            );
-          }
-        }
-      } catch (err) {
-        console.error("Error checking geofences on child connect:", err);
-      }
-    } else if (role === "PARENT") {
-      addParentSocket(userId, socket.id);
-      try {
-        const children = await User.find({ parentId: userId, role: "CHILD" }).select("_id name username").lean();
-        const childrenStatus = await Promise.all(
-          children.map(async (ch) => {
-            const childIdStr = ch._id.toString();
-            const liveSockets = getChildSocketIds(childIdStr);
-            const isOnline = liveSockets.length > 0;
-            const device = await Device.findOne({ childId: childIdStr }).sort({ updatedAt: -1 }).lean();
-            return {
-              childId: childIdStr,
-              status: isOnline ? "ONLINE" : (device?.status || "OFFLINE"),
-              lastSeen: isOnline ? new Date() : (device?.lastSeen || new Date()),
-              deviceName: device?.deviceName ?? "Child Device",
-              platform: device?.platform ?? "Android",
-            };
-          })
-        );
-        socket.emit("initial_children_presence", { children: childrenStatus });
-      } catch (err) {
-        console.error("Error sending initial_children_presence:", err);
-      }
     }
+    async function sessionFor(sessionId: string, states = openSessionStates, kind?: "screen" | "camera", enforceConsent = true) {
+      const screen = kind === "camera" ? null : await ScreenShareSession.findById(sessionId);
+      const session = screen ?? (kind === "screen" ? null : await CameraStreamSession.findById(sessionId));
+      if (!session) throw new AppError("Session not found", 404);
+      assertSessionParticipant(actor, session, states);
+      if (enforceConsent) {
+        const device = await Device.findOne({ childId: session.childId }).sort({ updatedAt: -1 }).select("mediaConsentVersion").lean();
+        if (device?.mediaConsentVersion !== 2) throw new AppError("Update Seftly Child to enable consent", 409);
+      }
+      await ownedChild({ userId: session.parentId.toString(), role: "PARENT" }, session.childId.toString());
+      return { session, Model: screen ? sessionModels[0] : sessionModels[1], kind: screen ? "screen_share" : "camera_stream" };
+    }
+    const joinParticipants = (session: { _id: { toString(): string }; parentId: { toString(): string }; childId: { toString(): string } }) => {
+      for (const id of [...getParentSocketIds(session.parentId.toString()), ...getChildSocketIds(session.childId.toString())]) {
+        io.sockets.sockets.get(id)?.join(`session:${session._id.toString()}`);
+      }
+    };
 
-    // Handle periodic heartbeat from active child monitoring service
-    socket.on("child_heartbeat", async (data: { batteryLevel?: number; isGpsOn?: boolean; deviceName?: string }) => {
-      if (role !== "CHILD") return;
-      try {
+    if (role === "CHILD") setChildSocket(userId, socket.id); else addParentSocket(userId, socket.id);
+    void (async () => {
+      if (role === "CHILD") {
         const now = new Date();
-        const updateDoc: any = { status: "ONLINE", lastSeen: now, socketId: socket.id };
-        if (typeof data?.batteryLevel === "number") {
-          updateDoc["lastLocation.batteryLevel"] = data.batteryLevel;
-        }
-        if (data?.deviceName) {
-          updateDoc.deviceName = data.deviceName;
-        }
-        const updatedDev = await Device.findOneAndUpdate(
-          { childId: userId },
-          { $set: updateDoc },
-          { sort: { updatedAt: -1 }, new: true }
-        );
-
-        socket.broadcast.emit("child_status_changed", {
-          childId: userId,
-          status: "ONLINE",
-          lastSeen: now,
-          batteryLevel: data?.batteryLevel,
-          deviceName: updatedDev?.deviceName ?? "Child Device",
-        });
-
-        // Trigger geofence evaluation on heartbeat if child has location
-        const childUser = await User.findById(userId);
-        if (childUser?.parentId && updatedDev?.lastLocation?.latitude && updatedDev?.lastLocation?.longitude) {
-          evaluateChildGeofences(userId, childUser.parentId.toString(), updatedDev.lastLocation).catch((err) =>
-            console.error("Error evaluating geofences on child heartbeat:", err)
-          );
-        }
-      } catch (err) {
-        console.error("Error handling child_heartbeat:", err);
+        const device = await Device.findOneAndUpdate({ childId: userId }, { status: "ONLINE", lastSeen: now, socketId: socket.id }, { sort: { updatedAt: -1 }, new: true });
+        const child = await User.findById(userId);
+        if (socket.connected && child?.parentId) emitParent(child.parentId.toString(), "child_status_changed", { childId: userId, status: "ONLINE", lastSeen: now, deviceName: device?.deviceName });
+      } else {
+        const children = await User.find({ parentId: userId, role: "CHILD" }).select("_id").lean();
+        const statuses = await Promise.all(children.map(async (child) => {
+          const device = await Device.findOne({ childId: child._id }).sort({ updatedAt: -1 }).lean();
+          return { childId: child._id.toString(), status: getChildSocketIds(child._id.toString()).length ? "ONLINE" : "OFFLINE", lastSeen: device?.lastSeen ?? null, deviceName: device?.deviceName, platform: device?.platform };
+        }));
+        if (socket.connected) socket.emit("initial_children_presence", { children: statuses });
       }
+    })().catch(() => { socket.emit("operation_error", { event: "presence", code: "SERVER_ERROR" }); socket.disconnect(true); });
+
+    on("child_heartbeat", heartbeatPayload, async (data) => {
+      requireChild();
+      const now = new Date();
+      const update: Record<string, unknown> = { status: "ONLINE", lastSeen: now, socketId: socket.id };
+      if (data.batteryLevel !== undefined) update["lastLocation.batteryLevel"] = data.batteryLevel;
+      if (data.deviceName) update.deviceName = data.deviceName;
+      const device = await Device.findOneAndUpdate({ childId: userId }, { $set: update }, { sort: { updatedAt: -1 }, new: true });
+      const child = await User.findById(userId);
+      if (child?.parentId) emitParent(child.parentId.toString(), "child_status_changed", { childId: userId, status: "ONLINE", lastSeen: now, batteryLevel: data.batteryLevel, deviceName: device?.deviceName });
     });
-
-    // Auto-join any active/requested sessions for this user so reconnected sockets stay in sync
-    try {
-      const activeScreenSessions = await ScreenShareSession.find({
-        $or: [
-          { parentId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
-          { childId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
-        ],
+    on("join_session", sessionPayload, async ({ sessionId }) => {
+      await sessionFor(sessionId);
+      await socket.join(`session:${sessionId}`);
+    });
+    for (const kind of ["screen", "camera"] as const) {
+      const prefix = kind === "screen" ? "screen_share" : "camera_stream";
+      on(`${prefix}_accept`, sessionPayload, async ({ sessionId }) => {
+        requireChild();
+        const { session, Model } = await sessionFor(sessionId, ["REQUESTED"], kind);
+        const changed = await Model.updateOne({ _id: session._id, status: "REQUESTED" }, { $set: { status: "ACCEPTED" } });
+        if (!changed.modifiedCount) throw new AppError("Request already handled", 409);
+        joinParticipants(session);
+        io.to(`session:${sessionId}`).emit(`${prefix}_accept`, { sessionId });
       });
-      for (const s of activeScreenSessions) {
-        socket.join(`session:${s.id}`);
-      }
-
-      const activeCameraSessions = await CameraStreamSession.find({
-        $or: [
-          { parentId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
-          { childId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
-        ],
+      on(`${prefix}_reject`, sessionPayload.extend({ reason: z.string().max(200).optional() }), async ({ sessionId, reason }) => {
+        requireChild();
+        const { session, Model } = await sessionFor(sessionId, ["REQUESTED"], kind);
+        const changed = await Model.updateOne({ _id: session._id, status: "REQUESTED" }, { $set: { status: "REJECTED", endedAt: new Date(), endedBy: "CHILD" } });
+        if (!changed.modifiedCount) throw new AppError("Request already handled", 409);
+        emitParent(session.parentId.toString(), `${prefix}_reject`, { sessionId, reason });
+        await releaseMediaSession(sessionId);
+        io.in(`session:${sessionId}`).socketsLeave(`session:${sessionId}`);
       });
-      for (const s of activeCameraSessions) {
-        socket.join(`session:${s.id}`);
-      }
-    } catch {
-      // ignore lookup error on socket connect
+      on(`${prefix}_stopped`, sessionPayload, async ({ sessionId }) => {
+        const { Model, session } = await sessionFor(sessionId, openSessionStates, kind, false);
+        await Model.updateOne({ _id: session._id, status: { $in: openSessionStates } }, { $set: { status: "ENDED", endedAt: new Date(), endedBy: role } });
+        joinParticipants(session);
+        await releaseMediaSession(sessionId);
+        notifySessionEnd(session, `${prefix}_stopped`, role);
+      });
     }
-
-    // ---- Explicit room joining ----
-    socket.on("join_session", async ({ sessionId }: { sessionId: string }) => {
-      if (!sessionId) return;
-      const screenSession = await ScreenShareSession.findById(sessionId);
-      if (screenSession) {
-        const isParticipant =
-          (role === "PARENT" && screenSession.parentId.toString() === userId) ||
-          (role === "CHILD" && screenSession.childId.toString() === userId);
-        if (isParticipant) socket.join(`session:${sessionId}`);
-        return;
-      }
-
-      const cameraSession = await CameraStreamSession.findById(sessionId);
-      if (cameraSession) {
-        const isParticipant =
-          (role === "PARENT" && cameraSession.parentId.toString() === userId) ||
-          (role === "CHILD" && cameraSession.childId.toString() === userId);
-        if (isParticipant) socket.join(`session:${sessionId}`);
-      }
+    on("camera_stream_switch_camera", sessionPayload.extend({ cameraFacing: z.enum(["BACK", "FRONT"]) }), async ({ sessionId, cameraFacing }) => {
+      requireParent();
+      const { session } = await sessionFor(sessionId, ["ACTIVE"], "camera");
+      await CameraStreamSession.updateOne({ _id: session._id, status: "ACTIVE" }, { $set: { cameraFacing } });
+      socket.to(`session:${sessionId}`).emit("camera_stream_switch_camera", { sessionId, cameraFacing });
     });
-
-    // ---- Screen share consent flow ----
-
-    // Child approves a pending screen share request
-    socket.on("screen_share_accept", async ({ sessionId }: { sessionId: string }) => {
-      if (role !== "CHILD") return;
-      const session = await ScreenShareSession.findById(sessionId);
-      if (!session || session.childId.toString() !== userId) return;
-
-      // Always ensure the accepting socket and parent sockets are in the session room
-      socket.join(`session:${sessionId}`);
-      for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
-        io.sockets.sockets.get(parentSocketId)?.join(`session:${sessionId}`);
-      }
-
-      if (session.status === "REQUESTED") {
-        session.status = "ACCEPTED";
-        await session.save();
-        io.to(`session:${sessionId}`).emit("screen_share_accept", { sessionId });
-      } else if (session.status === "ACCEPTED" || session.status === "ACTIVE") {
-        // If re-accepting or service socket connected, inform room of acceptance
-        io.to(`session:${sessionId}`).emit("screen_share_accept", { sessionId });
-      }
+    on("webrtc_offer", sdpPayload, async ({ sessionId, sdp }) => {
+      requireChild();
+      if (sdp.type !== "offer") throw new AppError("Invalid offer", 400);
+      const { session, Model } = await sessionFor(sessionId, ["ACCEPTED"]);
+      const device = await Device.findOne({ childId: session.childId }).sort({ updatedAt: -1 }).select("mediaConsentVersion").lean();
+      if (device?.mediaConsentVersion !== 2) throw new AppError("Update Seftly Child to enable consent", 409);
+      const changed = await Model.updateOne({ _id: session._id, status: "ACCEPTED", offerSentAt: null }, { $set: { offerSentAt: new Date() } });
+      if (!changed.modifiedCount) throw new AppError("Offer already handled", 409);
+      joinParticipants(session);
+      socket.to(`session:${sessionId}`).emit("webrtc_offer", { sessionId, sdp });
     });
-
-    // Child rejects a pending screen share request
-    socket.on("screen_share_reject", async ({ sessionId }: { sessionId: string }) => {
-      if (role !== "CHILD") return;
-      const session = await ScreenShareSession.findById(sessionId);
-      if (!session || session.childId.toString() !== userId) return;
-      if (session.status !== "REQUESTED") return;
-
-      session.status = "REJECTED";
-      session.endedAt = new Date();
-      session.endedBy = "CHILD";
-      await session.save();
-
-      for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
-        io.to(parentSocketId).emit("screen_share_reject", { sessionId });
-      }
-    });
-
-    // ---- Camera stream flow ----
-
-    // Child accepts / starts camera stream
-    socket.on("camera_stream_accept", async ({ sessionId }: { sessionId: string }) => {
-      if (role !== "CHILD") return;
-      const session = await CameraStreamSession.findById(sessionId);
-      if (!session || session.childId.toString() !== userId) return;
-
-      socket.join(`session:${sessionId}`);
-      for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
-        io.sockets.sockets.get(parentSocketId)?.join(`session:${sessionId}`);
-      }
-
-      if (session.status === "REQUESTED") {
-        session.status = "ACCEPTED";
-        await session.save();
-        io.to(`session:${sessionId}`).emit("camera_stream_accept", { sessionId });
-      } else if (session.status === "ACCEPTED" || session.status === "ACTIVE") {
-        io.to(`session:${sessionId}`).emit("camera_stream_accept", { sessionId });
-      }
-    });
-
-    // Child rejects or reports error for camera stream
-    socket.on(
-      "camera_stream_reject",
-      async ({ sessionId, reason }: { sessionId: string; reason?: string }) => {
-        if (role !== "CHILD") return;
-        const session = await CameraStreamSession.findById(sessionId);
-        if (!session || session.childId.toString() !== userId) return;
-        if (session.status !== "REQUESTED") return;
-
-        session.status = "REJECTED";
-        session.endedAt = new Date();
-        session.endedBy = "CHILD";
-        await session.save();
-
-        for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
-          io.to(parentSocketId).emit("camera_stream_reject", { sessionId, reason });
-        }
-      }
-    );
-
-    // Parent requests switching camera lens (front / back)
-    socket.on(
-      "camera_stream_switch_camera",
-      async ({ sessionId, cameraFacing }: { sessionId: string; cameraFacing?: "BACK" | "FRONT" }) => {
-        if (role !== "PARENT") return;
-        const session = await CameraStreamSession.findById(sessionId);
-        if (!session || session.parentId.toString() !== userId) return;
-
-        if (cameraFacing) {
-          session.cameraFacing = cameraFacing;
-          await session.save();
-        }
-
-        socket.to(`session:${sessionId}`).emit("camera_stream_switch_camera", {
-          sessionId,
-          cameraFacing: session.cameraFacing,
-        });
-      }
-    );
-
-    // Camera stream stopped over socket
-    socket.on("camera_stream_stopped", async ({ sessionId }: { sessionId: string }) => {
-      const session = await CameraStreamSession.findById(sessionId);
-      if (!session) return;
-      const isParticipant =
-        (role === "PARENT" && session.parentId.toString() === userId) ||
-        (role === "CHILD" && session.childId.toString() === userId);
-      if (!isParticipant || session.status === "ENDED") return;
-
-      session.status = "ENDED";
-      session.endedAt = new Date();
-      session.endedBy = role;
-      await session.save();
-
-      io.to(`session:${sessionId}`).emit("camera_stream_stopped", { sessionId, endedBy: role });
-    });
-
-    // ---- WebRTC signaling relay (backend never touches media, just forwards SDP/ICE) ----
-
-    socket.on(
-      "webrtc_offer",
-      async ({ sessionId, sdp }: { sessionId: string; sdp: unknown }) => {
-        const screenSession = await ScreenShareSession.findById(sessionId);
-        if (screenSession) {
-          if (screenSession.status === "ACCEPTED") {
-            screenSession.status = "ACTIVE";
-            screenSession.startedAt = new Date();
-            await screenSession.save();
-            io.to(`session:${sessionId}`).emit("screen_share_started", { sessionId });
-          }
-        } else {
-          const cameraSession = await CameraStreamSession.findById(sessionId);
-          if (cameraSession && cameraSession.status === "ACCEPTED") {
-            cameraSession.status = "ACTIVE";
-            cameraSession.startedAt = new Date();
-            await cameraSession.save();
-            io.to(`session:${sessionId}`).emit("camera_stream_started", { sessionId });
-          }
-        }
-        socket.to(`session:${sessionId}`).emit("webrtc_offer", { sessionId, sdp });
-      }
-    );
-
-    socket.on("webrtc_answer", ({ sessionId, sdp }: { sessionId: string; sdp: unknown }) => {
+    on("webrtc_answer", sdpPayload, async ({ sessionId, sdp }) => {
+      requireParent();
+      if (sdp.type !== "answer") throw new AppError("Invalid answer", 400);
+      const { session, Model } = await sessionFor(sessionId, ["ACCEPTED"]);
+      const changed = await Model.updateOne({ _id: session._id, status: "ACCEPTED", offerSentAt: { $ne: null }, answerReceivedAt: null }, { $set: { answerReceivedAt: new Date() } });
+      if (!changed.modifiedCount) throw new AppError("Answer unavailable or already handled", 409);
       socket.to(`session:${sessionId}`).emit("webrtc_answer", { sessionId, sdp });
     });
-
-    socket.on(
-      "ice_candidate",
-      ({ sessionId, candidate }: { sessionId: string; candidate: unknown }) => {
-        socket.to(`session:${sessionId}`).emit("ice_candidate", { sessionId, candidate });
-      }
-    );
-
-    // Either side can signal a stop over the socket too (REST endpoint also supports this)
-    socket.on("screen_share_stopped", async ({ sessionId }: { sessionId: string }) => {
-      const session = await ScreenShareSession.findById(sessionId);
-      if (!session) return;
-      const isParticipant =
-        (role === "PARENT" && session.parentId.toString() === userId) ||
-        (role === "CHILD" && session.childId.toString() === userId);
-      if (!isParticipant || session.status === "ENDED") return;
-
-      session.status = "ENDED";
-      session.endedAt = new Date();
-      session.endedBy = role;
-      await session.save();
-
-      io.to(`session:${sessionId}`).emit("screen_share_stopped", { sessionId, endedBy: role });
+    on("ice_candidate", icePayload, async ({ sessionId, candidate }) => {
+      await sessionFor(sessionId, ["ACCEPTED", "ACTIVE"]);
+      socket.to(`session:${sessionId}`).emit("ice_candidate", { sessionId, candidate });
     });
-
-    // ---- Live GPS Location Tracking ----
-    socket.on(
-      "location_update",
-      async (data: {
-        latitude: number;
-        longitude: number;
-        accuracy?: number;
-        altitude?: number;
-        speed?: number;
-        heading?: number;
-        batteryLevel?: number;
-        recordedAt?: string | Date;
-      }) => {
-        if (role !== "CHILD" || !data || typeof data.latitude !== "number" || typeof data.longitude !== "number") {
-          return;
-        }
-
-        try {
-          const recordedDate = data.recordedAt ? new Date(data.recordedAt) : new Date();
-          const device = await Device.findOne({ childId: userId }).sort({ updatedAt: -1 });
-
-          const locationPayload = {
-            latitude: data.latitude,
-            longitude: data.longitude,
-            accuracy: data.accuracy,
-            altitude: data.altitude,
-            speed: data.speed,
-            heading: data.heading,
-            batteryLevel: data.batteryLevel,
-            recordedAt: recordedDate,
-          };
-
-          await LocationRecord.create({
-            childId: userId,
-            deviceId: device?._id || null,
-            ...locationPayload,
-          });
-
-          if (device) {
-            device.lastLocation = locationPayload;
-            device.lastSeen = new Date();
-            await device.save();
-          }
-
-          const child = await User.findById(userId);
-          if (child?.parentId) {
-            const parentSocketIds = getParentSocketIds(child.parentId.toString());
-            for (const pSocketId of parentSocketIds) {
-              io.to(pSocketId).emit("child_location_update", {
-                childId: userId,
-                ...locationPayload,
-              });
-            }
-
-            // Real-time boundary evaluation against active geofences
-            evaluateChildGeofences(userId, child.parentId.toString(), locationPayload).catch((err) =>
-              console.error("Error in evaluateChildGeofences (socket):", err)
-            );
-          }
-        } catch (err) {
-          // Keep socket resilient on DB write error
-          console.error("Failed to process location_update socket event:", err);
-        }
-      }
-    );
-
-    // ---- App & Game Blocker: Unblock Request flow ----
-    socket.on(
-      "unblock_request",
-      async (data: {
-        requestId?: string;
-        childId?: string;
-        packageName: string;
-        appName: string;
-        reason?: string;
-      }) => {
-        if (role !== "CHILD" || !data.packageName) return;
-        try {
-          const child = await User.findById(userId);
-          if (child?.parentId) {
-            const parentSockets = getParentSocketIds(child.parentId.toString());
-            const payload = {
-              requestId: data.requestId || new Date().getTime().toString(),
-              childId: userId,
-              childName: child.name,
-              packageName: data.packageName,
-              appName: data.appName,
-              reason: data.reason || "Need extra time",
-              requestedAt: new Date().toISOString(),
-            };
-            for (const pSocketId of parentSockets) {
-              io.to(pSocketId).emit("unblock_request", payload);
-            }
-          }
-        } catch (err) {
-          console.error("Error processing unblock_request socket event:", err);
-        }
-      }
-    );
-
-    // Parent responds to child's unblock request
-    socket.on(
-      "unblock_response",
-      async (data: {
-        requestId: string;
-        childId: string;
-        packageName: string;
-        approved: boolean;
-        temporaryDurationMinutes?: number;
-      }) => {
-        if (role !== "PARENT" || !data.childId || !data.packageName) return;
-        try {
-          const childSockets = getChildSocketIds(data.childId);
-          for (const cSocketId of childSockets) {
-            io.to(cSocketId).emit("unblock_response", {
-              requestId: data.requestId,
-              packageName: data.packageName,
-              approved: data.approved,
-              temporaryDurationMinutes: data.temporaryDurationMinutes ?? (data.approved ? 15 : 0),
-            });
-          }
-        } catch (err) {
-          console.error("Error processing unblock_response socket event:", err);
-        }
-      }
-    );
-
-    // Parent toggles instant lockdown over socket
-    socket.on(
-      "instant_lockdown_toggle",
-      async (data: { childId: string; isPaused: boolean }) => {
-        if (role !== "PARENT" || !data.childId) return;
-        try {
-          await Device.updateMany({ childId: data.childId }, { isPaused: data.isPaused });
-          const childSockets = getChildSocketIds(data.childId);
-          for (const cSocketId of childSockets) {
-            io.to(cSocketId).emit("instant_lockdown_toggle", {
-              isPaused: data.isPaused,
-            });
-          }
-        } catch (err) {
-          console.error("Error processing instant_lockdown_toggle socket event:", err);
-        }
-      }
-    );
-
-    // ---- Browsing History Monitoring: Real-time event ----
-    socket.on(
-      "new_browsing_activity",
-      async (data: {
-        url: string;
-        domain: string;
-        title?: string;
-        browser?: string;
-        isIncognito?: boolean;
-        category?: string;
-        isBlockedAttempt?: boolean;
-        blockedReason?: string;
-        visitedAt?: string | Date;
-      }) => {
-        if (role !== "CHILD" || !data.url || !data.domain) return;
-        try {
-          const device = await Device.findOne({ childId: userId }).sort({ updatedAt: -1 }).lean();
-          const record = await BrowsingHistoryRecord.create({
-            childId: userId,
-            deviceId: device?._id ?? null,
-            url: data.url,
-            domain: data.domain,
-            title: data.title || "",
-            browser: (data.browser as any) || "OTHER",
-            isIncognito: data.isIncognito ?? false,
-            category: (data.category as any) || "GENERAL",
-            isBlockedAttempt: data.isBlockedAttempt ?? false,
-            blockedReason: data.blockedReason,
-            visitedAt: data.visitedAt ? new Date(data.visitedAt) : new Date(),
-          });
-
-          const child = await User.findById(userId);
-          if (child?.parentId) {
-            const parentSockets = getParentSocketIds(child.parentId.toString());
-            for (const pSocketId of parentSockets) {
-              io.to(pSocketId).emit("new_browsing_activity", {
-                childId: userId,
-                record,
-              });
-
-              if (record.isBlockedAttempt || record.category === "ADULT" || record.category === "SUSPICIOUS") {
-                io.to(pSocketId).emit("suspicious_web_alert", {
-                  childId: userId,
-                  childName: child.name,
-                  record,
-                });
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Error processing new_browsing_activity socket event:", err);
-        }
-      }
-    );
-
-    // ---- App Usage & Downtime: Real-time sync events ----
-    socket.on("request_usage_sync", async (data: { childId: string }) => {
-      if (role !== "PARENT" || !data?.childId) return;
-      try {
-        const childSockets = getChildSocketIds(data.childId);
-        for (const cSocketId of childSockets) {
-          io.to(cSocketId).emit("request_usage_sync", {
-            childId: data.childId,
-            requestedAt: new Date().toISOString(),
-          });
-        }
-      } catch (err) {
-        console.error("Error processing request_usage_sync socket event:", err);
-      }
+    on("media_connected", sessionPayload, async ({ sessionId }) => {
+      requireChild();
+      const { Model, session, kind } = await sessionFor(sessionId, ["ACCEPTED"]);
+      const changed = await Model.updateOne({ _id: session._id, status: "ACCEPTED", offerSentAt: { $ne: null }, answerReceivedAt: { $ne: null } }, { $set: { status: "ACTIVE", startedAt: new Date() } });
+      if (!changed.modifiedCount) throw new AppError("Session negotiation incomplete", 409);
+      await MediaLease.updateMany({ sessionId }, { $set: { expiresAt: new Date(Date.now() + 30 * 60_000) } });
+      if (changed.modifiedCount) io.to(`session:${sessionId}`).emit(`${kind}_started`, { sessionId });
     });
-
-    socket.on("usage_updated", async (data: { childId?: string; report: any }) => {
-      if (role !== "CHILD") return;
-      try {
-        const child = await User.findById(userId);
-        if (child?.parentId) {
-          const parentSockets = getParentSocketIds(child.parentId.toString());
-          for (const pSocketId of parentSockets) {
-            io.to(pSocketId).emit("usage_updated", {
-              childId: userId,
-              date: data.report?.date,
-              report: data.report,
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Error processing usage_updated socket event:", err);
-      }
+    on("location_update", recordLocationSchema, async (data) => {
+      requireChild();
+      await ingestLocation(userId, data);
     });
-
-    socket.on("disconnect", async () => {
-      if (role === "CHILD") {
-        const childId = findChildIdBySocket(socket.id);
-        if (childId) {
-          const isNowOffline = removeChildSocket(childId, socket.id);
-          if (isNowOffline) {
-            await Device.findOneAndUpdate(
-              { childId },
-              { status: "OFFLINE", lastSeen: new Date(), socketId: null },
-              { sort: { updatedAt: -1 } }
-            );
-            socket.broadcast.emit("child_status_changed", { childId, status: "OFFLINE" });
-
-            // Auto-end any still-active screen sessions for this child so the parent UI doesn't hang.
-            const activeScreenSessions = await ScreenShareSession.find({
-              childId,
-              status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
-            });
-            for (const s of activeScreenSessions) {
-              s.status = "ENDED";
-              s.endedAt = new Date();
-              s.endedBy = "SYSTEM";
-              await s.save();
-              io.to(`session:${s.id}`).emit("screen_share_stopped", {
-                sessionId: s.id,
-                endedBy: "SYSTEM",
-                reason: "child_disconnected",
-              });
-            }
-
-            // Auto-end any still-active camera sessions for this child
-            const activeCameraSessions = await CameraStreamSession.find({
-              childId,
-              status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
-            });
-            for (const s of activeCameraSessions) {
-              s.status = "ENDED";
-              s.endedAt = new Date();
-              s.endedBy = "SYSTEM";
-              await s.save();
-              io.to(`session:${s.id}`).emit("camera_stream_stopped", {
-                sessionId: s.id,
-                endedBy: "SYSTEM",
-                reason: "child_disconnected",
-              });
-            }
-          }
+    on("new_browsing_activity", recordBrowsingHistorySchema, async (data) => {
+      requireChild();
+      await ingestBrowsing(userId, [data]);
+    });
+    on("unblock_request", unblockRequestPayload, async (data) => {
+      requireChild();
+      const child = await User.findById(userId);
+      if (!child?.parentId) throw new AppError("Child unavailable", 403);
+      const exists = await UnblockRequest.findOne({ childId: userId, requestId: data.requestId });
+      if (exists) throw new AppError("Duplicate request", 409);
+      await UnblockRequest.create({ _id: `${userId}:${data.requestId}`, childId: userId, parentId: child.parentId, requestId: data.requestId, packageName: data.packageName, expiresAt: new Date(Date.now() + 10 * 60_000) });
+      emitParent(child.parentId.toString(), "unblock_request", { ...data, childId: userId, childName: child.name, requestedAt: new Date().toISOString() });
+    });
+    on("unblock_response", unblockResponsePayload, async (data) => {
+      await ownedChild(actor, data.childId);
+      const request = await UnblockRequest.findOneAndUpdate({ childId: data.childId, parentId: userId, requestId: data.requestId, packageName: data.packageName, resolvedAt: null, expiresAt: { $gt: new Date() } }, { $set: { resolvedAt: new Date() } }, { new: true });
+      if (!request) throw new AppError("Request expired or already resolved", 409);
+      for (const id of getChildSocketIds(data.childId)) io.to(id).emit("unblock_response", { ...data, temporaryDurationMinutes: data.approved ? data.temporaryDurationMinutes ?? 15 : 0 });
+    });
+    on("instant_lockdown_toggle", childPayload.extend({ isPaused: z.boolean() }), async (data) => {
+      await ownedChild(actor, data.childId);
+      await Device.updateMany({ childId: data.childId }, { $set: { isPaused: data.isPaused } });
+      for (const id of getChildSocketIds(data.childId)) io.to(id).emit("instant_lockdown_toggle", { isPaused: data.isPaused });
+    });
+    on("request_usage_sync", childPayload, async ({ childId }) => {
+      await ownedChild(actor, childId);
+      for (const id of getChildSocketIds(childId)) io.to(id).emit("request_usage_sync", { childId, requestedAt: new Date().toISOString() });
+    });
+    on("usage_updated", z.object({ report: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }) }), async ({ report }) => {
+      requireChild();
+      const child = await User.findById(userId);
+      const saved = await AppUsageReport.findOne({ childId: userId, date: report.date }).lean();
+      if (child?.parentId && saved) emitParent(child.parentId.toString(), "usage_updated", { childId: userId, date: saved.date, report: saved });
+    });
+    socket.on("disconnect", () => {
+      clearTimeout(expiryTimer);
+      const last = role === "CHILD" ? removeChildSocket(userId, socket.id) : (removeParentSocket(userId, socket.id), getParentSocketIds(userId).length === 0);
+      if (!last) return;
+      void (async () => {
+        if (role === "CHILD") {
+          await Device.updateMany({ childId: userId }, { $set: { status: "OFFLINE", socketId: null } });
+          const child = await User.findById(userId);
+          if (child?.parentId && !getChildSocketIds(userId).length) emitParent(child.parentId.toString(), "child_status_changed", { childId: userId, status: "OFFLINE" });
         }
-      } else if (role === "PARENT") {
-        removeParentSocket(userId, socket.id);
-      }
+        // Reconnection requires a new request and fresh consent; media grants are never reused.
+        if (!(role === "CHILD" ? getChildSocketIds(userId) : getParentSocketIds(userId)).length) await endUserSessions(userId, role, `${role.toLowerCase()}_disconnected`);
+      })().catch(() => console.error("[socket] disconnect cleanup failed"));
     });
   });
 }

@@ -13,6 +13,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -57,32 +59,15 @@ class BlockedAppActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    background = Color(0xFF121212),
-                    surface = Color(0xFF1E1E1E),
-                    primary = Color(0xFF3B82F6),
-                    onBackground = Color(0xFFEDEDED),
-                    onSurface = Color(0xFFEDEDED),
-                    onSurfaceVariant = Color(0xFFAAAAAA)
-                )
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    StealthLoadingScreen(
-                        appName = resolvedAppName,
-                        packageName = packageName,
-                        iconBitmap = appIconBitmap,
+            SeftlyChildTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    RestrictionScreen(resolvedAppName, packageName, appIconBitmap,
+                        intent.getStringExtra("REASON") ?: "This app is restricted by your family’s rules.",
+                        onGoHome = { goToHomeScreen() },
                         onApprovedLaunch = {
-                            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-                            if (launchIntent != null) {
-                                startActivity(launchIntent)
-                            }
+                            packageManager.getLaunchIntentForPackage(packageName)?.let { startActivity(it) }
                             finish()
-                        }
-                    )
+                        })
                 }
             }
         }
@@ -117,78 +102,33 @@ class BlockedAppActivity : ComponentActivity() {
 }
 
 @Composable
-fun StealthLoadingScreen(
-    appName: String,
-    packageName: String,
-    iconBitmap: ImageBitmap?,
-    onApprovedLaunch: () -> Unit
-) {
-    // Listen for real-time unblock from parent socket
+fun RestrictionScreen(appName: String, packageName: String, iconBitmap: ImageBitmap?, reason: String, onGoHome: () -> Unit, onApprovedLaunch: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var requestSent by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(packageName) {
-        val socket = BlockedAppActivity.activeSocketManager
-        if (socket != null) {
-            val originalPolicyHandler = socket.onPolicyUpdated
-            socket.onPolicyUpdated = { data ->
-                val type = data.optString("type")
-                if (type == "APP_POLICY") {
-                    val pol = data.optJSONObject("policy")
-                    if (pol != null && pol.optString("packageName") == packageName) {
-                        val status = pol.optString("status")
-                        if (status == "ALWAYS_ALLOWED") {
-                            onApprovedLaunch()
-                        }
-                    }
-                }
-                originalPolicyHandler?.invoke(data)
+        while (true) {
+            kotlinx.coroutines.delay(2000)
+            val allowed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                !com.example.childapp.blocker.AppUsageTracker.evaluatePackage(context, packageName, recordAttempt = false).isBlocked
             }
+            if (allowed) { onApprovedLaunch(); break }
         }
     }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(32.dp)
-        ) {
-            if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap,
-                    contentDescription = appName,
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                )
-                Spacer(Modifier.height(20.dp))
-            }
-
-            Text(
-                text = appName,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-
-            Spacer(Modifier.height(36.dp))
-
-            CircularProgressIndicator(
-                modifier = Modifier.size(42.dp),
-                strokeWidth = 3.5.dp,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            Text(
-                text = "Connecting...",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                fontSize = 14.sp
-            )
-        }
+    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        if (iconBitmap != null) { Image(bitmap = iconBitmap, contentDescription = appName, modifier = Modifier.size(72.dp).clip(RoundedCornerShape(18.dp))); Spacer(Modifier.height(24.dp)) }
+        Text("Time for a break", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(12.dp)); Text(appName, style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(16.dp)); Text(reason, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Spacer(Modifier.height(24.dp))
+        Button(enabled = !requestSent, onClick = {
+            val socket = BlockedAppActivity.activeSocketManager
+            if (socket?.isConnected == true) {
+                socket.sendUnblockRequest(java.util.UUID.randomUUID().toString(), packageName, appName, "Could I have a little extra time?")
+                requestSent = true; message = "Request sent. Your parent can approve extra time."
+            } else message = "You’re offline. Ask your parent to reconnect this device."
+        }, modifier = Modifier.fillMaxWidth()) { Text(if (requestSent) "Waiting for your parent" else "Ask for extra time") }
+        OutlinedButton(onClick = onGoHome, modifier = Modifier.fillMaxWidth()) { Text("Go to home screen") }
+        message?.let { Spacer(Modifier.height(16.dp)); Text(it) }
     }
 }

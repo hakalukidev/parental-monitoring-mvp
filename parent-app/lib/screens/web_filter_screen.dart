@@ -1,3 +1,5 @@
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'package:flutter/material.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
@@ -16,7 +18,8 @@ class WebFilterScreen extends StatefulWidget {
   State<WebFilterScreen> createState() => _WebFilterScreenState();
 }
 
-class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProviderStateMixin {
+class _WebFilterScreenState extends State<WebFilterScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   List<WebBlockRule> _rules = [];
   bool _loading = true;
@@ -54,7 +57,9 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
     try {
       final raw = await ApiService.instance.listWebRules(widget.childId);
       setState(() {
-        _rules = raw.map((e) => WebBlockRule.fromJson(e as Map<String, dynamic>)).toList();
+        _rules = raw
+            .map((e) => WebBlockRule.fromJson(e as Map<String, dynamic>))
+            .toList();
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -66,7 +71,9 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
   WebBlockRule? _findCategoryRule(String categoryKey) {
     try {
       return _rules.firstWhere(
-        (r) => r.ruleType == 'CATEGORY' && r.target.toUpperCase() == categoryKey.toUpperCase(),
+        (r) =>
+            r.ruleType == 'CATEGORY' &&
+            r.target.toUpperCase() == categoryKey.toUpperCase(),
       );
     } catch (_) {
       return null;
@@ -103,7 +110,9 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update filter: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Failed to update filter: $e'),
+            backgroundColor: context.colors.error),
       );
     }
   }
@@ -133,7 +142,8 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                 autofocus: true,
               ),
               const SizedBox(height: 16),
-              const Text('Rule Type:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Rule Type:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               RadioGroup<String>(
                 groupValue: ruleType,
                 onChanged: (val) => setDialogState(() => ruleType = val!),
@@ -163,7 +173,8 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                 ),
               ),
               const SizedBox(height: 8),
-              const Text('Action:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Action:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               RadioGroup<String>(
                 groupValue: action,
                 onChanged: (val) => setDialogState(() => action = val!),
@@ -220,13 +231,16 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
         setState(() => _rules.insert(0, WebBlockRule.fromJson(newRuleMap)));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Added rule: ${targetController.text.trim()}')),
+            SnackBar(
+                content: Text('Added rule: ${targetController.text.trim()}')),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to add rule: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Failed to add rule: $e'),
+                backgroundColor: context.colors.error),
           );
         }
       }
@@ -245,7 +259,9 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete rule: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Failed to delete rule: $e'),
+              backgroundColor: context.colors.error),
         );
       }
     }
@@ -255,7 +271,10 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
   Widget build(BuildContext context) {
     final customRules = _rules.where((r) => r.ruleType != 'CATEGORY').toList();
 
-    return Scaffold(
+    return SeftlyScaffold(
+      title: 'Safer browsing, simpler rules',
+      subtitle: 'Choose the websites and categories to allow or block.',
+      icon: Icons.language_rounded,
       appBar: AppBar(
         title: Text("${widget.childName}'s Web Filter"),
         actions: [
@@ -281,17 +300,19 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                       padding: const EdgeInsets.all(16),
                       children: [
                         Card(
-                          color: Colors.blue.shade50,
-                          child: const Padding(
-                            padding: EdgeInsets.all(12),
+                          color: context.colors.primaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
                             child: Row(
                               children: [
-                                Icon(Icons.info_outline, color: Colors.blue),
-                                SizedBox(width: 12),
+                                Icon(Icons.info_outline,
+                                    color: context.colors.primary),
+                                const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
                                     'Category filters block inappropriate websites and search queries locally on the device.',
-                                    style: TextStyle(fontSize: 13, color: Colors.blueGrey),
+                                    style: TextStyle(
+                                        fontSize: 13, color: context.muted),
                                   ),
                                 ),
                               ],
@@ -312,9 +333,11 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.language, size: 64, color: Colors.grey),
+                                Icon(Icons.language,
+                                    size: 64, color: context.muted),
                                 const SizedBox(height: 16),
-                                const Text('No custom website rules added yet.'),
+                                const Text(
+                                    'No custom website rules added yet.'),
                                 const SizedBox(height: 12),
                                 FilledButton.icon(
                                   icon: const Icon(Icons.add),
@@ -327,22 +350,30 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                         : ListView.separated(
                             padding: const EdgeInsets.all(12),
                             itemCount: customRules.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (ctx, idx) {
                               final rule = customRules[idx];
                               final isBlock = rule.action == 'BLOCK';
                               return ListTile(
                                 leading: CircleAvatar(
-                                  backgroundColor: isBlock ? Colors.red.shade100 : Colors.green.shade100,
+                                  backgroundColor: isBlock
+                                      ? context.colors.errorContainer
+                                      : context.colors.primaryContainer,
                                   child: Icon(
                                     isBlock ? Icons.block : Icons.check,
-                                    color: isBlock ? Colors.red : Colors.green,
+                                    color: isBlock
+                                        ? context.colors.error
+                                        : context.colors.primary,
                                   ),
                                 ),
-                                title: Text(rule.target, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                title: Text(rule.target,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600)),
                                 subtitle: Text(
                                   '${rule.ruleType} • ${rule.action}',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  style: TextStyle(
+                                      fontSize: 12, color: context.muted),
                                 ),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -351,7 +382,8 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                                       value: rule.isEnabled,
                                       onChanged: (val) async {
                                         try {
-                                          await ApiService.instance.updateWebRule(
+                                          await ApiService.instance
+                                              .updateWebRule(
                                             widget.childId,
                                             rule.id,
                                             isEnabled: val,
@@ -361,7 +393,8 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                                       },
                                     ),
                                     IconButton(
-                                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                      icon: Icon(Icons.delete_outline,
+                                          color: context.colors.error),
                                       onPressed: () => _deleteRule(rule),
                                     ),
                                   ],
@@ -409,13 +442,18 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
 
     return SwitchListTile(
       secondary: CircleAvatar(
-        backgroundColor: isEnabled ? Colors.red.shade100 : Colors.grey.shade200,
-        child: Icon(icon, color: isEnabled ? Colors.red.shade800 : Colors.grey.shade700),
+        backgroundColor: isEnabled
+            ? context.colors.errorContainer
+            : context.colors.surfaceContainerHighest,
+        child:
+            Icon(icon, color: isEnabled ? context.colors.error : context.muted),
       ),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
       subtitle: Text(
         isEnabled ? 'Active (Blocked)' : 'Inactive (Allowed)',
-        style: TextStyle(fontSize: 12, color: isEnabled ? Colors.red : Colors.grey),
+        style: TextStyle(
+            fontSize: 12,
+            color: isEnabled ? context.colors.error : context.muted),
       ),
       value: isEnabled,
       onChanged: (val) => _toggleCategory(categoryKey, val),

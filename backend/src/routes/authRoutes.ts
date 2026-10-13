@@ -5,7 +5,7 @@ import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
-const authLimiter = rateLimit({
+export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
   standardHeaders: true,
@@ -20,7 +20,7 @@ const authLimiter = rateLimit({
 router.post("/register", authLimiter, register);
 router.post("/login", authLimiter, login);
 router.post("/child-login", authLimiter, childLogin);
-router.post("/refresh", refresh);
+router.post("/refresh", authLimiter, refresh);
 router.post("/logout", requireAuth, logout);
 
 export default router;

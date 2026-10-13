@@ -1,8 +1,10 @@
+import { addRetention } from "../services/historyModels";
 import { Schema, model, Types, Document } from "mongoose";
 import { AppCategory, AppPolicyStatus } from "./AppPolicy";
 
 export interface IAppUsageItem {
   packageName: string;
+  iconPngBase64?: string;
   appName: string;
   category: AppCategory;
   foregroundTimeSeconds: number;
@@ -26,7 +28,7 @@ export interface IHourlyUsage {
 
 export interface IDowntimeDetails {
   scheduledDowntimeMinutes: number;
-  screenOffTimeSeconds: number;
+  screenOffTimeSeconds: number | null;
   isDevicePaused: boolean;
   activeScheduleDowntime?: string | null;
   blockedAttemptsCount: number;
@@ -39,8 +41,11 @@ export interface IAppUsageReport extends Document {
   deviceId?: Types.ObjectId | null;
   date: string; // YYYY-MM-DD
   totalScreenTimeSeconds: number;
-  totalDowntimeSeconds: number;
-  screenOffTimeSeconds: number;
+  totalDowntimeSeconds: number | null;
+  timeZone: string;
+  usageAvailable: boolean;
+  metricsVersion: number;
+  screenOffTimeSeconds: number | null;
   isDevicePaused: boolean;
   activeScheduleDowntime?: string | null;
   blockedAttemptsCount: number;
@@ -102,9 +107,12 @@ const appUsageReportSchema = new Schema<IAppUsageReport>(
     childId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     deviceId: { type: Schema.Types.ObjectId, ref: "Device", default: null },
     date: { type: String, required: true, index: true }, // "YYYY-MM-DD"
+    timeZone: { type: String, default: "UTC" },
+    metricsVersion: { type: Number, enum: [1, 2], default: 1 },
+    usageAvailable: { type: Boolean, default: false },
     totalScreenTimeSeconds: { type: Number, default: 0, min: 0 },
-    totalDowntimeSeconds: { type: Number, default: 0, min: 0 },
-    screenOffTimeSeconds: { type: Number, default: 0, min: 0 },
+    totalDowntimeSeconds: { type: Number, default: null, min: 0 },
+    screenOffTimeSeconds: { type: Number, default: null, min: 0 },
     isDevicePaused: { type: Boolean, default: false },
     activeScheduleDowntime: { type: String, default: null },
     blockedAttemptsCount: { type: Number, default: 0, min: 0 },
@@ -119,5 +127,7 @@ const appUsageReportSchema = new Schema<IAppUsageReport>(
 
 // Compound index for querying specific child and date
 appUsageReportSchema.index({ childId: 1, date: 1 }, { unique: true });
+
+addRetention(appUsageReportSchema as unknown as Schema);
 
 export const AppUsageReport = model<IAppUsageReport>("AppUsageReport", appUsageReportSchema);

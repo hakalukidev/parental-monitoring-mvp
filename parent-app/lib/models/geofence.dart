@@ -4,10 +4,13 @@ enum GeofenceZoneType {
   safeZone,
   restrictedZone;
 
-  String toApiValue() => this == GeofenceZoneType.safeZone ? 'SAFE_ZONE' : 'RESTRICTED_ZONE';
+  String toApiValue() =>
+      this == GeofenceZoneType.safeZone ? 'SAFE_ZONE' : 'RESTRICTED_ZONE';
 
   static GeofenceZoneType fromString(String val) {
-    return val == 'RESTRICTED_ZONE' ? GeofenceZoneType.restrictedZone : GeofenceZoneType.safeZone;
+    return val == 'RESTRICTED_ZONE'
+        ? GeofenceZoneType.restrictedZone
+        : GeofenceZoneType.safeZone;
   }
 }
 
@@ -53,7 +56,9 @@ class GeofenceSchedule {
 
   factory GeofenceSchedule.fromJson(Map<String, dynamic> json) {
     return GeofenceSchedule(
-      daysOfWeek: (json['daysOfWeek'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList() ??
+      daysOfWeek: (json['daysOfWeek'] as List<dynamic>?)
+              ?.map((e) => (e as num).toInt())
+              .toList() ??
           const [0, 1, 2, 3, 4, 5, 6],
       startTime: json['startTime'] as String?,
       endTime: json['endTime'] as String?,
@@ -120,8 +125,10 @@ class Geofence {
       longitude: (json['longitude'] as num).toDouble(),
       radius: (json['radius'] as num?)?.toDouble() ?? 200.0,
       address: json['address'] as String? ?? '',
-      zoneType: GeofenceZoneType.fromString(json['zoneType'] as String? ?? 'SAFE_ZONE'),
-      triggerType: GeofenceTriggerType.fromString(json['triggerType'] as String? ?? 'EXIT'),
+      zoneType: GeofenceZoneType.fromString(
+          json['zoneType'] as String? ?? 'SAFE_ZONE'),
+      triggerType: GeofenceTriggerType.fromString(
+          json['triggerType'] as String? ?? 'EXIT'),
       isEnabled: json['isEnabled'] as bool? ?? true,
       colorHex: json['colorHex'] as String? ?? '#2196F3',
       lastState: json['lastState'] as String? ?? 'UNKNOWN',

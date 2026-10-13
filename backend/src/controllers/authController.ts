@@ -1,3 +1,4 @@
+import { disconnectUserSockets } from "../socket/io";
 import { Request, Response } from "express";
 import { User } from "../models/User";
 import { hashPassword, verifyPassword } from "../utils/password";
@@ -33,7 +34,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     role: "PARENT",
   });
 
-  const accessToken = signAccessToken({ sub: user.id, role: "PARENT" });
+  const accessToken = signAccessToken({ sub: user.id, role: "PARENT", tokenVersion: user.refreshTokenVersion });
   const refreshToken = signRefreshToken({ sub: user.id, role: "PARENT", tokenVersion: user.refreshTokenVersion });
   setRefreshCookie(res, refreshToken);
 
@@ -47,13 +48,13 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const data = loginSchema.parse(req.body);
 
-  const user = await User.findOne({ email: data.email.toLowerCase() });
+  const user = await User.findOne({ email: data.email.toLowerCase(), role: "PARENT" });
   if (!user) throw new AppError("Invalid email or password", 401);
 
   const ok = await verifyPassword(user.passwordHash, data.password);
   if (!ok) throw new AppError("Invalid email or password", 401);
 
-  const accessToken = signAccessToken({ sub: user.id, role: user.role });
+  const accessToken = signAccessToken({ sub: user.id, role: user.role, tokenVersion: user.refreshTokenVersion });
   const refreshToken = signRefreshToken({
     sub: user.id,
     role: user.role,
@@ -87,7 +88,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError("Refresh token has been revoked", 401);
   }
 
-  const accessToken = signAccessToken({ sub: user.id, role: user.role });
+  const accessToken = signAccessToken({ sub: user.id, role: user.role, tokenVersion: user.refreshTokenVersion });
   const newRefreshToken = signRefreshToken({
     sub: user.id,
     role: user.role,
@@ -102,6 +103,7 @@ export const logout = asyncHandler(async (req: AuthedRequest, res: Response) => 
   // Invalidate all refresh tokens for this user (bump version) and clear cookie
   if (req.user) {
     await User.findByIdAndUpdate(req.user.id, { $inc: { refreshTokenVersion: 1 } });
+    disconnectUserSockets(req.user.id);
   }
   res.clearCookie(REFRESH_COOKIE, { path: "/api/auth" });
   res.status(204).send();
@@ -116,7 +118,7 @@ export const childLogin = asyncHandler(async (req: Request, res: Response) => {
   const ok = await verifyPassword(user.passwordHash, data.password);
   if (!ok) throw new AppError("Invalid username or password", 401);
 
-  const accessToken = signAccessToken({ sub: user.id, role: "CHILD" });
+  const accessToken = signAccessToken({ sub: user.id, role: "CHILD", tokenVersion: user.refreshTokenVersion });
   const refreshToken = signRefreshToken({
     sub: user.id,
     role: "CHILD",

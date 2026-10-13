@@ -1,3 +1,5 @@
+import '../design/seftly_theme.dart';
+import '../design/seftly_widgets.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -97,13 +99,16 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       _trackingMode = MapTrackingMode.historyTrail;
       final now = DateTime.now();
       final focus = widget.focusTimestamp!.toLocal();
-      if (focus.year == now.year && focus.month == now.month && focus.day == now.day) {
+      if (focus.year == now.year &&
+          focus.month == now.month &&
+          focus.day == now.day) {
         _selectedFilter = RouteTimeFilter.today;
       } else {
         _selectedFilter = RouteTimeFilter.custom;
         _customDateRange = DateTimeRange(
           start: DateTime(focus.year, focus.month, focus.day),
-          end: DateTime(focus.year, focus.month, focus.day).add(const Duration(days: 1)),
+          end: DateTime(focus.year, focus.month, focus.day)
+              .add(const Duration(days: 1)),
         );
       }
     }
@@ -117,7 +122,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       final raw = await ApiService.instance.listGeofences(widget.childId);
       if (mounted) {
         setState(() {
-          _geofences = raw.map((e) => Geofence.fromJson(e as Map<String, dynamic>)).toList();
+          _geofences = raw
+              .map((e) => Geofence.fromJson(e as Map<String, dynamic>))
+              .toList();
         });
       }
     } catch (_) {}
@@ -141,8 +148,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
             final newPoint = LocationPoint.fromJson(data);
             setState(() {
               _latestLocation = newPoint;
-              _deviceStatus = 'ONLINE';
-              _lastSeen = DateTime.now();
+              // Recorded fixes can arrive from offline uploads; they do not establish presence.
 
               if (_selectedFilter != RouteTimeFilter.liveOnly) {
                 _routeHistory.add(newPoint);
@@ -151,17 +157,19 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
 
             _updateReverseGeocoding(newPoint.latitude, newPoint.longitude);
 
-            if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null) {
+            if (_trackingMode == MapTrackingMode.directionsToChild &&
+                _parentPosition != null) {
               _calculateDrivingRoute();
             }
 
-            if (_isFollowingChild && _trackingMode == MapTrackingMode.historyTrail) {
+            if (_isFollowingChild &&
+                _trackingMode == MapTrackingMode.historyTrail) {
               _mapController.move(newPoint.latLng, _mapController.camera.zoom);
             }
           }
         });
       } catch (e) {
-        debugPrint('Socket connection error: $e');
+        debugPrint('Live location connection unavailable.');
       }
     }
   }
@@ -184,10 +192,13 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
 
     try {
       // 1. Fetch latest location
-      final latestRes = await ApiService.instance.getLatestLocation(widget.childId);
+      final latestRes =
+          await ApiService.instance.getLatestLocation(widget.childId);
       if (latestRes['location'] != null) {
-        _latestLocation = LocationPoint.fromJson(latestRes['location'] as Map<String, dynamic>);
-        _updateReverseGeocoding(_latestLocation!.latitude, _latestLocation!.longitude);
+        _latestLocation = LocationPoint.fromJson(
+            latestRes['location'] as Map<String, dynamic>);
+        _updateReverseGeocoding(
+            _latestLocation!.latitude, _latestLocation!.longitude);
       }
       _deviceStatus = latestRes['deviceStatus']?.toString() ?? 'OFFLINE';
       if (latestRes['lastSeen'] != null) {
@@ -307,7 +318,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           setState(() {
-            _routeError = 'Location permission is required to calculate directions.';
+            _routeError =
+                'Location permission is required to calculate directions.';
             _loadingRoute = false;
           });
           _fitMapToBounds();
@@ -317,7 +329,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
 
       if (permission == LocationPermission.deniedForever) {
         setState(() {
-          _routeError = 'Location permission permanently denied. Enable in Settings.';
+          _routeError =
+              'Location permission permanently denied. Enable in Settings.';
           _loadingRoute = false;
         });
         _fitMapToBounds();
@@ -371,7 +384,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
           }
         },
         onError: (err) {
-          debugPrint('Parent live position stream error: $err');
+          debugPrint('Parent live position unavailable.');
           // If we already have a cached position, do not show an intrusive error
           if (_parentPosition == null && mounted) {
             setState(() {
@@ -420,10 +433,12 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       return;
     }
 
-    final parentLatLng = LatLng(_parentPosition!.latitude, _parentPosition!.longitude);
+    final parentLatLng =
+        LatLng(_parentPosition!.latitude, _parentPosition!.longitude);
     final childLatLng = _latestLocation!.latLng;
 
-    final result = await _routingService.getDrivingRoute(parentLatLng, childLatLng);
+    final result =
+        await _routingService.getDrivingRoute(parentLatLng, childLatLng);
     if (result != null && mounted) {
       setState(() {
         _osrmRoutePoints = result.points;
@@ -432,7 +447,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       });
 
       // Fit map to show both parent and child
-      final bounds = LatLngBounds.fromPoints([parentLatLng, childLatLng, ..._osrmRoutePoints]);
+      final bounds = LatLngBounds.fromPoints(
+          [parentLatLng, childLatLng, ..._osrmRoutePoints]);
       _mapController.fitCamera(
         CameraFit.bounds(
           bounds: bounds,
@@ -451,10 +467,17 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       return;
     }
 
-    if (_latestLocation == null && _routeHistory.isEmpty && _parentPosition == null) return;
+    if (_latestLocation == null &&
+        _routeHistory.isEmpty &&
+        _parentPosition == null) {
+      return;
+    }
 
-    if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null && _latestLocation != null) {
-      final parentLatLng = LatLng(_parentPosition!.latitude, _parentPosition!.longitude);
+    if (_trackingMode == MapTrackingMode.directionsToChild &&
+        _parentPosition != null &&
+        _latestLocation != null) {
+      final parentLatLng =
+          LatLng(_parentPosition!.latitude, _parentPosition!.longitude);
       final points = [parentLatLng, _latestLocation!.latLng];
       if (_osrmRoutePoints.isNotEmpty) points.addAll(_osrmRoutePoints);
       final bounds = LatLngBounds.fromPoints(points);
@@ -467,7 +490,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       return;
     }
 
-    if (_routeHistory.isNotEmpty && _selectedFilter != RouteTimeFilter.liveOnly) {
+    if (_routeHistory.isNotEmpty &&
+        _selectedFilter != RouteTimeFilter.liveOnly) {
       final points = _routeHistory.map((p) => p.latLng).toList();
       if (_latestLocation != null) points.add(_latestLocation!.latLng);
 
@@ -504,7 +528,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
 
   Future<void> _launchGoogleMapsNavigation(double lat, double lng) async {
     final navUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
-    final webFallback = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+    final webFallback = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
 
     try {
       if (await canLaunchUrl(navUri)) {
@@ -540,8 +565,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                   CircleAvatar(
                     backgroundColor: theme.colorScheme.primary,
                     child: Text(
-                      widget.childName.isNotEmpty ? widget.childName[0].toUpperCase() : 'C',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      widget.childName.isNotEmpty
+                          ? widget.childName[0].toUpperCase()
+                          : 'C',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -551,14 +579,21 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       children: [
                         Text(
                           widget.childName,
-                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          _deviceStatus == 'ONLINE'
-                              ? 'Live • Connected'
+                          _deviceStatus == 'ONLINE' &&
+                                  DateTime.now()
+                                          .difference(loc.recordedAt)
+                                          .inMinutes <
+                                      5
+                              ? 'Recent fix • Device online'
                               : 'Last updated ${DateFormat('MMM d, h:mm a').format(loc.recordedAt)}',
                           style: TextStyle(
-                            color: _deviceStatus == 'ONLINE' ? Colors.green.shade700 : Colors.grey.shade600,
+                            color: _deviceStatus == 'ONLINE'
+                                ? context.colors.primary
+                                : context.muted,
                             fontSize: 12,
                           ),
                         ),
@@ -570,7 +605,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               const Divider(height: 24),
               Row(
                 children: [
-                  const Icon(Icons.location_on, color: Colors.red, size: 20),
+                  Icon(Icons.location_on,
+                      color: context.colors.error, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -587,17 +623,23 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                   _MetricItem(
                     icon: Icons.battery_charging_full,
                     label: 'Battery',
-                    value: loc.batteryLevel != null ? '${loc.batteryLevel}%' : '--',
+                    value: loc.batteryLevel != null
+                        ? '${loc.batteryLevel}%'
+                        : '--',
                   ),
                   _MetricItem(
                     icon: Icons.speed,
                     label: 'Speed',
-                    value: loc.speedKmh != null ? '${loc.speedKmh!.toStringAsFixed(1)} km/h' : '0 km/h',
+                    value: loc.speedKmh != null
+                        ? '${loc.speedKmh!.toStringAsFixed(1)} km/h'
+                        : '0 km/h',
                   ),
                   _MetricItem(
                     icon: Icons.gps_fixed,
                     label: 'GPS Accuracy',
-                    value: loc.accuracy != null ? '±${loc.accuracy!.toStringAsFixed(0)}m' : '--',
+                    value: loc.accuracy != null
+                        ? '±${loc.accuracy!.toStringAsFixed(0)}m'
+                        : '--',
                   ),
                 ],
               ),
@@ -649,9 +691,14 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         : _latestLocation;
 
     final initialCenter = _latestLocation?.latLng ??
-        (_routeHistory.isNotEmpty ? _routeHistory.last.latLng : const LatLng(23.8103, 90.4125));
+        (_routeHistory.isNotEmpty
+            ? _routeHistory.last.latLng
+            : const LatLng(23.8103, 90.4125));
 
-    return Scaffold(
+    return SeftlyScaffold(
+      title: 'Stay connected to their day',
+      subtitle: 'Check the recorded time before relying on a location.',
+      icon: Icons.near_me_outlined,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -659,10 +706,12 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
             Text('${widget.childName}\'s Location'),
             Text(
               _deviceStatus == 'ONLINE'
-                  ? 'Live GPS • Online'
+                  ? 'Device online • Check fix time'
                   : 'Last seen: ${_lastSeen != null ? DateFormat('MMM d, h:mm a').format(_lastSeen!) : 'Offline'}',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: _deviceStatus == 'ONLINE' ? Colors.green.shade700 : Colors.grey.shade600,
+                color: _deviceStatus == 'ONLINE'
+                    ? context.colors.primary
+                    : context.muted,
               ),
             ),
           ],
@@ -670,7 +719,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         actions: [
           IconButton(
             icon: Icon(_showGeofences ? Icons.shield : Icons.shield_outlined,
-                color: _showGeofences ? Colors.teal : null),
+                color: _showGeofences ? context.colors.primary : null),
             tooltip: 'Safety Boundaries & Geofences',
             onPressed: () async {
               await Navigator.of(context).push(
@@ -688,8 +737,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
           ),
           IconButton(
             icon: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
-            tooltip: _isSatelliteView ? 'Switch to Street Map' : 'Switch to Satellite Map',
-            onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
+            tooltip: _isSatelliteView
+                ? 'Switch to Street Map'
+                : 'Switch to Satellite Map',
+            onPressed: () =>
+                setState(() => _isSatelliteView = !_isSatelliteView),
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -718,17 +770,20 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               if (_isSatelliteView)
                 TileLayer(
                   // Google Hybrid: High-res satellite imagery + roads + all place/shop labels
-                  urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                  urlTemplate:
+                      'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                   subdomains: const ['0', '1', '2', '3'],
                   userAgentPackageName: 'com.example.parentapp',
                   maxZoom: 20.0,
                   maxNativeZoom: 20,
-                  fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                  fallbackUrl:
+                      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                 )
               else
                 TileLayer(
                   // Google Street: Full street map with local POIs (mosques, shops, schools, markets, Bengali/English labels)
-                  urlTemplate: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                  urlTemplate:
+                      'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                   subdomains: const ['0', '1', '2', '3'],
                   userAgentPackageName: 'com.example.parentapp',
                   maxZoom: 20.0,
@@ -737,7 +792,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 ),
 
               // Road-following Route Polyline (Directions Mode)
-              if (_trackingMode == MapTrackingMode.directionsToChild && _osrmRoutePoints.isNotEmpty)
+              if (_trackingMode == MapTrackingMode.directionsToChild &&
+                  _osrmRoutePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
@@ -751,13 +807,15 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 ),
 
               // Breadcrumb Polylines (History Trail Mode)
-              if (_trackingMode == MapTrackingMode.historyTrail && _showBreadcrumbs && _routeHistory.length > 1)
+              if (_trackingMode == MapTrackingMode.historyTrail &&
+                  _showBreadcrumbs &&
+                  _routeHistory.length > 1)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: _routeHistory.map((p) => p.latLng).toList(),
                       strokeWidth: 4.5,
-                      color: Colors.blue.shade600.withValues(alpha: 0.85),
+                      color: context.colors.primary.withValues(alpha: 0.85),
                       borderStrokeWidth: 1.5,
                       borderColor: Colors.white,
                     ),
@@ -769,14 +827,20 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 CircleLayer(
                   circles: _geofences.where((g) => g.isEnabled).map((g) {
                     final isSafe = g.zoneType == GeofenceZoneType.safeZone;
-                    final isHighlighted = widget.highlightGeofenceId != null && g.id == widget.highlightGeofenceId;
-                    final col = isSafe ? Colors.teal : Colors.red;
+                    final isHighlighted = widget.highlightGeofenceId != null &&
+                        g.id == widget.highlightGeofenceId;
+                    final col =
+                        isSafe ? context.colors.primary : context.colors.error;
                     return CircleMarker(
                       point: g.latLng,
                       radius: g.radius,
                       useRadiusInMeter: true,
                       color: col.withValues(alpha: isHighlighted ? 0.35 : 0.18),
-                      borderColor: isHighlighted ? (isSafe ? Colors.teal.shade900 : Colors.red.shade900) : col,
+                      borderColor: isHighlighted
+                          ? (isSafe
+                              ? context.colors.primary
+                              : context.colors.error)
+                          : col,
                       borderStrokeWidth: isHighlighted ? 3.5 : 2.0,
                     );
                   }).toList(),
@@ -787,19 +851,24 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 MarkerLayer(
                   markers: _geofences.where((g) => g.isEnabled).map((g) {
                     final isSafe = g.zoneType == GeofenceZoneType.safeZone;
-                    final col = isSafe ? Colors.teal : Colors.red;
+                    final col =
+                        isSafe ? context.colors.primary : context.colors.error;
                     return Marker(
                       point: g.latLng,
                       width: 130,
                       height: 36,
                       child: Center(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
                             color: col,
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: const [
-                              BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))
+                              BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2))
                             ],
                           ),
                           child: Row(
@@ -838,8 +907,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       point: activeLocation.latLng,
                       radius: (activeLocation.accuracy! / 2).clamp(15.0, 80.0),
                       useRadiusInMeter: false,
-                      color: Colors.blue.withValues(alpha: 0.12),
-                      borderColor: Colors.blue.withValues(alpha: 0.35),
+                      color: context.colors.primary.withValues(alpha: 0.12),
+                      borderColor:
+                          context.colors.primary.withValues(alpha: 0.35),
                       borderStrokeWidth: 1.5,
                     ),
                   ],
@@ -858,21 +928,31 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: Colors.red.shade700,
+                              color: context.colors.error,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white, width: 1.5),
-                              boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                              border:
+                                  Border.all(color: Colors.white, width: 1.5),
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black38, blurRadius: 4)
+                              ],
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 12),
+                                const Icon(Icons.warning_amber_rounded,
+                                    color: Colors.white, size: 12),
                                 const SizedBox(width: 4),
                                 Text(
-                                  widget.breachType != null ? '${widget.breachType} Breach' : 'Breach Point',
-                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  widget.breachType != null
+                                      ? '${widget.breachType} Breach'
+                                      : 'Breach Point',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ],
                             ),
@@ -881,37 +961,49 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                           Container(
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.red.shade600,
+                              color: context.colors.error,
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.white, width: 2),
-                              boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 6)],
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black45, blurRadius: 6)
+                              ],
                             ),
-                            child: const Icon(Icons.location_on, color: Colors.white, size: 20),
+                            child: const Icon(Icons.location_on,
+                                color: Colors.white, size: 20),
                           ),
                         ],
                       ),
                     ),
 
                   // Parent Marker (Directions Mode)
-                  if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null)
+                  if (_trackingMode == MapTrackingMode.directionsToChild &&
+                      _parentPosition != null)
                     Marker(
-                      point: LatLng(_parentPosition!.latitude, _parentPosition!.longitude),
+                      point: LatLng(_parentPosition!.latitude,
+                          _parentPosition!.longitude),
                       width: 70,
                       height: 70,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
                               color: const Color(0xFF1E293B),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.white, width: 1.5),
-                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                              border:
+                                  Border.all(color: Colors.white, width: 1.5),
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black26, blurRadius: 4)
+                              ],
                             ),
                             child: const Text(
                               'You',
-                              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -920,16 +1012,21 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                             decoration: const BoxDecoration(
                               color: Color(0xFF2563EB),
                               shape: BoxShape.circle,
-                              boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 6)],
+                              boxShadow: [
+                                BoxShadow(color: Colors.black38, blurRadius: 6)
+                              ],
                             ),
-                            child: const Icon(Icons.person, color: Colors.white, size: 22),
+                            child: const Icon(Icons.person,
+                                color: Colors.white, size: 22),
                           ),
                         ],
                       ),
                     ),
 
                   // Historical waypoint dots (History Trail Mode)
-                  if (_trackingMode == MapTrackingMode.historyTrail && _showBreadcrumbs && _routeHistory.isNotEmpty)
+                  if (_trackingMode == MapTrackingMode.historyTrail &&
+                      _showBreadcrumbs &&
+                      _routeHistory.isNotEmpty)
                     for (int i = 0; i < _routeHistory.length; i++)
                       Marker(
                         point: _routeHistory[i].latLng,
@@ -938,14 +1035,17 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                         child: GestureDetector(
                           onTap: () {
                             setState(() => _scrubbedPointIndex = i);
-                            _mapController.move(_routeHistory[i].latLng, _mapController.camera.zoom);
+                            _mapController.move(_routeHistory[i].latLng,
+                                _mapController.camera.zoom);
                           },
                           child: Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: i == 0
-                                  ? Colors.green
-                                  : (i == _routeHistory.length - 1 ? Colors.red : Colors.blue.shade700),
+                                  ? context.colors.primary
+                                  : (i == _routeHistory.length - 1
+                                      ? context.colors.error
+                                      : context.colors.primary),
                               border: Border.all(color: Colors.white, width: 2),
                             ),
                           ),
@@ -964,11 +1064,13 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: theme.colorScheme.primary,
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.white, width: 1.5),
+                                border:
+                                    Border.all(color: Colors.white, width: 1.5),
                                 boxShadow: const [
                                   BoxShadow(
                                     color: Colors.black38,
@@ -994,7 +1096,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               decoration: BoxDecoration(
                                 color: theme.colorScheme.primary,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
+                                border:
+                                    Border.all(color: Colors.white, width: 2),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withValues(alpha: 0.35),
@@ -1025,7 +1128,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
             right: 12,
             child: Card(
               elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
               child: Padding(
                 padding: const EdgeInsets.all(4),
                 child: Row(
@@ -1034,9 +1138,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       child: _ModeTabButton(
                         title: 'Directions to Child',
                         icon: Icons.alt_route,
-                        isSelected: _trackingMode == MapTrackingMode.directionsToChild,
+                        isSelected:
+                            _trackingMode == MapTrackingMode.directionsToChild,
                         onTap: () {
-                          setState(() => _trackingMode = MapTrackingMode.directionsToChild);
+                          setState(() => _trackingMode =
+                              MapTrackingMode.directionsToChild);
                           _fetchParentLocationAndRoute();
                         },
                       ),
@@ -1045,9 +1151,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       child: _ModeTabButton(
                         title: 'Child History Trail',
                         icon: Icons.timeline,
-                        isSelected: _trackingMode == MapTrackingMode.historyTrail,
+                        isSelected:
+                            _trackingMode == MapTrackingMode.historyTrail,
                         onTap: () {
-                          setState(() => _trackingMode = MapTrackingMode.historyTrail);
+                          setState(() =>
+                              _trackingMode = MapTrackingMode.historyTrail);
                           _fitMapToBounds();
                         },
                       ),
@@ -1073,7 +1181,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       icon: Icons.my_location,
                       isSelected: _selectedFilter == RouteTimeFilter.liveOnly,
                       onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.liveOnly);
+                        setState(
+                            () => _selectedFilter = RouteTimeFilter.liveOnly);
                         _loadLocationData();
                       },
                     ),
@@ -1089,9 +1198,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                     const SizedBox(width: 8),
                     _FilterChip(
                       label: 'Past 24h',
-                      isSelected: _selectedFilter == RouteTimeFilter.past24Hours,
+                      isSelected:
+                          _selectedFilter == RouteTimeFilter.past24Hours,
                       onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.past24Hours);
+                        setState(() =>
+                            _selectedFilter = RouteTimeFilter.past24Hours);
                         _loadLocationData();
                       },
                     ),
@@ -1100,7 +1211,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       label: 'Past 7 Days',
                       isSelected: _selectedFilter == RouteTimeFilter.past7Days,
                       onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.past7Days);
+                        setState(
+                            () => _selectedFilter = RouteTimeFilter.past7Days);
                         _loadLocationData();
                       },
                     ),
@@ -1126,16 +1238,18 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               right: 12,
               child: Card(
                 elevation: 4,
-                color: Colors.red.shade50,
+                color: context.colors.errorContainer,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.red.shade300, width: 1.2),
+                  side: BorderSide(color: context.colors.error, width: 1.2),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     children: [
-                      Icon(Icons.notifications_active, color: Colors.red.shade700, size: 22),
+                      Icon(Icons.notifications_active,
+                          color: context.colors.error, size: 22),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -1147,20 +1261,22 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.red.shade900,
+                                color: context.colors.error,
                               ),
                             ),
                             Text(
                               'Showing trail around ${DateFormat('MMM d, h:mm a').format(widget.focusTimestamp!.toLocal())}',
-                              style: TextStyle(fontSize: 11, color: Colors.red.shade800),
+                              style: TextStyle(
+                                  fontSize: 11, color: context.colors.error),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.close, size: 18),
-                        color: Colors.red.shade900,
-                        onPressed: () => setState(() => _breachBannerDismissed = true),
+                        color: context.colors.error,
+                        onPressed: () =>
+                            setState(() => _breachBannerDismissed = true),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -1173,15 +1289,18 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
           // Floating Action Buttons (Recenter / Layer / Fit)
           Positioned(
             right: 16,
-            bottom: _trackingMode == MapTrackingMode.directionsToChild ? 240 : 220,
+            bottom:
+                _trackingMode == MapTrackingMode.directionsToChild ? 240 : 220,
             child: Column(
               children: [
                 FloatingActionButton.small(
                   heroTag: 'toggle_map_layer',
                   backgroundColor: theme.colorScheme.surface,
                   tooltip: _isSatelliteView ? 'Street View' : 'Satellite View',
-                  onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
-                  child: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
+                  onPressed: () =>
+                      setState(() => _isSatelliteView = !_isSatelliteView),
+                  child:
+                      Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
                 ),
                 if (_trackingMode == MapTrackingMode.historyTrail) ...[
                   const SizedBox(height: 8),
@@ -1189,8 +1308,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                     heroTag: 'toggle_trail',
                     backgroundColor: theme.colorScheme.surface,
                     tooltip: _showBreadcrumbs ? 'Hide Trail' : 'Show Trail',
-                    onPressed: () => setState(() => _showBreadcrumbs = !_showBreadcrumbs),
-                    child: Icon(_showBreadcrumbs ? Icons.timeline : Icons.timeline_outlined),
+                    onPressed: () =>
+                        setState(() => _showBreadcrumbs = !_showBreadcrumbs),
+                    child: Icon(_showBreadcrumbs
+                        ? Icons.timeline
+                        : Icons.timeline_outlined),
                   ),
                 ],
                 const SizedBox(height: 8),
@@ -1233,7 +1355,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
             bottom: 16,
             child: Card(
               elevation: 6,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -1247,9 +1370,11 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                         ),
                       )
                     else if (_error != null)
-                      Text(_error!, style: TextStyle(color: theme.colorScheme.error))
+                      Text(_error!,
+                          style: TextStyle(color: theme.colorScheme.error))
                     else if (activeLocation == null)
-                      const Text('No location data recorded yet for this period.')
+                      const Text(
+                          'No location data recorded yet for this period.')
                     else ...[
                       // Human-Readable Address Header
                       Row(
@@ -1275,14 +1400,16 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               children: [
                                 Text(
                                   _resolvedAddress ?? 'Locating address...',
-                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                  style: theme.textTheme.titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Recorded: ${DateFormat('h:mm:ss a, MMM d').format(activeLocation.recordedAt)} • GPS ±${activeLocation.accuracy?.toStringAsFixed(0) ?? '15'}m',
-                                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                                  'Recorded: ${DateFormat('h:mm:ss a, MMM d').format(activeLocation.recordedAt)} • GPS ±${activeLocation.accuracy?.toStringAsFixed(0) ?? 'unknown'}m',
+                                  style: theme.textTheme.bodySmall
+                                      ?.copyWith(color: context.muted),
                                 ),
                               ],
                             ),
@@ -1291,7 +1418,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       ),
 
                       // Directions Mode Route Info & Google Maps Button
-                      if (_trackingMode == MapTrackingMode.directionsToChild) ...[
+                      if (_trackingMode ==
+                          MapTrackingMode.directionsToChild) ...[
                         const Divider(height: 20),
                         if (_loadingRoute)
                           const Padding(
@@ -1299,35 +1427,49 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                                SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2)),
                                 SizedBox(width: 12),
-                                Text('Calculating road route from your location...'),
+                                Text(
+                                    'Calculating road route from your location...'),
                               ],
                             ),
                           )
                         else if (_routeError != null)
-                          Text(_routeError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 13))
-                        else if (_routeDistanceKm != null && _routeDurationMinutes != null)
+                          Text(_routeError!,
+                              style: TextStyle(
+                                  color: theme.colorScheme.error, fontSize: 13))
+                        else if (_routeDistanceKm != null &&
+                            _routeDurationMinutes != null)
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.shade50,
+                                  color: context.colors.primaryContainer,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Row(
                                   children: [
-                                    Icon(Icons.directions_car, size: 18, color: Colors.blue.shade700),
+                                    Icon(Icons.directions_car,
+                                        size: 18,
+                                        color: context.colors.primary),
                                     const SizedBox(width: 6),
                                     Text(
                                       '${_routeDistanceKm!.toStringAsFixed(1)} km',
-                                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: context.colors.primary),
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
                                       '(${_routeDurationMinutes!} mins)',
-                                      style: TextStyle(color: Colors.blue.shade800),
+                                      style: TextStyle(
+                                          color: context.colors.primary),
                                     ),
                                   ],
                                 ),
@@ -1336,7 +1478,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               FilledButton.icon(
                                 style: FilledButton.styleFrom(
                                   backgroundColor: const Color(0xFF2563EB),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
                                 ),
                                 onPressed: () => _launchGoogleMapsNavigation(
                                   activeLocation.latitude,
@@ -1380,16 +1523,19 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               _MetricItem(
                                 icon: Icons.straighten,
                                 label: 'Distance',
-                                value: '${_calculateTotalDistanceKm().toStringAsFixed(2)} km',
+                                value:
+                                    '${_calculateTotalDistanceKm().toStringAsFixed(2)} km',
                               ),
                           ],
                         ),
-
                         if (_routeHistory.length > 1) ...[
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              const Text('Trail Scrubber', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                              const Text('Trail Scrubber',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600)),
                               const Spacer(),
                               if (_scrubbedPointIndex != null)
                                 TextButton(
@@ -1397,7 +1543,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                                     padding: EdgeInsets.zero,
                                     visualDensity: VisualDensity.compact,
                                   ),
-                                  onPressed: () => setState(() => _scrubbedPointIndex = null),
+                                  onPressed: () => setState(
+                                      () => _scrubbedPointIndex = null),
                                   child: const Text('Back to Live'),
                                 ),
                             ],
@@ -1406,15 +1553,20 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                             min: 0,
                             max: (_routeHistory.length - 1).toDouble(),
                             divisions: _routeHistory.length - 1,
-                            value: (_scrubbedPointIndex ?? (_routeHistory.length - 1)).toDouble(),
+                            value: (_scrubbedPointIndex ??
+                                    (_routeHistory.length - 1))
+                                .toDouble(),
                             onChanged: (val) {
                               final idx = val.round();
                               setState(() {
                                 _scrubbedPointIndex = idx;
                                 _isFollowingChild = false;
                               });
-                              _mapController.move(_routeHistory[idx].latLng, _mapController.camera.zoom);
-                              _updateReverseGeocoding(_routeHistory[idx].latitude, _routeHistory[idx].longitude);
+                              _mapController.move(_routeHistory[idx].latLng,
+                                  _mapController.camera.zoom);
+                              _updateReverseGeocoding(
+                                  _routeHistory[idx].latitude,
+                                  _routeHistory[idx].longitude);
                             },
                           ),
                         ],
@@ -1502,7 +1654,9 @@ class _FilterChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 14, color: isSelected ? theme.colorScheme.onPrimary : null),
+            Icon(icon,
+                size: 14,
+                color: isSelected ? theme.colorScheme.onPrimary : null),
             const SizedBox(width: 4),
           ],
           Text(label),
@@ -1510,7 +1664,9 @@ class _FilterChip extends StatelessWidget {
       ),
       selectedColor: theme.colorScheme.primary,
       labelStyle: TextStyle(
-        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+        color: isSelected
+            ? theme.colorScheme.onPrimary
+            : theme.colorScheme.onSurface,
         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
       ),
       onSelected: (_) => onSelected(),
@@ -1536,8 +1692,11 @@ class _MetricItem extends StatelessWidget {
       children: [
         Icon(icon, size: 18, color: theme.colorScheme.primary),
         const SizedBox(height: 2),
-        Text(value, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
-        Text(label, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600)),
+        Text(value,
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        Text(label,
+            style: theme.textTheme.bodySmall?.copyWith(color: context.muted)),
       ],
     );
   }

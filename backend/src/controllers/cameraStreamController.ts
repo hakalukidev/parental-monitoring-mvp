@@ -1,3 +1,5 @@
+import { reserveMediaSession, releaseMediaSession, notifySessionEnd } from "../services/mediaSessions";
+import { sessionExpired, openSessionStates } from "../services/authorization";
 import { Response } from "express";
 import { CameraStreamSession } from "../models/CameraStreamSession";
 import { Device } from "../models/Device";
@@ -17,13 +19,16 @@ export const requestCameraStream = asyncHandler(async (req: AuthedRequest, res: 
 
   const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
   if (!device) throw new AppError("Child has no registered device", 404);
+  if (device.mediaConsentVersion !== 2) throw new AppError("Update Seftly Child to enable on-device session approval", 409);
 
   const childSocketIds = getChildSocketIds(childId);
-  if (childSocketIds.length === 0 && device.status !== "ONLINE") {
+  if (childSocketIds.length === 0) {
     throw new AppError("Child device is offline", 409);
   }
 
+  const id = await reserveMediaSession("camera", childId);
   const session = await CameraStreamSession.create({
+    _id: id,
     parentId,
     childId,
     deviceId: device.id,
@@ -43,6 +48,7 @@ export const requestCameraStream = asyncHandler(async (req: AuthedRequest, res: 
     getIO().to(sId).emit("camera_stream_request", {
       sessionId: session.id,
       parentId,
+      requestedAt: session.requestedAt,
       cameraFacing,
       withAudio,
     });
@@ -50,7 +56,7 @@ export const requestCameraStream = asyncHandler(async (req: AuthedRequest, res: 
 
   res.status(201).json({
     sessionId: session.id,
-    status: session.status,
+    status: sessionExpired(session) && openSessionStates.includes(session.status) ? "ENDED" : session.status,
     cameraFacing: session.cameraFacing,
     withAudio: session.withAudio,
   });
@@ -70,7 +76,7 @@ export const getCameraStreamSession = asyncHandler(async (req: AuthedRequest, re
 
   res.json({
     id: session.id,
-    status: session.status,
+    status: sessionExpired(session) && openSessionStates.includes(session.status) ? "ENDED" : session.status,
     cameraFacing: session.cameraFacing,
     withAudio: session.withAudio,
     requestedAt: session.requestedAt,
@@ -90,7 +96,7 @@ export const stopCameraStream = asyncHandler(async (req: AuthedRequest, res: Res
   const isChildParticipant = role === "CHILD" && session.childId.toString() === userId;
   if (!isParentParticipant && !isChildParticipant) throw new AppError("Forbidden", 403);
 
-  if (session.status === "ENDED") {
+  if (!openSessionStates.includes(session.status)) {
     res.json({ id: session.id, status: session.status });
     return;
   }
@@ -101,10 +107,8 @@ export const stopCameraStream = asyncHandler(async (req: AuthedRequest, res: Res
   await session.save();
 
   // Notify the room so both sides tear down WebRTC + UI state
-  getIO().to(`session:${session.id}`).emit("camera_stream_stopped", {
-    sessionId: session.id,
-    endedBy: role,
-  });
+  await releaseMediaSession(session.id);
+  notifySessionEnd(session, "camera_stream_stopped", role);
 
   res.json({ id: session.id, status: session.status });
 });

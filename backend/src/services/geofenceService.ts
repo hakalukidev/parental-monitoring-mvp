@@ -1,3 +1,4 @@
+import { Device } from "../models/Device";
 import { Geofence, IGeofence } from "../models/Geofence";
 import { GeofenceEvent } from "../models/GeofenceEvent";
 import { User } from "../models/User";
@@ -33,39 +34,19 @@ export function calculateHaversineDistance(
 /**
  * Checks if the geofence schedule is active at a given date/time.
  */
-export function isScheduleActive(
-  schedule: IGeofence["schedule"] | undefined,
-  date: Date
-): boolean {
+export function isScheduleActive(schedule: IGeofence["schedule"] | undefined, date: Date, timeZone = "UTC"): boolean {
   if (!schedule) return true;
-
-  // Day of week check (0 = Sun, 1 = Mon ... 6 = Sat)
-  const currentDay = date.getDay();
-  if (schedule.daysOfWeek && schedule.daysOfWeek.length > 0) {
-    if (!schedule.daysOfWeek.includes(currentDay)) {
-      return false;
-    }
-  }
-
-  // Time window check (HH:mm)
-  if (schedule.startTime && schedule.endTime) {
-    const hours = date.getHours().toString().padStart(2, "0");
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    const currentTimeStr = `${hours}:${minutes}`;
-
-    if (schedule.startTime <= schedule.endTime) {
-      if (currentTimeStr < schedule.startTime || currentTimeStr > schedule.endTime) {
-        return false;
-      }
-    } else {
-      // Over-midnight window (e.g. 22:00 to 06:00)
-      if (currentTimeStr < schedule.startTime && currentTimeStr > schedule.endTime) {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(date);
+  const part = (name: string) => parts.find((p) => p.type === name)?.value ?? "";
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(part("weekday"));
+  const minute = Number(part("hour")) * 60 + Number(part("minute"));
+  const days = schedule.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6];
+  if (!schedule.startTime || !schedule.endTime) return days.includes(day);
+  const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+  const start = toMinutes(schedule.startTime), end = toMinutes(schedule.endTime);
+  if (start === end) return days.includes(day);
+  if (start < end) return days.includes(day) && minute >= start && minute < end;
+  return (days.includes(day) && minute >= start) || (days.includes((day + 6) % 7) && minute < end);
 }
 
 export interface LocationPayload {
@@ -112,9 +93,10 @@ export async function evaluateChildGeofences(
       childName = childUser.name;
     }
 
+    const device = await Device.findOne({ childId }).sort({ updatedAt: -1 }).select("timeZone").lean();
     for (const geofence of geofences) {
       // Schedule check
-      if (!isScheduleActive(geofence.schedule, recordedDate)) {
+      if (!isScheduleActive(geofence.schedule, recordedDate, geofence.timeZone ?? device?.timeZone ?? "UTC")) {
         continue;
       }
 
@@ -164,6 +146,7 @@ export async function evaluateChildGeofences(
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
+        timeZone: geofence.timeZone ?? device?.timeZone ?? "UTC",
       });
 
       if (isInitialCheck) {
@@ -208,9 +191,7 @@ export async function evaluateChildGeofences(
 
         const matchesTrigger =
           geofence.triggerType === "BOTH" ||
-          geofence.triggerType === transitionType ||
-          (geofence.zoneType === "SAFE_ZONE" && transitionType === "EXIT") ||
-          (geofence.zoneType === "RESTRICTED_ZONE" && transitionType === "ENTRY");
+          geofence.triggerType === transitionType;
 
         if (matchesTrigger && timeSinceLastTrigger > TRANSITION_COOLDOWN_MS) {
           shouldTrigger = true;
@@ -331,6 +312,6 @@ export async function evaluateChildGeofences(
       }
     }
   } catch (err) {
-    console.error("Error evaluating geofences:", err);
+    console.error("[geofence] evaluation failed");
   }
 }

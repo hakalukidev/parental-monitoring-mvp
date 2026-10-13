@@ -1,3 +1,4 @@
+import { authLimiter } from "./authRoutes";
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth";
 import {
@@ -17,11 +18,11 @@ import {
 const router = Router();
 
 // These routes are the public/domain-facing Seftly app contract.
-router.post("/parent/login", seftlyParentLogin);
-router.post("/child/login", seftlyChildLogin);
+router.post("/parent/login", authLimiter, seftlyParentLogin);
+router.post("/child/login", authLimiter, seftlyChildLogin);
 router.get("/parent/childs", requireAuth, requireRole("PARENT"), seftlyParentChildren);
 router.get("/parent/children", requireAuth, requireRole("PARENT"), seftlyParentChildren);
-router.get("/child/lookup", seftlyLookupChild);
+router.get("/child/lookup", authLimiter, requireSeftlyServiceToken, seftlyLookupChild);
 router.get("/child", requireAuth, requireRole("PARENT"), seftlyGetChild);
 router.get("/child/dashboard", requireAuth, requireRole("CHILD"), seftlyChildDashboard);
 router.patch("/account/email", requireAuth, seftlyChangeEmail);

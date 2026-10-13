@@ -1,140 +1,86 @@
-# Parental Screen Monitoring MVP
+# Seftly family safety
 
-Consent-based screen sharing between a Parent app and a Child app. The child
-must explicitly approve every session (in-app Accept + Android's own
-MediaProjection system dialog) before any screen data leaves the device.
-No location, mic, camera, SMS, or browsing-history monitoring is implemented.
+Seftly connects a Flutter parent app, a Kotlin/Compose Android child app and a TypeScript/Express/MongoDB backend. Parents manage each child's app rules, usage reports, supported-browser rules/history, location history and safety zones. Screen and camera check-ins require explicit approval on the child device. The backend relays WebRTC signaling; it does not record media.
 
-## Structure
+Production IDs remain `com.example.parent_app` and `com.example.childapp`. The child is distributed as a signed standalone APK. Debug packages use `.debug` and do not replace installed production apps.
 
-```
-parental-monitoring-mvp/
-├── backend/       Node.js + Express + TypeScript + MongoDB + Socket.IO
-├── parent-app/    Flutter (Material 3)
-└── child-app/     Native Android, Kotlin, Jetpack Compose
-```
+## Development
 
-## 1. Backend — deploying to your VPS
+Use Node 22+, Flutter 3.44.0, Android SDK 34+ and Java 17+ (Android Studio's bundled JDK works). MongoDB is required for the backend. Install CocoaPods and full Xcode for the existing iOS plugins.
 
-### Requirements
-- Node.js 18+
-- MongoDB (local install or a managed URI, e.g. Atlas)
-- nginx (reverse proxy + TLS)
-- A domain pointed at your VPS (for `wss://` — required for WebRTC on real devices)
-
-### Steps
-
-```bash
-# On the VPS
-git clone <your-repo> parental-monitoring-mvp
-cd parental-monitoring-mvp/backend
-cp .env.example .env
-nano .env   # fill in real secrets, MONGO_URI, CORS_ORIGINS, etc.
-
-npm install
-npm run build
-
-# Run with pm2 (recommended) so it restarts on crash/reboot
-npm install -g pm2
-pm2 start dist/server.js --name parental-monitoring-backend
-pm2 save
-pm2 startup   # follow the printed instructions to enable on boot
+```sh
+cd backend
+npm ci
+cp -n .env.example .env
+# Supply distinct private authentication secrets before starting.
+npm run dev
 ```
 
-### nginx reverse proxy (with TLS via certbot)
-
-```nginx
-server {
-    listen 80;
-    server_name api.yourdomain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:4000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-```bash
-sudo certbot --nginx -d api.yourdomain.com
-```
-
-After this, your backend is reachable at `https://api.yourdomain.com` and
-Socket.IO at `wss://api.yourdomain.com`.
-
-### Important production notes
-- Set strong, unique values for `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`,
-  and `SESSION_TOKEN_SECRET` in `.env` — never reuse the example values.
-- Set `CORS_ORIGINS` to your actual app origins.
-- **TURN server**: for real-world networks (mobile data, symmetric NATs),
-  STUN alone often isn't enough for WebRTC to connect. Run a TURN server
-  (e.g. [coturn](https://github.com/coturn/coturn)) on the VPS and set
-  `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` in `.env`. The `/api/config`
-  endpoint automatically serves these to both apps.
-- The backend never touches raw video — it only relays SDP/ICE signaling
-  over Socket.IO. Actual screen frames flow peer-to-peer via WebRTC.
-- Presence (`childSockets`/`parentSockets`) is currently in-memory, which is
-  fine for a single Node process. If you scale to multiple instances, add
-  the `@socket.io/redis-adapter` and move presence into Redis.
-
-## 2. Parent App (Flutter)
-
-```bash
+```sh
 cd parent-app
-fvm flutter pub get
-fvm flutter run \
-  --dart-define=API_BASE_URL=https://api.yourdomain.com \
-  --dart-define=SOCKET_URL=https://api.yourdomain.com
+flutter pub get
+flutter run
 ```
 
-Build a release APK/AAB the same way, passing the `--dart-define` flags (or
-bake them into `app_config.dart` before building).
-
-## 3. Child App (Android/Kotlin)
-
-Open `child-app/` in Android Studio. Before building, update the backend URLs
-in `app/build.gradle.kts`:
-
-```kotlin
-buildConfigField("String", "API_BASE_URL", "\"https://api.yourdomain.com\"")
-buildConfigField("String", "SOCKET_URL", "\"https://api.yourdomain.com\"")
+```sh
+cd child-app
+# Set JAVA_HOME / ANDROID_HOME or an ignored local.properties sdk.dir.
+bash ./gradlew assembleDebug
 ```
 
-Also remove `android:usesCleartextTraffic="true"` from `AndroidManifest.xml`
-once you're pointed at `https://`/`wss://` (it's only needed for local dev
-against `http://10.0.2.2`).
+The default clients use `https://api.hakaluki.dev`. Release builds require normal TLS verification and reject broad cleartext traffic. For local emulator checks, the debug-only network configuration permits `10.0.2.2`, `127.0.0.1` and `localhost`.
 
-Then `Build > Generate Signed Bundle/APK` as usual.
+```sh
+# Child (debug only)
+bash ./gradlew assembleDebug -PdevelopmentApiUrl=http://10.0.2.2:4001
+# Parent (debug only)
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:4001 --dart-define=SOCKET_URL=http://10.0.2.2:4001
+```
 
-## 4. End-to-end flow to test
+## Verification
 
-1. Register a parent account in the Parent app.
-2. Create a child account from the Parent Dashboard.
-3. Log into the Child app with that username/password — device registers
-   and shows "Connected"; Parent Dashboard shows the child as ONLINE.
-4. From the dashboard, tap **Share Screen**.
-5. Child app shows the consent dialog ("Your parent wants to view your
-   screen... Accept / Reject").
-6. On Accept, Android's own MediaProjection system dialog appears — this is
-   mandatory and cannot be bypassed.
-7. After that's approved, screen capture starts, a persistent "Screen
-   sharing active" notification appears on the child device, and the Parent
-   app renders the live WebRTC video.
-8. Either side can stop the session at any time.
+```sh
+cd backend
+npm run build
+npm run lint
+npm test
+npm audit --audit-level=high
+```
 
-## What's intentionally NOT built
+Backend tests start their own temporary MongoDB process and use two isolated families. They never use the configured application database. The first test run may download a MongoDB binary.
 
-Per the spec: no location tracking, SMS monitoring, camera/microphone
-monitoring, app blocking, browsing history capture, or subscriptions. Adding
-any of these — especially covert versions — is out of scope for this project
-and won't be added even on request, since covert monitoring of a minor's
-camera/mic/location crosses into surveillance that bypasses the child's
-knowledge and consent.
-# parental-monitoring-mvp
-# parental-monitoring-mvp
+```sh
+cd parent-app
+flutter analyze
+flutter test
+```
+
+```sh
+cd child-app
+bash ./gradlew testDebugUnitTest lintDebug
+```
+
+From the repository root, run `python3 scripts/check_security.py`. CI runs compilation, lint, tests, formatting, dependency auditing and tracked-source security checks. Signing secrets are excluded from PR jobs.
+
+## Releases and operational limits
+
+Read [release and deployment instructions](docs/RELEASE.md) before generating artifacts or changing production. Existing keys are preserved locally; exposed historical keys/environment values still require a continuity-aware remediation plan. Removing a file from Git tracking does not erase Git history.
+
+Backend 1.1.0 was deployed to `https://api.hakaluki.dev` on 2026-10-13 with a restore-tested backup and verified public authentication/Socket.IO checks. See the [deployment and rollback record](docs/PRODUCTION_DEPLOYMENT.md). Approved media check-ins require the updated child app to register consent capability version 2.
+
+This is a single-instance Socket.IO deployment with in-memory presence. Use one child account per primary child device. Android permissions and vendor battery management can limit monitoring. Reboot recovery does not silently restart camera, microphone or screen capture. Foreground location resumes from the visible child app because while-in-use permission alone cannot authorize a background boot start.
+
+Calls/SMS extraction, social-message extraction, a standalone Sound Around feature, notification monitoring, image/video safety inference and verified payment transactions are not complete features in this repository. Do not infer completion from related filenames or camera audio support.
+
+## Documentation and previews
+
+- [Architecture, API ownership and session lifecycle](docs/ARCHITECTURE.md)
+- [Permissions, privacy, export and retention](docs/PRIVACY.md)
+- [Builds, signing, deployment and rollback](docs/RELEASE.md)
+- [Implementation checklist](docs/IMPLEMENTATION_CHECKLIST.md)
+- [Engineering report](docs/ENGINEERING_REPORT.md)
+- [Actual validation results and release limits](docs/VALIDATION.md)
+- [Secondary milestone feasibility and platform references](docs/FUTURE_FEATURES.md)
+- [Original launcher artwork and previews](assets/branding/launcher-preview.png)
+- [Parent login visual baseline](parent-app/test/goldens/login.png)
+- [Parent child-card visual baseline](parent-app/test/goldens/family-card.png)
