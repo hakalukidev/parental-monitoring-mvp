@@ -1,0 +1,93 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Parent App: Pixel 9a Emulator (Debug)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/parent-app",
+      "program": "lib/main.dart",
+      "emulatorId": "Pixel_9a",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=https://api.hakaluki.dev",
+        "--dart-define=SOCKET_URL=https://api.hakaluki.dev"
+      ]
+    },
+    {
+      "name": "Parent App: Android (Debug)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/parent-app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=https://api.hakaluki.dev",
+        "--dart-define=SOCKET_URL=https://api.hakaluki.dev"
+      ]
+    },
+    {
+      "name": "Parent App: Android (Profile)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/parent-app",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=https://api.hakaluki.dev",
+        "--dart-define=SOCKET_URL=https://api.hakaluki.dev"
+      ]
+    },
+    {
+      "name": "Parent App: Android (Release)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/parent-app",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=https://api.hakaluki.dev",
+        "--dart-define=SOCKET_URL=https://api.hakaluki.dev"
+      ]
+    },
+    {
+      "name": "Child App: Android (Debug)",
+      "request": "launch",
+      "type": "node-terminal",
+      "cwd": "${workspaceFolder}/child-app",
+      "env": {
+        "JAVA_HOME": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
+        "ANDROID_HOME": "${env:HOME}/Library/Android/sdk"
+      },
+      "command": "sh ./gradlew installDebug && \"${env:HOME}/Library/Android/sdk/platform-tools/adb\" shell monkey -p com.example.childapp.debug -c android.intent.category.LAUNCHER 1"
+    },
+    {
+      "name": "Child App: Android (Release)",
+      "request": "launch",
+      "type": "node-terminal",
+      "cwd": "${workspaceFolder}/child-app",
+      "env": {
+        "JAVA_HOME": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
+        "ANDROID_HOME": "${env:HOME}/Library/Android/sdk"
+      },
+      "command": "sh ./gradlew installRelease && \"${env:HOME}/Library/Android/sdk/platform-tools/adb\" shell monkey -p com.example.childapp -c android.intent.category.LAUNCHER 1"
+    },
+    {
+      "name": "Backend: Dev Server",
+      "request": "launch",
+      "type": "node-terminal",
+      "cwd": "${workspaceFolder}/backend",
+      "command": "npm run dev"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Parent + Child (Debug)",
+      "configurations": [
+        "Parent App: Android (Debug)",
+        "Child App: Android (Debug)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

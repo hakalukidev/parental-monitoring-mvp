@@ -22,6 +22,8 @@ flutter pub get
 flutter run
 ```
 
+In the IDE's Run menu, choose **Parent App: Pixel 9a Emulator (Debug)** to start the local `Pixel_9a` AVD automatically. The other parent Debug/Profile/Release entries use the device selected in the IDE status bar. `android` is a platform name, not a valid connected-device ID. From a terminal, use `flutter run --debug -d emulator-5554` when that emulator is running; confirm its current ID with `flutter devices`.
+
 ```sh
 cd child-app
 # Set JAVA_HOME / ANDROID_HOME or an ignored local.properties sdk.dir.

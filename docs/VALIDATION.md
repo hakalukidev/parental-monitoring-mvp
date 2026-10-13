@@ -1,6 +1,6 @@
 # Validation record
 
-Validated locally on 2026-10-13 (Asia/Dhaka), against the modified working tree based on `73ee98e9856d29666a5bc3a9e83b170079d2c695`. Commands below summarize completed runs, not suggested or fabricated checks. The backend ran on Node 26.7.0 and the parent on Flutter 3.44.0; CI targets Node 22 but has not run remotely. Sandbox access was granted for installed SDK caches, local servers and emulator operations. No physical device was selected for installation.
+Validated locally on 2026-10-13 (Asia/Dhaka), against the modified working tree based on `73ee98e9856d29666a5bc3a9e83b170079d2c695`. Commands below summarize completed runs, not suggested or fabricated checks. The backend ran on Node 26.7.0 and the parent on Flutter 3.44.0; CI targets Node 22 but has not run remotely. Sandbox access was granted for installed SDK caches, local servers and emulator operations. The initial redesign validation selected no physical device; a later user-authorized Infinix installation is recorded below.
 
 ## Baseline and corrected failures
 
@@ -101,3 +101,15 @@ An initial database-tools URI constrained restore namespace discovery, yielding 
 - Website/real payments and secondary milestones: source/credentials/authorized integration/model evaluation unavailable; see `FUTURE_FEATURES.md` and the engineering report.
 
 The final isolated database check found zero open screen/camera sessions. The task-owned debug apps, temporary QA emulator, loopback fixture/MongoDB and private fixture credentials were stopped/removed after testing; the original emulator and connected physical device were preserved.
+
+## IDE/emulator launch repair (follow-up)
+
+The parent IDE entries used `deviceId: android`. Reproduction with `flutter run -d android --no-pub --no-resident` reported no matching device, while `flutter devices` identified `emulator-5554`. Removed that invalid selector from Debug/Profile/Release so they respect the IDE-selected device. Added `Parent App: Pixel 9a Emulator (Debug)` with the installed Dart extension's supported `emulatorId: Pixel_9a`, which can start that AVD automatically. Switched the project SDK setting to the existing FVM `flutter_sdk` link, retained launch/settings files through specific Git-ignore exceptions, and corrected the child debug launcher package suffix. All Dart entries validate against the installed extension's launch schema; SDK and entrypoint paths exist.
+
+`flutter run --release -d emulator-5554 --no-pub` built the device-targeted release APK in 92 seconds, installed it and displayed the sign-in screen. `flutter run --debug -d emulator-5554 --no-pub --no-resident --dart-define=API_BASE_URL=https://api.hakaluki.dev --dart-define=SOCKET_URL=https://api.hakaluki.dev` built in 24.8 seconds, installed the separate `.debug` package and launched it successfully. The debug app was left running on the user's existing Pixel 9a emulator. No physical device was installed or selected, and no APK archive was republished. Emulator verification here covers build/install/startup; it does not add authenticated UI-flow or physical-device acceptance claims.
+
+## Infinix child installation (follow-up)
+
+At the user's explicit request, selected only the connected Infinix X697 (Android API 30) using its exact wireless ADB device identifier. Neither Seftly production nor debug child package was installed beforehand. `assembleRelease` passed; the APK's package, version code 2, preserved signer and SHA-256 matched the previously tested child release. `adb install -r` succeeded without uninstalling or clearing any app. Started `com.example.childapp/.ui.MainActivity`; Android reported a successful cold start and the child activity in the foreground, with no startup fatal exception for its process. Installed version name: 1.1. The release uses the existing production HTTPS API.
+
+This verifies a fresh physical-phone installation and launch, not migration over an installed customer version. Child sign-in and visible permission setup are left to the user. Physical enforcement, background/reboot behavior, location accuracy, and real camera/screen/TURN acceptance remain separate unverified checks.

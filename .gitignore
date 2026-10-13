@@ -59,7 +59,9 @@ child-app/.android/
 Thumbs.db
 *.log
 *.tmp
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
 .idea/
 *.swp
 __pycache__/
