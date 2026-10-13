@@ -46,7 +46,7 @@ android {
     }
 
     buildTypes {
-        debug { applicationIdSuffix = ".debug" }
+        debug { applicationIdSuffix = if (providers.gradleProperty("seftlyQa").orNull == "true") ".qa" else ".debug" }
         release {
             if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }

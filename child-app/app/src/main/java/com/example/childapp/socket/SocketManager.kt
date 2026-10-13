@@ -25,6 +25,9 @@ class SocketManager(private var accessToken: String) {
     var onScreenShareStopped: ((sessionId: String) -> Unit)? = null
     var onCameraStreamRequest: ((sessionId: String, parentId: String, cameraFacing: String, withAudio: Boolean) -> Unit)? = null
     var onCameraStreamStopped: ((sessionId: String) -> Unit)? = null
+    var onAudioSessionRequest: ((sessionId: String) -> Unit)? = null
+    var onAudioSessionStopped: ((sessionId: String) -> Unit)? = null
+    var onActivityPolicyUpdated: (() -> Unit)? = null
     var onCameraStreamSwitchCamera: ((sessionId: String, cameraFacing: String) -> Unit)? = null
     var onWebrtcAnswer: ((sessionId: String, sdp: JSONObject) -> Unit)? = null
     var onIceCandidate: ((sessionId: String, candidate: JSONObject) -> Unit)? = null
@@ -87,6 +90,15 @@ class SocketManager(private var accessToken: String) {
             s.on("screen_share_stopped") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
                 onScreenShareStopped?.invoke(data.getString("sessionId"))
+            }
+            s.on("activity_policy_updated") { onActivityPolicyUpdated?.invoke() }
+            s.on("audio_session_request") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                onAudioSessionRequest?.invoke(data.getString("sessionId"))
+            }
+            s.on("audio_session_stopped") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                onAudioSessionStopped?.invoke(data.getString("sessionId"))
             }
             s.on("camera_stream_request") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
@@ -170,6 +182,16 @@ class SocketManager(private var accessToken: String) {
             onAccepted((args.getOrNull(0) as? JSONObject)?.optBoolean("ok", false) == true)
         }) ?: onAccepted(false)
     }
+
+    fun acceptAudioSession(sessionId: String, onAccepted: (Boolean) -> Unit) {
+        socket?.emit("audio_session_accept", JSONObject().put("sessionId", sessionId), Ack { args ->
+            onAccepted((args.getOrNull(0) as? JSONObject)?.optBoolean("ok", false) == true)
+        }) ?: onAccepted(false)
+    }
+    fun rejectAudioSession(sessionId: String, reason: String = "permission_denied") {
+        socket?.emit("audio_session_reject", JSONObject().put("sessionId", sessionId).put("reason", reason))
+    }
+    fun notifyAudioStopped(sessionId: String) { socket?.emit("audio_session_stopped", JSONObject().put("sessionId", sessionId)) }
 
     fun rejectCameraStream(sessionId: String, reason: String? = null) {
         val payload = JSONObject().put("sessionId", sessionId)

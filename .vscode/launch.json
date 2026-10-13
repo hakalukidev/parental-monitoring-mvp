@@ -59,7 +59,7 @@
         "JAVA_HOME": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
         "ANDROID_HOME": "${env:HOME}/Library/Android/sdk"
       },
-      "command": "sh ./gradlew installDebug && \"${env:HOME}/Library/Android/sdk/platform-tools/adb\" shell monkey -p com.example.childapp.debug -c android.intent.category.LAUNCHER 1"
+      "command": "python3 ../scripts/run_child.py --mode debug"
     },
     {
       "name": "Child App: Android (Release)",
@@ -70,7 +70,7 @@
         "JAVA_HOME": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
         "ANDROID_HOME": "${env:HOME}/Library/Android/sdk"
       },
-      "command": "sh ./gradlew installRelease && \"${env:HOME}/Library/Android/sdk/platform-tools/adb\" shell monkey -p com.example.childapp -c android.intent.category.LAUNCHER 1"
+      "command": "python3 ../scripts/run_child.py --mode release"
     },
     {
       "name": "Backend: Dev Server",

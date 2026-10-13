@@ -42,6 +42,7 @@ child-app/.gradle/
 child-app/local.properties
 child-app/build/
 child-app/app/build/
+child-app/notification-fixture/build/
 child-app/captures/
 child-app/.cxx/
 child-app/*.apk

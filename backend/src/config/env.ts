@@ -47,5 +47,9 @@ if (env.nodeEnv === "production") {
   if (env.corsOrigins.some((o) => !o.startsWith("https://") || o.includes("*"))) throw new Error("Production CORS origins must be explicit HTTPS origins");
 }
 if (env.turnUrl && (!env.turnUsername || !env.turnCredential)) throw new Error("TURN requires runtime credentials");
+if(process.env.FEATURE_COMMUNICATIONS_ENABLED==="true"&&env.nodeEnv==="production") {
+  const encryptionKey=process.env.COMMUNICATION_DATA_KEY??"";
+  if(!/^[a-f\d]{64}$/i.test(encryptionKey)||[env.jwtAccessSecret,env.jwtRefreshSecret,env.sessionTokenSecret].includes(encryptionKey))throw new Error("Detailed communications require an independent private 32-byte encryption key");
+}
 
 for (const kind of ["LOCATION", "BROWSING", "USAGE"] as const) retentionExpiry(kind);

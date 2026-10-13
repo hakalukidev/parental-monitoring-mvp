@@ -120,7 +120,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
                               style: Theme.of(ctx).textTheme.titleLarge),
                           const SizedBox(height: 12),
                           const Text(
-                              'Choose what to request. The child device will ask for approval before anything is shared.'),
+                              'Choose what to request. Existing camera and microphone grants are reused. Android may require device activation or a missing permission.'),
                           const SizedBox(height: 20),
                           DropdownButtonFormField<String>(
                               initialValue: _currentFacing,
@@ -506,7 +506,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     return SeftlyScaffold(
       title: 'Check in together',
       subtitle:
-          'The child device must approve each camera and microphone session.',
+          'Existing camera and microphone permissions are reused. Android may require foreground activation or a missing permission.',
       icon: Icons.videocam_outlined,
       backgroundColor: context.colors.surface,
       appBar: AppBar(
@@ -573,9 +573,10 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
         return const Column(mainAxisSize: MainAxisSize.min, children: [
           CircularProgressIndicator(),
           SizedBox(height: 16),
-          Text('Waiting for approval on the child device'),
+          Text('Connecting to the child device'),
           SizedBox(height: 4),
-          Text('Camera and microphone stay off until approved.'),
+          Text(
+              'Open Seftly on the child device if Android requires activation. Capture starts only after access and session checks.'),
         ]);
       case _CameraViewState.connecting:
         return const Column(mainAxisSize: MainAxisSize.min, children: [

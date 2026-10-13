@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -128,13 +129,13 @@ class ApiClient(private val session: SessionStore) {
 
     /** POST /api/devices/register */
     fun registerDevice(deviceName: String, platform: String = "Android"): JSONObject {
-        val payload = JSONObject().put("deviceName", deviceName).put("platform", platform).put("timeZone", java.util.TimeZone.getDefault().id).put("mediaConsentVersion", 2)
+        val payload = JSONObject().put("deviceName", deviceName).put("platform", platform).put("timeZone", java.util.TimeZone.getDefault().id).put("mediaConsentVersion", 2).put("audioCheckInVersion", 1).put("policyProtocolVersion", 2)
         val req = authedRequest("/api/devices/register", "POST", payload).build()
         return execute(req)
     }
 
     fun getMediaSession(kind: String, sessionId: String): JSONObject {
-        val path = if (kind == "screen") "screen-share" else "camera-stream"
+        val path = when (kind) { "screen" -> "screen-share"; "audio" -> "audio-session"; else -> "camera-stream" }
         return execute(authedRequest("/api/$path/$sessionId", "GET").build())
     }
 
@@ -155,6 +156,16 @@ class ApiClient(private val session: SessionStore) {
         val req = authedRequest("/api/camera-stream/$sessionId/stop", "POST").build()
         execute(req)
     }
+
+    fun stopAudioSession(sessionId: String) {
+        execute(authedRequest("/api/audio-session/$sessionId/stop", "POST").build())
+    }
+
+    fun getActivityPolicy():JSONObject = execute(authedRequest("/api/activity/my-policy","GET").build())
+    fun reportActivityCapabilities(data:JSONObject) {execute(authedRequest("/api/activity/capabilities","POST",data).build())}
+    fun reportCommunicationCapabilities(data:JSONObject) {execute(authedRequest("/api/communications/capabilities","POST",data).build())}
+    fun ingestCommunications(records:JSONArray,childId:String):JSONObject = execute(authedRequest("/api/communications/ingest","POST",JSONObject().put("records",records).put("clientChildId",childId)).build())
+    fun ingestActivity(events:JSONArray,childId:String):JSONObject = execute(authedRequest("/api/activity/ingest","POST",JSONObject().put("events",events).put("clientChildId",childId)).build())
 
     /** POST /api/location/record */
     fun postLocation(

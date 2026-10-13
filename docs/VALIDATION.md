@@ -1,3 +1,7 @@
+# Current validation — 1.3.0
+
+See [the current report](ENGINEERING_REPORT_1_3.md#e-executed-checks) for backend/Flutter/Kotlin/signing/deployment results and device limitations. The record below is historical 1.1 validation and must not be read as current feature status.
+
 # Validation record
 
 Validated locally on 2026-10-13 (Asia/Dhaka), against the modified working tree based on `73ee98e9856d29666a5bc3a9e83b170079d2c695`. Commands below summarize completed runs, not suggested or fabricated checks. The backend ran on Node 26.7.0 and the parent on Flutter 3.44.0; CI targets Node 22 but has not run remotely. Sandbox access was granted for installed SDK caches, local servers and emulator operations. The initial redesign validation selected no physical device; a later user-authorized Infinix installation is recorded below.

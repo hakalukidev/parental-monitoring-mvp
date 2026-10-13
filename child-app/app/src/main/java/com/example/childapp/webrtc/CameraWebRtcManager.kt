@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import org.webrtc.*
+import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -18,7 +19,8 @@ class CameraWebRtcManager(
     private val onLocalOffer: (sdp: JSONObject) -> Unit,
     private val onIceCandidate: (candidate: JSONObject) -> Unit,
     private val onStateChange: (PeerConnection.PeerConnectionState) -> Unit,
-    private val onError: ((String) -> Unit)? = null
+    private val onError: ((String) -> Unit)? = null,
+    private val onMicrophoneState: ((Boolean) -> Unit)? = null
 ) {
     private lateinit var factory: PeerConnectionFactory
     private var peerConnection: PeerConnection? = null
@@ -27,6 +29,7 @@ class CameraWebRtcManager(
     private var audioSource: AudioSource? = null
     private var videoTrack: VideoTrack? = null
     private var audioTrack: AudioTrack? = null
+    private var audioDeviceModule: JavaAudioDeviceModule? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
     private val eglBase: EglBase = EglBase.create()
@@ -42,7 +45,20 @@ class CameraWebRtcManager(
         )
         val encoderFactory = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
+        val audioModule = JavaAudioDeviceModule.builder(context)
+            .setEnableVolumeLogger(false)
+            .setAudioRecordErrorCallback(object:JavaAudioDeviceModule.AudioRecordErrorCallback {
+                override fun onWebRtcAudioRecordInitError(message:String) {if(!isDisposed.get())onError?.invoke("microphone_init_failed")}
+                override fun onWebRtcAudioRecordStartError(code:JavaAudioDeviceModule.AudioRecordStartErrorCode,message:String) {if(!isDisposed.get())onError?.invoke("microphone_start_failed")}
+                override fun onWebRtcAudioRecordError(message:String) {if(!isDisposed.get())onError?.invoke("microphone_failed")}
+            })
+            .setAudioRecordStateCallback(object:JavaAudioDeviceModule.AudioRecordStateCallback {
+                override fun onWebRtcAudioRecordStart() {if(!isDisposed.get())onMicrophoneState?.invoke(true)}
+                override fun onWebRtcAudioRecordStop() {if(!isDisposed.get())onMicrophoneState?.invoke(false)}
+            }).createAudioDeviceModule()
+        audioDeviceModule=audioModule
         factory = PeerConnectionFactory.builder()
+            .setAudioDeviceModule(audioModule)
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
@@ -57,7 +73,8 @@ class CameraWebRtcManager(
     fun startStreaming(
         cameraFacing: String = "BACK",
         withAudio: Boolean = false,
-        iceServers: List<PeerConnection.IceServer>
+        iceServers: List<PeerConnection.IceServer>,
+        audioOnly: Boolean = false
     ) {
         isDisposed.set(false)
 
@@ -66,7 +83,7 @@ class CameraWebRtcManager(
             Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
 
-        if (!hasCameraPermission) {
+        if (!audioOnly && !hasCameraPermission) {
             Log.e(TAG, "Camera permission not granted")
             onError?.invoke("permission_denied")
             return
@@ -112,6 +129,8 @@ class CameraWebRtcManager(
             override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
         })
 
+        val streamId = if (audioOnly) "audio_check_in" else "camera_stream"
+        if (!audioOnly) {
         // Create camera capturer
         val capturer = createCameraCapturer(cameraFacing)
         if (capturer == null) {
@@ -138,12 +157,12 @@ class CameraWebRtcManager(
             return
         }
 
-        val streamId = "camera_stream"
 
         val vTrack = factory.createVideoTrack("camera_video_track", videoSource)
         videoTrack = vTrack
         peerConnection?.addTrack(vTrack, listOf(streamId))
 
+        }
         if (withAudio) {
             val hasAudioPermission = ContextCompat.checkSelfPermission(
                 context,
@@ -166,6 +185,7 @@ class CameraWebRtcManager(
             }
         }
 
+        if (withAudio && audioTrack == null) { onError?.invoke("microphone_unavailable"); return }
         val constraints = MediaConstraints()
         peerConnection?.createOffer(object : SdpObserverAdapter() {
             override fun onCreateSuccess(desc: SessionDescription?) {
@@ -353,6 +373,8 @@ class CameraWebRtcManager(
         try {
             if (::factory.isInitialized) factory.dispose()
         } catch (_: Exception) {}
+        runCatching {audioDeviceModule?.release()};audioDeviceModule=null
+        onMicrophoneState?.invoke(false)
         try {
             eglBase.release()
         } catch (_: Exception) {}

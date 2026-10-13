@@ -15,7 +15,7 @@ keyPassword=<private secret>
 
 `storeFile` is relative to the app Gradle module, or absolute. Alternatively use `SEFTLY_STORE_FILE`, `SEFTLY_STORE_PASSWORD`, `SEFTLY_KEY_ALIAS`, `SEFTLY_KEY_PASSWORD` as private CI/runtime environment variables. Release tasks fail when signing configuration is missing. Debug uses a separate key and `.debug` package ID. Never install a debug package over the production package as an update.
 
-Production versions are incremented to parent `1.1.0+2` and child code 2/name 1.1. Confirm the currently installed version before distribution; increase again if an installed release already has a higher code.
+Production versions are incremented to parent `1.3.0+4` and child code 4/name 1.3.0. Confirm the currently installed version before distribution; increase again if an installed release already has a higher code.
 
 ```sh
 cd parent-app

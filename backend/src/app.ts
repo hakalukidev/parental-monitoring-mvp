@@ -1,4 +1,7 @@
 import privacyRoutes from "./routes/privacyRoutes";
+import audioSessionRoutes from "./routes/audioSessionRoutes";
+import activityRoutes from "./routes/activityRoutes";
+import communicationRoutes from "./routes/communicationRoutes";
 import mongoose from "mongoose";
 import rateLimit from "express-rate-limit";
 import express, { Express } from "express";
@@ -54,6 +57,9 @@ export function createApp(): Express {
   app.use("/api/devices", deviceRoutes);
   app.use("/api/screen-share", screenShareRoutes);
   app.use("/api/camera-stream", cameraStreamRoutes);
+  app.use("/api/audio-session", audioSessionRoutes);
+  app.use("/api/activity", activityRoutes);
+  app.use("/api/communications", communicationRoutes);
   app.use("/api/location", locationRoutes);
   app.use("/api/config", configRoutes);
   app.use("/api", seftlyRoutes);

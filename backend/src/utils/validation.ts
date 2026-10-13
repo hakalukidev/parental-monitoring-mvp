@@ -45,6 +45,8 @@ export const registerDeviceSchema = z.object({
   platform: z.string().min(1).max(50).default("Android"),
   timeZone: timezoneSchema.optional(),
   mediaConsentVersion: z.number().finite().int().min(1).max(2).optional(),
+  audioCheckInVersion: z.number().int().min(0).max(1).optional(),
+  policyProtocolVersion: z.number().int().min(1).max(2).optional(),
 });
 
 export const screenShareRequestSchema = z.object({
@@ -135,16 +137,18 @@ export const toggleDevicePauseSchema = z.object({
 
 // Web Block Rules Validation Schemas
 export const createWebRuleSchema = z.object({
-  ruleType: z.enum(["DOMAIN", "KEYWORD", "CATEGORY"]),
-  target: z.string().min(1).max(255),
+  ruleType: z.enum(["DOMAIN", "URL", "KEYWORD", "CATEGORY"]),
+  target: z.string().trim().min(1).max(2048),
   action: z.enum(["BLOCK", "ALLOW"]).default("BLOCK"),
   isEnabled: z.boolean().default(true),
 });
 
 export const updateWebRuleSchema = z.object({
+  ruleType: z.enum(["DOMAIN", "URL", "KEYWORD", "CATEGORY"]).optional(),
+  target: z.string().trim().min(1).max(2048).optional(),
   action: z.enum(["BLOCK", "ALLOW"]).optional(),
   isEnabled: z.boolean().optional(),
-});
+}).refine(d => Object.keys(d).length > 0, "Provide a rule change");
 
 // Browsing History Validation Schemas
 export const recordBrowsingHistorySchema = z.object({

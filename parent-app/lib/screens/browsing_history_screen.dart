@@ -608,7 +608,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                                     children: [
                                       Text(
                                         DateFormat('hh:mm a')
-                                            .format(record.visitedAt),
+                                            .format(record.visitedAt.toLocal()),
                                         style: TextStyle(
                                             fontSize: 11, color: context.muted),
                                       ),

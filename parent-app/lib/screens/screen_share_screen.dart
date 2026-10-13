@@ -402,7 +402,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
     return SeftlyScaffold(
       title: 'A shared view',
       subtitle:
-          'Each session needs approval on the child device. You can stop at any time.',
+          'Android requires fresh screen-sharing consent for each session. You can stop at any time.',
       icon: Icons.screen_share_outlined,
       appBar: AppBar(title: Text("${widget.childName}'s Screen")),
       body: Center(child: _buildBody()),
@@ -425,7 +425,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
           children: [
             CircularProgressIndicator(),
             SizedBox(height: 16),
-            Text('Waiting for approval on the child device'),
+            Text('Android screen-sharing permission required'),
             SizedBox(height: 4),
             Text('Android asks what to share for every session.'),
           ],

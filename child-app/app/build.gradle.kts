@@ -25,8 +25,9 @@ android {
         applicationId = "com.example.childapp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "1.3.0"
+        buildConfigField("boolean", "QA_SAFE_FIXTURES", "false")
 
         // Backend
         buildConfigField(
@@ -56,7 +57,9 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            val isolatedQa = providers.gradleProperty("seftlyQa").orNull == "true"
+            applicationIdSuffix = if (isolatedQa) ".qa" else ".debug"
+            buildConfigField("boolean", "QA_SAFE_FIXTURES", isolatedQa.toString())
             val developmentApi = providers.gradleProperty("developmentApiUrl").orNull
             if (developmentApi != null) {
                 val host = URI(developmentApi).host
@@ -112,6 +115,8 @@ dependencies {
     // ANDROIDX
     // =========================================================
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("org.tensorflow:tensorflow-lite:2.17.0")
 
     implementation(
         "androidx.lifecycle:lifecycle-runtime-ktx:2.8.4"

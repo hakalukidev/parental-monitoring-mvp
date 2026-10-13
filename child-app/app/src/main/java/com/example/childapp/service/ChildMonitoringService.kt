@@ -1,5 +1,8 @@
 package com.example.childapp.service
 
+import com.example.childapp.audio.AudioCheckInService
+import com.example.childapp.BuildConfig
+import com.example.childapp.activity.ActivitySync
 import android.app.*
 import android.content.Context
 import android.content.Intent
@@ -33,6 +36,7 @@ class ChildMonitoringService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socketManager: SocketManager? = null
     private var heartbeatJob: Job? = null
+    private var communicationObservers: com.example.childapp.communication.CommunicationObservers? = null
     private lateinit var session: SessionStore
     private lateinit var api: ApiClient
     private var inventoryFingerprint: String? = null
@@ -42,6 +46,7 @@ class ChildMonitoringService : Service() {
         super.onCreate()
         session = SessionStore(applicationContext)
         api = ApiClient(session)
+        communicationObservers=com.example.childapp.communication.CommunicationObservers(this).also {it.start()}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -83,6 +88,7 @@ class ChildMonitoringService : Service() {
             .setContentText("Family rules and activity synchronization are active")
             .setSmallIcon(com.example.childapp.R.drawable.ic_seftly_notification)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
@@ -100,6 +106,7 @@ class ChildMonitoringService : Service() {
         ChildAccessibilityService.activeSocketCallback = null // REST batch ingestion is authoritative.
 
         socket.onConnected = {
+            ActivitySync.schedule(this)
             connectionState.value = true;
             Log.i(TAG, "Persistent socket connected successfully")
             syncAppData()
@@ -110,6 +117,7 @@ class ChildMonitoringService : Service() {
             connectionState.value = false;
             ScreenCaptureService.stop(this)
             CameraStreamService.stop(this)
+            AudioCheckInService.stop(this)
             SessionConsentController.clearAll(this)
             Log.w(TAG, "Socket disconnected, pausing heartbeat")
             heartbeatJob?.cancel()
@@ -162,7 +170,8 @@ class ChildMonitoringService : Service() {
         socket.onUnblockResponse = { _, packageName, approved, minutes ->
             if (approved && packageName.isNotBlank() && minutes in 1..120) LocalDatabase.getInstance(this).grantTemporaryUnblock(packageName, minutes)
         }
-        socket.onRequestUsageSync = {
+        socket.onRequestUsageSync = usageSync@{
+            if (BuildConfig.QA_SAFE_FIXTURES) return@usageSync
             Log.i(TAG, "Parent requested immediate usage & downtime refresh over socket")
             serviceScope.launch {
                 try {
@@ -183,6 +192,12 @@ class ChildMonitoringService : Service() {
             SessionConsentController.clear(this, sessionId)
             if (ScreenCaptureService.currentSessionId == sessionId) ScreenCaptureService.stop(this)
         }
+        socket.onAudioSessionRequest = { sessionId -> SessionConsentController.request(this, MediaRequest(sessionId, "audio", withAudio = true)) }
+        socket.onActivityPolicyUpdated = { ActivitySync.schedule(this) }
+        socket.onAudioSessionStopped = { sessionId ->
+            SessionConsentController.clear(this, sessionId)
+            if (AudioCheckInService.currentSessionId == sessionId) AudioCheckInService.stop(this)
+        }
         socket.onCameraStreamRequest = { sessionId, _, facing, audio ->
             SessionConsentController.request(this, MediaRequest(sessionId, "camera", facing, audio))
         }
@@ -198,7 +213,7 @@ class ChildMonitoringService : Service() {
     private fun syncAppData() {
         serviceScope.launch {
             try {
-                val apps = AppScanner.scanInstalledApps(this@ChildMonitoringService)
+                val apps = if (BuildConfig.QA_SAFE_FIXTURES) emptyList() else AppScanner.scanInstalledApps(this@ChildMonitoringService)
                 val fingerprint = apps.joinToString { "${it.packageName}:${it.versionName}:${it.appName}:${it.category}" }
                 if (fingerprint != inventoryFingerprint || System.currentTimeMillis() - lastInventoryAt > 6 * 60 * 60_000L) {
                     for (batch in apps.chunked(25)) api.syncInstalledApps(AppScanner.toJsonArray(batch, this@ChildMonitoringService))
@@ -231,7 +246,7 @@ class ChildMonitoringService : Service() {
                         .saveGeofences(geoResp.getJSONArray("geofences"))
                 }
 
-                val unsynced = LocalDatabase.getInstance(this@ChildMonitoringService).getUnsyncedBrowsingHistory()
+                val unsynced = if (BuildConfig.QA_SAFE_FIXTURES) emptyList() else LocalDatabase.getInstance(this@ChildMonitoringService).getUnsyncedBrowsingHistory()
                 if (unsynced.isNotEmpty()) {
                     val batchArray = JSONArray()
                     for (entry in unsynced) {
@@ -254,9 +269,11 @@ class ChildMonitoringService : Service() {
 
                 // Sync today's app usages and downtime report
                 try {
-                    val usageReport = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
-                    api.syncDailyUsage(usageReport)
-                    socketManager?.sendUsageUpdated(usageReport)
+                    if (!BuildConfig.QA_SAFE_FIXTURES) {
+                        val usageReport = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
+                        api.syncDailyUsage(usageReport)
+                        socketManager?.sendUsageUpdated(usageReport)
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to sync daily usage: ${e.message}")
                 }
@@ -289,11 +306,7 @@ class ChildMonitoringService : Service() {
                     heartbeatCounter++
                     if (heartbeatCounter % 3 == 0) {
                         syncAppData()
-                        try {
-                            val report = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
-                            api.syncDailyUsage(report)
-                            socketManager?.sendUsageUpdated(report)
-                        } catch (_: Exception) {}
+                        ActivitySync.schedule(this@ChildMonitoringService)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Heartbeat emission error: ${e.message}")
@@ -314,6 +327,7 @@ class ChildMonitoringService : Service() {
     }
 
     override fun onDestroy() {
+        communicationObservers?.stop()
         connectionState.value = false
         SessionConsentController.clearAll(this)
         activeSocket = null

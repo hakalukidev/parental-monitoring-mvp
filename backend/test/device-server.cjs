@@ -7,12 +7,14 @@ const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const { Server } = require('socket.io');
 Object.assign(process.env, { NODE_ENV: 'test', MONGO_URI: 'mongodb://127.0.0.1/seftly_device_fixture', CORS_ORIGINS: 'http://127.0.0.1:4001', JWT_ACCESS_SECRET: crypto.randomBytes(32).toString('hex'), JWT_REFRESH_SECRET: crypto.randomBytes(32).toString('hex'), SESSION_TOKEN_SECRET: crypto.randomBytes(32).toString('hex'), PARENT_CHILD_API_TOKEN: '', TURN_URL: '', TURN_USERNAME: '', TURN_CREDENTIAL: '', TRUST_PROXY_HOPS: '0' });
+Object.assign(process.env, { FEATURE_AUDIO_ENABLED: 'true', FEATURE_NOTIFICATIONS_ENABLED: 'true', FEATURE_CALL_SMS_ENABLED: 'false', FEATURE_SAFETY_ENABLED: 'false', SAFETY_APPROVED_MODELS: '' });
+Object.assign(process.env, { FEATURE_COMMUNICATIONS_ENABLED: process.argv.includes('--communications') ? 'true' : 'false', COMMUNICATION_DATA_KEY: crypto.randomBytes(32).toString('hex') });
 const { createApp } = require('../dist/app');
 const { setIO } = require('../dist/socket/io');
 const { registerSocketHandlers } = require('../dist/socket');
 (async () => {
   const db = await MongoMemoryServer.create({ instance: { dbName: 'seftly_device_fixture' } });
-  await mongoose.connect(db.getUri());
+  await mongoose.connect(db.getUri('seftly_device_fixture'));
   const server = http.createServer(createApp()), io = new Server(server);
   setIO(io); registerSocketHandlers(io);
   await new Promise(r => server.listen(4001, '127.0.0.1', r));

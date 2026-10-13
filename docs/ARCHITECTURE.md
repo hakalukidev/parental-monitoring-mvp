@@ -58,7 +58,7 @@ A primary child device must register `mediaConsentVersion: 2` before new media r
 ```mermaid
 stateDiagram-v2
   [*] --> REQUESTED: Owner requests / device online
-  REQUESTED --> ACCEPTED: Child approves / OS permissions granted
+  REQUESTED --> ACCEPTED: Authorized session / OS access available
   REQUESTED --> REJECTED: Child declines
   ACCEPTED --> ACTIVE: Authorized SDP negotiation / connected media
   REQUESTED --> ENDED: Timeout / cancellation / disconnect
@@ -66,7 +66,7 @@ stateDiagram-v2
   ACTIVE --> ENDED: Stop / failure / disconnect / maximum duration
 ```
 
-Pending negotiation expires in two minutes. Active sessions expire after 30 minutes and also end when authenticated participants disconnect. Each new session requests fresh permission. Screen capture grants are never cached or reused; camera/microphone services start only from the visible approval activity. Foreground notices and child controls stop the actual media services. The parent closes resources when stopped or leaving the viewer. Media-service sockets do not overwrite monitoring-service callbacks.
+Pending negotiation expires in two minutes. Active sessions expire after 30 minutes and also end when authenticated participants disconnect. Camera/microphone runtime grants are reused. Android foreground restrictions remain; Android 11+ background sensor activation requires a permitted visible activity. Screen capture requests fresh Android consent each session and grants are never cached or reused. Foreground notices and child controls stop the actual media services. The parent closes resources when stopped or leaving the viewer. Media-service sockets do not overwrite monitoring-service callbacks.
 
 ## Accuracy and reliability
 
@@ -79,3 +79,7 @@ Pending negotiation expires in two minutes. Active sessions expire after 30 minu
 - App inventory refreshes on a package fingerprint change or after six hours. Small validated PNG thumbnails are uploaded in batches; missing icons use a consistent fallback. Usage scans do not repeatedly render every installed icon.
 
 Scaling, device-scoped enrollment, background-location recovery across all OEMs, hardware media compatibility and real-device accuracy remain separate release gates.
+
+## Additive 1.3 communications and dashboard
+
+The compact parent dashboard controls a single expanded child ID across refreshes. `/api/communications` adds role/owner-protected capabilities, encrypted ingestion, scoped paging/search/groups/statistics and deletion; `/api/activity/policy` controls explicit guardian authorization. The Android encrypted communications database is separate from existing local history. AES-GCM content and keyed indexes use an independent backend key. See [current report](ENGINEERING_REPORT_1_3.md) for coverage and actual verification.

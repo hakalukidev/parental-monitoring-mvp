@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { env } from "../config/env";
 import { requireAuth } from "../middleware/auth";
+import { featureEnabled } from "../services/features";
+import { approvedSafetyModels } from "../services/activityValidation";
+import { communicationKeyAvailable } from "../services/communicationPrivacy";
 
 const router = Router();
 
@@ -19,7 +22,8 @@ router.get("/", requireAuth, (_req, res) => {
       });
     }
   }
-  res.json({ iceServers, mediaProtocolVersion: 2, consentRequired: true });
+  res.json({ iceServers, mediaProtocolVersion: 2, webRuleProtocolVersion: 2, consentRequired: true,
+    features: { audioCheckIn: featureEnabled("AUDIO"), notificationActivity: featureEnabled("NOTIFICATIONS"), callSmsActivity: featureEnabled("CALL_SMS")||(featureEnabled("COMMUNICATIONS")&&communicationKeyAvailable()),communicationHistory:featureEnabled("COMMUNICATIONS")&&communicationKeyAvailable(), mediaSafety: featureEnabled("SAFETY") && approvedSafetyModels().length > 0 } });
 });
 
 export default router;

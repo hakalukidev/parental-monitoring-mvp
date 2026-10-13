@@ -22,7 +22,7 @@ object WebFilterEvaluator {
         val trimmedRaw = rawUrl.trim()
         val decodedRaw = safeDecode(trimmedRaw)
 
-        val normalizedUrl = if (!trimmedRaw.startsWith("http://") && !trimmedRaw.startsWith("https://")) {
+        val normalizedUrl = if (!trimmedRaw.startsWith("http://", true) && !trimmedRaw.startsWith("https://", true)) {
             "https://$trimmedRaw"
         } else {
             trimmedRaw
@@ -30,12 +30,8 @@ object WebFilterEvaluator {
 
         val decodedUrl = safeDecode(normalizedUrl)
 
-        val domain = try {
-            val uri = URI(normalizedUrl)
-            uri.host?.lowercase() ?: extractDomainFallback(normalizedUrl)
-        } catch (_: Exception) {
-            extractDomainFallback(normalizedUrl)
-        }
+        val address = WebAddresses.parse(trimmedRaw)
+        val domain = address?.host ?: ""
 
         val searchQuery = extractSearchQuery(normalizedUrl).ifBlank {
             if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://") && !rawUrl.contains(".")) {
@@ -54,14 +50,14 @@ object WebFilterEvaluator {
 
         // 1. Check direct ALLOW rules first
         for (rule in rules.filter { it.isEnabled }) {
-            if (rule.action == "ALLOW" && matchesRule(rule, lowerUrl, lowerRaw, lowerDomain, lowerTitle, lowerQuery)) {
+            if (rule.action == "ALLOW" && matchesRule(rule, lowerUrl, lowerRaw, lowerDomain, lowerTitle, lowerQuery, address)) {
                 return WebCheckResult(isBlocked = false, matchedRule = rule)
             }
         }
 
         // 2. Check BLOCK rules
         for (rule in rules.filter { it.isEnabled }) {
-            if (rule.action == "BLOCK" && matchesRule(rule, lowerUrl, lowerRaw, lowerDomain, lowerTitle, lowerQuery)) {
+            if (rule.action == "BLOCK" && matchesRule(rule, lowerUrl, lowerRaw, lowerDomain, lowerTitle, lowerQuery, address)) {
                 val cat = resolveCategory(rule, lowerUrl, lowerDomain)
                 return WebCheckResult(
                     isBlocked = true,
@@ -83,20 +79,14 @@ object WebFilterEvaluator {
         lowerRaw: String,
         lowerDomain: String,
         lowerTitle: String,
-        lowerQuery: String
+        lowerQuery: String,
+        address: WebAddress?
     ): Boolean {
         val target = rule.target.lowercase().trim()
         if (target.isBlank()) return false
 
         when (rule.ruleType) {
-            "DOMAIN" -> {
-                val cleanTarget = target.removePrefix("*.").removePrefix("*").removeSuffix("*").trim()
-                if (cleanTarget.isBlank()) return false
-                return lowerDomain == cleanTarget ||
-                        lowerDomain.endsWith(".$cleanTarget") ||
-                        lowerRaw == cleanTarget ||
-                        lowerRaw.startsWith("$cleanTarget/")
-            }
+            "DOMAIN", "URL" -> return WebAddresses.matches(rule.ruleType, rule.target, address)
             "KEYWORD" -> {
                 val cleanKeyword = target.removePrefix("*").removeSuffix("*").trim()
                 if (cleanKeyword.isBlank()) return false
@@ -163,12 +153,6 @@ object WebFilterEvaluator {
     private fun isViolenceContent(url: String, query: String): Boolean {
         val violenceKeywords = listOf("gore", "beheading", "weapons", "extremist", "terrorist")
         return violenceKeywords.any { url.contains(it) || query.contains(it) }
-    }
-
-    private fun extractDomainFallback(url: String): String {
-        val cleaned = url.removePrefix("https://").removePrefix("http://")
-        val slashIdx = cleaned.indexOf('/')
-        return if (slashIdx != -1) cleaned.substring(0, slashIdx) else cleaned
     }
 
     private fun extractSearchQuery(url: String): String {

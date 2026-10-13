@@ -1,5 +1,7 @@
 package com.example.childapp.ui
 
+import com.example.childapp.audio.AudioCheckInService
+import com.example.childapp.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +31,7 @@ fun HomeScreen(childName: String, parentName: String?, deviceConnected: Boolean,
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(2000); tick++ } }
     val requests by SessionConsentController.pending.collectAsState()
     val screenStatus by ScreenCaptureService.status.collectAsState()
+    val audioStatus by AudioCheckInService.status.collectAsState()
     val cameraStatus by CameraStreamService.status.collectAsState()
     val locating by LocationService.isTracking.collectAsState()
     val rulesActive = remember(tick) { ChildAccessibilityService.isAccessibilityServiceEnabled(context) }
@@ -56,9 +59,9 @@ fun HomeScreen(childName: String, parentName: String?, deviceConnected: Boolean,
                     Column(Modifier.padding(20.dp)) {
                         Text("A check-in request", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
-                        Text(if (request.kind == "screen") "Your parent would like to see your screen." else "Your parent would like to use your camera${if (request.withAudio) " and microphone" else ""}.")
+                        Text(if (request.kind == "screen") "Your parent would like to see your screen." else if (request.kind == "audio") "Your parent would like an audio-only microphone check-in." else "Your parent would like to use your camera${if (request.withAudio) " and microphone" else ""}.")
                         Spacer(Modifier.height(14.dp))
-                        Button(onClick = { SessionConsentController.open(context, request.sessionId) }) { Text("Review request") }
+                        Button(onClick = { SessionConsentController.open(context, request.sessionId) }) { Text("Open Android device action") }
                     }
                 }
             }
@@ -74,12 +77,22 @@ fun HomeScreen(childName: String, parentName: String?, deviceConnected: Boolean,
                 Spacer(Modifier.height(16.dp))
                 Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
                     Text(if (cameraStatus == "LIVE") "Your camera is streaming" else "Camera sharing is connecting", style = MaterialTheme.typography.titleMedium)
-                    Text(if (CameraStreamService.audioEnabled) "Camera and microphone are on for this session." else "Camera is on. Microphone is off.")
+                    Text(if (cameraStatus != "LIVE") "The approved camera session is connecting." else if (CameraStreamService.audioEnabled) "Camera and microphone are on for this session." else "Camera is on. Microphone is off.")
                     Button(onClick = { CameraStreamService.stop(context) }) { Text("Stop camera sharing") }
                 } }
             }
+            if (audioStatus != "OFF") {
+                Spacer(Modifier.height(16.dp))
+                Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
+                    Text(if (audioStatus == "LIVE") "Audio check-in is live" else "Audio check-in is connecting", style = MaterialTheme.typography.titleMedium)
+                    Text(if(AudioCheckInService.microphoneActive) "Your microphone is on for this check-in. Seftly does not save recordings." else "Waiting for the approved microphone activation.")
+                    Button(onClick = { AudioCheckInService.stop(context) }) { Text("Stop audio check-in") }
+                } }
+            }
             Spacer(Modifier.height(24.dp))
-            Text(if (screenStatus == "OFF" && cameraStatus == "OFF") "Screen, camera and microphone sharing are off. New sessions will ask you first." else "You can stop sharing here or from the Seftly notification.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (screenStatus == "OFF" && cameraStatus == "OFF" && audioStatus == "OFF") "Screen, camera and microphone sharing are off. Parent requests use existing permissions; Android device actions may be required." else "You can stop sharing here or from the Seftly notification.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+            Text("Seftly Child ${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     if (confirmLogout) AlertDialog(onDismissRequest = { confirmLogout = false }, title = { Text("Log out of Seftly?") }, text = { Text("This stops family synchronization and live sharing, and clears this device’s saved monitoring data. You can review Android permissions in Settings.") }, confirmButton = { TextButton(onClick = { confirmLogout = false; onLogout() }) { Text("Log out") } }, dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Stay connected") } })

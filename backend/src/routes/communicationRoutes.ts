@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { requireAuth,requireRole } from "../middleware/auth";
+import { getCommunicationPolicy,reportCommunicationCapabilities,ingestCommunications,listCommunications,communicationGroups,communicationStats,deleteCommunications } from "../controllers/communicationController";
+const router=Router(),child=[requireAuth,requireRole("CHILD")],parent=[requireAuth,requireRole("PARENT")];
+router.use((_req,res,next)=>{res.setHeader("Cache-Control","no-store");next();});
+router.post("/capabilities",...child,reportCommunicationCapabilities);
+router.post("/ingest",...child,ingestCommunications);
+router.get("/policy/:childId",...parent,getCommunicationPolicy);
+router.get("/:childId/:kind/groups",...parent,communicationGroups);
+router.get("/:childId/:kind/stats",...parent,communicationStats);
+router.get("/:childId/:kind",...parent,listCommunications);
+router.delete("/:childId/:kind",...parent,deleteCommunications);
+export default router;

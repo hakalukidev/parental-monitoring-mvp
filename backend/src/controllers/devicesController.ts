@@ -19,6 +19,8 @@ export const registerDevice = asyncHandler(async (req: AuthedRequest, res: Respo
       platform: data.platform,
         ...(data.timeZone ? { timeZone: data.timeZone } : {}),
       ...(data.mediaConsentVersion ? { mediaConsentVersion: data.mediaConsentVersion } : {}),
+      ...(data.audioCheckInVersion !== undefined ? { audioCheckInVersion: data.audioCheckInVersion } : {}),
+      ...(data.policyProtocolVersion !== undefined ? { policyProtocolVersion: data.policyProtocolVersion } : {}),
       status: getChildSocketIds(childId).length ? "ONLINE" : "OFFLINE",
       lastSeen: new Date(),
     },

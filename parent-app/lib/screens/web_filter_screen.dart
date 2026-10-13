@@ -1,3 +1,4 @@
+import '../design/website_rule_editor.dart';
 import '../design/seftly_theme.dart';
 import '../design/seftly_widgets.dart';
 import 'package:flutter/material.dart';
@@ -56,13 +57,14 @@ class _WebFilterScreenState extends State<WebFilterScreen>
 
     try {
       final raw = await ApiService.instance.listWebRules(widget.childId);
+      if (!mounted) return;
       setState(() {
         _rules = raw
             .map((e) => WebBlockRule.fromJson(e as Map<String, dynamic>))
             .toList();
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -117,133 +119,36 @@ class _WebFilterScreenState extends State<WebFilterScreen>
     }
   }
 
-  Future<void> _addCustomRule() async {
-    final targetController = TextEditingController();
-    String ruleType = 'DOMAIN';
-    String action = 'BLOCK';
+  Future<void> _addCustomRule() => _editRule();
 
-    final created = await showDialog<bool>(
+  Future<void> _editRule([WebBlockRule? existing]) async {
+    final draft = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add Web Filter Rule'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: targetController,
-                decoration: const InputDecoration(
-                  labelText: 'Website Domain or Keyword',
-                  hintText: 'e.g. roblox.com, *casino*, tiktok',
-                  helperText: 'Supports wildcards like *.bet or *gambling*',
-                  border: OutlineInputBorder(),
-                ),
-                autofocus: true,
-              ),
-              const SizedBox(height: 16),
-              const Text('Rule Type:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              RadioGroup<String>(
-                groupValue: ruleType,
-                onChanged: (val) => setDialogState(() => ruleType = val!),
-                child: const Wrap(
-                  spacing: 12,
-                  runSpacing: 4,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Radio<String>(
-                          value: 'DOMAIN',
-                        ),
-                        Text('Domain / Host'),
-                      ],
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Radio<String>(
-                          value: 'KEYWORD',
-                        ),
-                        Text('Keyword'),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text('Action:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              RadioGroup<String>(
-                groupValue: action,
-                onChanged: (val) => setDialogState(() => action = val!),
-                child: const Wrap(
-                  spacing: 12,
-                  runSpacing: 4,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Radio<String>(
-                          value: 'BLOCK',
-                        ),
-                        Text('Block (Blacklist)'),
-                      ],
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Radio<String>(
-                          value: 'ALLOW',
-                        ),
-                        Text('Allow (Whitelist)'),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Add Rule'),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => WebsiteRuleEditor(
+          childId: widget.childId,
+          target: existing?.target ?? '',
+          ruleType: existing?.ruleType ?? 'DOMAIN',
+          action: existing?.action ?? 'BLOCK'),
     );
-
-    if (created == true && targetController.text.trim().isNotEmpty) {
-      try {
-        final newRuleMap = await ApiService.instance.createWebRule(
-          widget.childId,
-          ruleType: ruleType,
-          target: targetController.text.trim(),
-          action: action,
-          isEnabled: true,
-        );
-        setState(() => _rules.insert(0, WebBlockRule.fromJson(newRuleMap)));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Added rule: ${targetController.text.trim()}')),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Failed to add rule: $e'),
-                backgroundColor: context.colors.error),
-          );
-        }
+    if (draft == null || !mounted) return;
+    try {
+      if (existing == null) {
+        await ApiService.instance.createWebRule(widget.childId,
+            ruleType: draft['ruleType'] as String,
+            target: draft['target'] as String,
+            action: draft['action'] as String);
+      } else {
+        await ApiService.instance.updateWebRule(widget.childId, existing.id,
+            ruleType: draft['ruleType'] as String,
+            target: draft['target'] as String,
+            action: draft['action'] as String);
       }
+      if (!mounted) return;
+      await _loadRules();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save rule: $e')));
     }
   }
 
@@ -392,6 +297,10 @@ class _WebFilterScreenState extends State<WebFilterScreen>
                                         } catch (_) {}
                                       },
                                     ),
+                                    IconButton(
+                                        tooltip: 'Edit rule',
+                                        icon: const Icon(Icons.edit_outlined),
+                                        onPressed: () => _editRule(rule)),
                                     IconButton(
                                       icon: Icon(Icons.delete_outline,
                                           color: context.colors.error),

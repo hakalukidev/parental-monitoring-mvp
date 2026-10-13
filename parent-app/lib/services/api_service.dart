@@ -294,6 +294,47 @@ class ApiService {
     return body['iceServers'] as List<dynamic>;
   }
 
+  Future<Map<String, dynamic>> getServerConfig() async {
+    return _parseResponse(await _send('GET', _u('/api/config')))
+        as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getActivityPolicy(String childId) async =>
+      _parseResponse(await _send('GET', _u('/api/activity/policy/$childId')))
+          as Map<String, dynamic>;
+  Future<void> updateActivityPolicy(
+      String childId, Map<String, dynamic> policy) async {
+    _parseResponse(await _send('PUT', _u('/api/activity/policy/$childId'),
+        body: jsonEncode(policy)));
+  }
+
+  Future<Map<String, dynamic>> listActivity(String childId, String kind,
+      {String? cursor,
+      String? packageName,
+      DateTime? start,
+      DateTime? end}) async {
+    final uri = _u('/api/activity/$childId/$kind').replace(queryParameters: {
+      'limit': '50',
+      if (cursor != null) 'cursor': cursor,
+      if (packageName != null) 'packageName': packageName,
+      if (start != null) 'start': start.toUtc().toIso8601String(),
+      if (end != null) 'end': end.toUtc().toIso8601String()
+    });
+    return _parseResponse(await _send('GET', uri)) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteActivity(String childId, String kind) async {
+    _parseResponse(await _send('DELETE', _u('/api/activity/$childId/$kind'),
+        body: jsonEncode({'confirmation': 'DELETE_ACTIVITY'})));
+  }
+
+  Future<void> reviewSafetyEvent(
+      String childId, String id, String status) async {
+    _parseResponse(await _send('PATCH',
+        _u('/api/activity/$childId/SAFETY/${Uri.encodeComponent(id)}/review'),
+        body: jsonEncode({'reviewStatus': status})));
+  }
+
   // ==========================================
   // App Blocker & Policies
   // ==========================================
@@ -380,6 +421,8 @@ class ApiService {
     String ruleId, {
     String? action,
     bool? isEnabled,
+    String? ruleType,
+    String? target,
   }) async {
     final res = await _send(
       'PUT',
@@ -387,6 +430,8 @@ class ApiService {
       body: jsonEncode({
         if (action != null) 'action': action,
         if (isEnabled != null) 'isEnabled': isEnabled,
+        if (ruleType != null) 'ruleType': ruleType,
+        if (target != null) 'target': target,
       }),
     );
     _parseResponse(res);
@@ -396,6 +441,25 @@ class ApiService {
     final res =
         await _send('DELETE', _u('/api/children/$childId/web-rules/$ruleId'));
     _parseResponse(res);
+  }
+
+  Future<Map<String, dynamic>> previewWebRule(
+      String childId, String ruleType, String target) async {
+    final res = await _send(
+        'POST', _u('/api/children/$childId/web-rules/preview'),
+        body: jsonEncode({'ruleType': ruleType, 'target': target}));
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> requestAudioSession(String childId) async {
+    final res = await _send('POST', _u('/api/audio-session/request'),
+        body: jsonEncode({'childId': childId}));
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<void> stopAudioSession(String sessionId) async {
+    _parseResponse(
+        await _send('POST', _u('/api/audio-session/$sessionId/stop')));
   }
 
   // ==========================================
@@ -534,7 +598,7 @@ class ApiService {
   Future<Map<String, dynamic>> getUnreadGeofenceEventsSummary(
       {DateTime? since}) async {
     final query = <String, String>{
-      if (since != null) 'since': since.toIso8601String(),
+      if (since != null) 'since': since.toUtc().toIso8601String(),
     };
     final uri = Uri.parse(
             '${AppConfig.apiBaseUrl}/api/children/geofence-events/unread-summary')
@@ -563,6 +627,40 @@ class ApiService {
     final res =
         await _send('POST', _u('/api/children/$childId/usage/request-sync'));
     return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCommunicationPolicy(String childId) async =>
+      _parseResponse(
+              await _send('GET', _u('/api/communications/policy/$childId')))
+          as Map<String, dynamic>;
+  Future<Map<String, dynamic>> getCommunications(String childId, String kind,
+      {String? cursor,
+      String? search,
+      String? direction,
+      String? threadId,
+      DateTime? start,
+      DateTime? end,
+      bool grouped = false,
+      bool statistics = false}) async {
+    final params = <String, String>{
+      if (cursor != null) 'cursor': cursor,
+      if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      if (direction != null) 'direction': direction,
+      if (threadId != null) 'threadId': threadId,
+      if (start != null) 'start': start.toUtc().toIso8601String(),
+      if (end != null) 'end': end.toUtc().toIso8601String()
+    };
+    final path =
+        '/api/communications/$childId/$kind${grouped ? '/groups' : statistics ? '/stats' : ''}';
+    return _parseResponse(await _send('GET',
+            _u(path).replace(queryParameters: params.isEmpty ? null : params)))
+        as Map<String, dynamic>;
+  }
+
+  Future<void> deleteCommunications(String childId, String kind) async {
+    _parseResponse(await _send(
+        'DELETE', _u('/api/communications/$childId/$kind'),
+        body: {'confirmation': 'DELETE_COMMUNICATIONS'}));
   }
 }
 

@@ -56,4 +56,33 @@ class MonitoringLogicTest {
         assertFalse(WebFilterEvaluator.evaluateRules("https://%invalid", rules = emptyList()).isBlocked)
     }
 
+    @Test fun domainsNormalizeWithoutLookalikeOrPathBroadening() {
+        for (target in listOf("example.com", " www.example.com ", "HTTP://WWW.EXAMPLE.COM/", "example.com.")) {
+            val rule = CachedWebRule("n", "DOMAIN", target, "BLOCK", true)
+            assertTrue(WebFilterEvaluator.evaluateRules("HTTPS://m.example.com/path", rules = listOf(rule)).isBlocked)
+            assertFalse(WebFilterEvaluator.evaluateRules("https://example.com.evil.test", rules = listOf(rule)).isBlocked)
+            assertFalse(WebFilterEvaluator.evaluateRules("javascript:example.com", rules = listOf(rule)).isBlocked)
+        }
+        val path = CachedWebRule("path", "DOMAIN", "example.com/Study", "BLOCK", true)
+        assertTrue(WebFilterEvaluator.evaluateRules("https://www.example.com/Study", rules = listOf(path)).isBlocked)
+        assertFalse(WebFilterEvaluator.evaluateRules("https://example.com/study", rules = listOf(path)).isBlocked)
+        assertFalse(WebFilterEvaluator.evaluateRules("https://sub.example.com/Study", rules = listOf(path)).isBlocked)
+        assertFalse(WebFilterEvaluator.evaluateRules("https://example.com/else", rules = listOf(path)).isBlocked)
+    }
+    @Test fun wildcardAndExactUrlCacheRulesKeepTheirScope() {
+        val wildcard = CachedWebRule("wild", "DOMAIN", "*.example.com", "BLOCK", true)
+        assertTrue(WebFilterEvaluator.evaluateRules("https://www.example.com", rules = listOf(wildcard)).isBlocked)
+        assertTrue(WebFilterEvaluator.evaluateRules("https://example.com", rules = listOf(wildcard)).isBlocked)
+        assertTrue(WebFilterEvaluator.evaluateRules("https://sample.bet", rules = listOf(wildcard.copy(target = "*.bet"))).isBlocked)
+        val url = CachedWebRule("url", "URL", "https://example.com/path?q=one", "BLOCK", true)
+        assertTrue(WebFilterEvaluator.evaluateRules("https://example.com/path?q=one#fragment", rules = listOf(url)).isBlocked)
+        assertFalse(WebFilterEvaluator.evaluateRules("http://example.com/path?q=one", rules = listOf(url)).isBlocked)
+        assertFalse(WebFilterEvaluator.evaluateRules("https://example.com/path?q=two", rules = listOf(url)).isBlocked)
+        assertEquals("xn--bcher-kva.de", WebAddresses.parse("https://bücher.de/")?.host)
+        assertNull(WebAddresses.parse("file:///example.com"))
+        assertEquals("https://example.com/Study", WebAddresses.parse("https://example.com/a/%2e%2e/Study")?.exact)
+        assertEquals("https://example.com/a//Study", WebAddresses.parse("https://example.com/a//Study")?.exact)
+        assertEquals("https://example.com/%C3%BC", WebAddresses.parse("https://example.com/ü")?.exact)
+    }
+
 }

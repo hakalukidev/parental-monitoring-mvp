@@ -589,7 +589,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                                           .inMinutes <
                                       5
                               ? 'Recent fix • Device online'
-                              : 'Last updated ${DateFormat('MMM d, h:mm a').format(loc.recordedAt)}',
+                              : 'Last updated ${DateFormat('MMM d, h:mm a').format(loc.recordedAt.toLocal())}',
                           style: TextStyle(
                             color: _deviceStatus == 'ONLINE'
                                 ? context.colors.primary
@@ -1407,7 +1407,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Recorded: ${DateFormat('h:mm:ss a, MMM d').format(activeLocation.recordedAt)} • GPS ±${activeLocation.accuracy?.toStringAsFixed(0) ?? 'unknown'}m',
+                                  'Recorded: ${DateFormat('h:mm:ss a, MMM d').format(activeLocation.recordedAt.toLocal())} • GPS ±${activeLocation.accuracy?.toStringAsFixed(0) ?? 'unknown'}m',
                                   style: theme.textTheme.bodySmall
                                       ?.copyWith(color: context.muted),
                                 ),

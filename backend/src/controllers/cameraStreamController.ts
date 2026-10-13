@@ -27,6 +27,10 @@ export const requestCameraStream = asyncHandler(async (req: AuthedRequest, res: 
   }
 
   const id = await reserveMediaSession("camera", childId);
+  if (withAudio) {
+    try { await reserveMediaSession("microphone", childId, id); }
+    catch (error) { await releaseMediaSession(id.toString()); throw error; }
+  }
   const session = await CameraStreamSession.create({
     _id: id,
     parentId,

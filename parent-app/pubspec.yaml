@@ -1,7 +1,7 @@
 name: parent_app
 description: Seftly - Parent application for parental monitoring MVP
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.3.0+4
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

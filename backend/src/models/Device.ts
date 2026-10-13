@@ -20,6 +20,8 @@ export interface IDevice extends Document {
   platform: string;
   timeZone?: string;
   mediaConsentVersion?: number;
+  audioCheckInVersion?: number;
+  policyProtocolVersion?: number;
   status: DeviceStatus;
   lastSeen: Date;
   socketId?: string | null; // current active socket connection id, if online
@@ -34,6 +36,8 @@ const deviceSchema = new Schema<IDevice>(
     childId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     deviceName: { type: String, required: true },
     mediaConsentVersion: { type: Number, default: 1 },
+    audioCheckInVersion: { type: Number, default: 0 },
+    policyProtocolVersion: { type: Number, default: 1 },
     timeZone: { type: String, default: "UTC" },
     platform: { type: String, default: "Android" },
     status: { type: String, enum: ["ONLINE", "OFFLINE"], default: "OFFLINE" },

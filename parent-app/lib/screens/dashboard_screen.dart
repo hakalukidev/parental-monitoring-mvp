@@ -1,6 +1,11 @@
+import '../services/app_info.dart';
+import 'communication_history_screen.dart';
+import '../design/family_date_time.dart';
+import 'activity_history_screen.dart';
 import '../design/seftly_widgets.dart';
 import '../design/seftly_theme.dart';
 import 'dart:async';
+import 'sound_around_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -21,7 +26,8 @@ import 'app_usage_report_screen.dart';
 import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final DateTime Function() now;
+  const DashboardScreen({super.key, this.now = DateTime.now});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -37,12 +43,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   DateTime? _lastSync;
   bool _syncFailed = false, _syncing = false;
   int _tab = 0;
+  String? _expandedChildId;
   List<Map<String, dynamic>> _alerts = [];
   bool _alertsAvailable = false;
   bool get _statusCurrent =>
       !_syncFailed &&
       _lastSync != null &&
-      DateTime.now().difference(_lastSync!).inSeconds < 90;
+      widget.now().difference(_lastSync!).inSeconds < 90;
 
   @override
   void initState() {
@@ -95,7 +102,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       setState(() {
         _children =
             raw.map((e) => Child.fromJson(e as Map<String, dynamic>)).toList();
-        _lastSync = DateTime.now();
+        _lastSync = widget.now();
         _syncFailed = false;
       });
       _syncUnreadGeofenceNotifications();
@@ -384,7 +391,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
             const SizedBox(height: 12),
             Text(
-              'Recorded at: ${DateFormat('h:mm a, MMM d').format(DateTime.tryParse(data['triggeredAt']?.toString() ?? '')?.toLocal() ?? DateTime.now())}',
+              'Recorded at: ${FamilyDateTime.format(DateTime.tryParse(data['triggeredAt']?.toString() ?? ''), pattern: 'h:mm a, MMM d')}',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
@@ -548,7 +555,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       setState(() {
         _children =
             raw.map((e) => Child.fromJson(e as Map<String, dynamic>)).toList();
-        _lastSync = DateTime.now();
+        _lastSync = widget.now();
         _syncFailed = false;
       });
     } catch (e) {
@@ -622,6 +629,17 @@ class _DashboardScreenState extends State<DashboardScreen>
           ]),
           actions: [
             IconButton(
+                tooltip: 'About Seftly',
+                icon: const Icon(Icons.info_outline_rounded),
+                onPressed: () async {
+                  final version = await AppInfo.installedVersion();
+                  if (!mounted) return;
+                  showAboutDialog(
+                      context: this.context,
+                      applicationName: 'Seftly Parent',
+                      applicationVersion: version);
+                }),
+            IconButton(
                 tooltip: 'Refresh family',
                 onPressed: _loading ? null : _refresh,
                 icon: const Icon(Icons.refresh_rounded)),
@@ -669,7 +687,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                       size.maxWidth > 1100
                                           ? (size.maxWidth - 1060) / 2
                                           : 20,
-                                      24,
+                                      12,
                                       size.maxWidth > 1100
                                           ? (size.maxWidth - 1060) / 2
                                           : 20,
@@ -677,61 +695,62 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   children: [
                                     Text(
                                         _tab == 0
-                                            ? 'Hello, parent.'
+                                            ? 'My Children · ${_children.length}'
                                             : 'Your family’s activity',
                                         style: Theme.of(context)
                                             .textTheme
-                                            .headlineMedium),
-                                    const SizedBox(height: 8),
+                                            .titleLarge),
+                                    const SizedBox(height: 4),
                                     Text(
                                         _tab == 0
-                                            ? 'Your family at a glance. Choose a child to check in.'
+                                            ? 'Tap a child to see details and controls.'
                                             : 'Recorded safety-zone alerts from your children’s devices.',
                                         style: TextStyle(color: context.muted)),
-                                    const SizedBox(height: 24),
-                                    Wrap(
-                                        spacing: 12,
-                                        runSpacing: 12,
-                                        children: [
-                                          _FamilyStat(
-                                              width: MediaQuery.textScalerOf(
-                                                              context)
-                                                          .scale(1) >
-                                                      1.5
-                                                  ? 148
-                                                  : ((size.maxWidth - 64) / 3)
-                                                      .clamp(90, 180),
-                                              label: 'Children',
-                                              value: '${_children.length}',
-                                              icon:
-                                                  Icons.people_outline_rounded),
-                                          _FamilyStat(
-                                              width: MediaQuery.textScalerOf(
-                                                              context)
-                                                          .scale(1) >
-                                                      1.5
-                                                  ? 148
-                                                  : ((size.maxWidth - 64) / 3)
-                                                      .clamp(90, 180),
-                                              label: 'Online now',
-                                              value: online?.toString() ??
-                                                  'Unknown',
-                                              icon: Icons.wifi_rounded),
-                                          _FamilyStat(
-                                              width: MediaQuery.textScalerOf(
-                                                              context)
-                                                          .scale(1) >
-                                                      1.5
-                                                  ? 148
-                                                  : ((size.maxWidth - 64) / 3)
-                                                      .clamp(90, 180),
-                                              label: 'Unread alerts',
-                                              value: _alertsAvailable
-                                                  ? '${_alerts.length}'
-                                                  : 'Unknown',
-                                              icon: Icons
-                                                  .notifications_none_rounded),
-                                        ]),
+                                    const SizedBox(height: 12),
+                                    if (_tab == 1)
+                                      Wrap(
+                                          spacing: 12,
+                                          runSpacing: 12,
+                                          children: [
+                                            _FamilyStat(
+                                                width: MediaQuery.textScalerOf(
+                                                                context)
+                                                            .scale(1) >
+                                                        1.5
+                                                    ? 148
+                                                    : ((size.maxWidth - 64) / 3)
+                                                        .clamp(90, 180),
+                                                label: 'Children',
+                                                value: '${_children.length}',
+                                                icon: Icons
+                                                    .people_outline_rounded),
+                                            _FamilyStat(
+                                                width: MediaQuery.textScalerOf(
+                                                                context)
+                                                            .scale(1) >
+                                                        1.5
+                                                    ? 148
+                                                    : ((size.maxWidth - 64) / 3)
+                                                        .clamp(90, 180),
+                                                label: 'Online now',
+                                                value: online?.toString() ??
+                                                    'Unknown',
+                                                icon: Icons.wifi_rounded),
+                                            _FamilyStat(
+                                                width: MediaQuery.textScalerOf(
+                                                                context)
+                                                            .scale(1) >
+                                                        1.5
+                                                    ? 148
+                                                    : ((size.maxWidth - 64) / 3)
+                                                        .clamp(90, 180),
+                                                label: 'Unread alerts',
+                                                value: _alertsAvailable
+                                                    ? '${_alerts.length}'
+                                                    : 'Unknown',
+                                                icon: Icons
+                                                    .notifications_none_rounded),
+                                          ]),
                                     const SizedBox(height: 16),
                                     Wrap(spacing: 8, runSpacing: 8, children: [
                                       StatusPill(
@@ -758,13 +777,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                                               style: TextStyle(
                                                   color:
                                                       context.colors.error))),
-                                    const SizedBox(height: 28),
+                                    const SizedBox(height: 12),
                                     if (_tab == 0) ...[
-                                      Text('Your children',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge),
-                                      const SizedBox(height: 16),
                                       if (_children.isEmpty)
                                         SeftlyStateView(
                                             icon: Icons.family_restroom_rounded,
@@ -777,12 +791,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                                       for (final child in _children)
                                         Padding(
                                             padding: const EdgeInsets.only(
-                                                bottom: 20),
-                                            child: ChildOverviewCard(
+                                                bottom: 8),
+                                            child: CompactChildCard(
                                                 key: ValueKey(child.id),
                                                 child: child,
                                                 socketService: _socketService,
-                                                statusCurrent: current)),
+                                                statusCurrent: current,
+                                                expanded: _expandedChildId ==
+                                                    child.id,
+                                                onToggle: () => setState(() =>
+                                                    _expandedChildId =
+                                                        _expandedChildId ==
+                                                                child.id
+                                                            ? null
+                                                            : child.id))),
                                     ] else if (!_alertsAvailable)
                                       SeftlyStateView(
                                           icon: Icons.cloud_off_outlined,
@@ -866,11 +888,13 @@ class ChildOverviewCard extends StatelessWidget {
   final Child child;
   final SocketService? socketService;
   final bool statusCurrent;
+  final bool embedded;
   const ChildOverviewCard(
       {super.key,
       required this.child,
       this.socketService,
-      this.statusCurrent = true});
+      this.statusCurrent = true,
+      this.embedded = false});
   String _lastSeen() {
     final seen = child.device?.lastSeen;
     if (seen == null) return 'No device update yet';
@@ -935,7 +959,7 @@ class ChildOverviewCard extends StatelessWidget {
       (
         Icons.screen_share_outlined,
         'Screen sharing',
-        'Approval on child device',
+        'Android device action when required',
         online
             ? () => open(
                 ScreenShareScreen(childId: child.id, childName: child.name))
@@ -944,143 +968,271 @@ class ChildOverviewCard extends StatelessWidget {
       (
         Icons.videocam_outlined,
         'Camera check-in',
-        'Approval on child device',
+        'Android device action when required',
         online
             ? () => open(
                 CameraStreamScreen(childId: child.id, childName: child.name))
             : null
       ),
+      (
+        Icons.hearing_rounded,
+        'Sound check-in',
+        'Audio only · uses granted access',
+        online
+            ? () => open(
+                SoundAroundScreen(childId: child.id, childName: child.name))
+            : null
+      ),
+      for (final (kind, title, icon) in const [
+        ('CALL', 'Call History', Icons.call_outlined),
+        ('SMS', 'Messages', Icons.sms_outlined),
+        (
+          'NOTIFICATION',
+          'Notification activity',
+          Icons.notifications_none_rounded
+        ),
+        ('SAFETY', 'Photo & video safety', Icons.verified_user_outlined),
+      ])
+        (
+          icon,
+          title,
+          'Settings and reported activity',
+          () => open(kind == 'CALL' || kind == 'SMS'
+              ? CommunicationHistoryScreen(
+                  childId: child.id, childName: child.name, kind: kind)
+              : ActivityHistoryScreen(
+                  childId: child.id, childName: child.name, kind: kind))
+        ),
     ];
-    return Card(
-        child: Padding(
-            padding: const EdgeInsets.all(20),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                CircleAvatar(
-                    radius: 25,
-                    backgroundColor: context.colors.primaryContainer,
-                    foregroundColor: context.colors.onPrimaryContainer,
-                    child: Text(child.name.characters.first.toUpperCase(),
-                        style: const TextStyle(fontWeight: FontWeight.w700))),
-                const SizedBox(width: 14),
-                Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Text(child.name,
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 3),
-                      Text('@${child.username}',
-                          style: TextStyle(color: context.muted))
-                    ]))
-              ]),
-              const SizedBox(height: 14),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                StatusPill(
-                    label: !statusCurrent
-                        ? 'Status unverified'
-                        : child.device == null
-                            ? 'Setup needed'
-                            : online
-                                ? 'Online'
-                                : 'Offline',
-                    active: online),
-                if (child.isPremium != null)
-                  StatusPill(
-                      label: child.isPremium!
-                          ? 'Access until ${child.expireDate == null ? 'renewal' : DateFormat('MMM d').format(child.expireDate!)}'
-                          : 'Access expired')
-              ]),
-              const SizedBox(height: 14),
-              Text(
-                  child.device?.deviceName ??
-                      'Connect Seftly Child to get started',
-                  style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 4),
-              Text(_lastSeen(),
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: context.muted)),
-              const SizedBox(height: 14),
-              Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                      color: context.colors.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(14)),
+    final content = Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (!embedded) ...[
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              CircleAvatar(
+                  radius: 25,
+                  backgroundColor: context.colors.primaryContainer,
+                  foregroundColor: context.colors.onPrimaryContainer,
+                  child: Text(child.name.characters.first.toUpperCase(),
+                      style: const TextStyle(fontWeight: FontWeight.w700))),
+              const SizedBox(width: 14),
+              Expanded(
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                            location == null
-                                ? 'Location not reported yet'
-                                : '${locFresh ? 'Recent location' : 'Last known location'} · ${DateFormat('MMM d, h:mm a').format(location.recordedAt.toLocal())}',
-                            style: Theme.of(context).textTheme.labelLarge),
-                        if (location != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                              '${location.latitude.toStringAsFixed(4)}, ${location.longitude.toStringAsFixed(4)}${location.accuracy == null ? '' : ' · ±${location.accuracy!.round()} m'}',
-                              style: Theme.of(context).textTheme.bodySmall)
-                        ],
-                        const SizedBox(height: 8),
-                        Text(
-                            child.recentUsage == null
-                                ? 'App activity: awaiting a device report'
-                                : 'Foreground app usage: ${((child.recentUsage!['totalScreenTimeSeconds'] as num? ?? 0) / 60).round()} min · ${child.recentUsage!['date'] ?? ''}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: context.muted)),
-                      ])),
-              const SizedBox(height: 20),
-              LayoutBuilder(builder: (context, box) {
-                final columns = box.maxWidth > 700
-                    ? 4
-                    : box.maxWidth > 280 &&
-                            MediaQuery.textScalerOf(context).scale(1) < 1.5
-                        ? 2
-                        : 1;
-                final width = (box.maxWidth - (columns - 1) * 10) / columns;
-                return Wrap(spacing: 10, runSpacing: 10, children: [
-                  for (final (icon, title, subtitle, action) in actions.take(4))
-                    SizedBox(
-                        width: width,
-                        child: _ChildAction(
-                            icon: icon,
-                            title: title,
-                            subtitle: subtitle,
-                            onTap: action))
-                ]);
-              }),
-              const SizedBox(height: 8),
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: EdgeInsets.zero,
-                title: const Text('More family tools'),
-                subtitle:
-                    const Text('Web rules, browsing and approved check-ins'),
-                children: [
-                  for (final (icon, title, subtitle, action) in actions.skip(4))
-                    ListTile(
-                        leading: Icon(icon),
-                        title: Text(title),
-                        subtitle: Text(subtitle),
-                        enabled: action != null,
-                        onTap: action)
-                ],
-              ),
-              if (!online)
-                Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: Text(
-                        'Live sessions are available when the child device is confirmed online.',
+                    Text(child.name,
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 3),
+                    Text('@${child.username}',
+                        style: TextStyle(color: context.muted))
+                  ]))
+            ]),
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              StatusPill(
+                  label: !statusCurrent
+                      ? 'Status unverified'
+                      : child.device == null
+                          ? 'Setup needed'
+                          : online
+                              ? 'Online'
+                              : 'Offline',
+                  active: online),
+              if (child.isPremium != null)
+                StatusPill(
+                    label: child.isPremium!
+                        ? 'Access until ${child.expireDate == null ? 'renewal' : DateFormat('MMM d').format(child.expireDate!)}'
+                        : 'Access expired')
+            ]),
+            const SizedBox(height: 14),
+          ],
+          Text(
+              child.device?.deviceName ?? 'Connect Seftly Child to get started',
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 4),
+          Text(_lastSeen(),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: context.muted)),
+          if (location?.batteryLevel != null)
+            Text(
+                'Battery ${location!.batteryLevel}% · reported ${FamilyDateTime.format(location.recordedAt)}'),
+          const SizedBox(height: 14),
+          Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                  color: context.colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(14)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        location == null
+                            ? 'Location not reported yet'
+                            : '${locFresh ? 'Recent location' : 'Last known location'} · ${DateFormat('MMM d, h:mm a').format(location.recordedAt.toLocal())}',
+                        style: Theme.of(context).textTheme.labelLarge),
+                    if (location != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                          '${location.latitude.toStringAsFixed(4)}, ${location.longitude.toStringAsFixed(4)}${location.accuracy == null ? '' : ' · ±${location.accuracy!.round()} m'}',
+                          style: Theme.of(context).textTheme.bodySmall)
+                    ],
+                    const SizedBox(height: 8),
+                    Text(
+                        child.recentUsage == null
+                            ? 'App activity: awaiting a device report'
+                            : 'Foreground app usage: ${((child.recentUsage!['totalScreenTimeSeconds'] as num? ?? 0) / 60).round()} min · ${child.recentUsage!['date'] ?? ''}',
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(color: context.muted))),
-            ])));
+                            ?.copyWith(color: context.muted)),
+                  ])),
+          const SizedBox(height: 20),
+          LayoutBuilder(builder: (context, box) {
+            final columns = box.maxWidth > 700
+                ? 4
+                : box.maxWidth > 280 &&
+                        MediaQuery.textScalerOf(context).scale(1) < 1.5
+                    ? 2
+                    : 1;
+            final width = (box.maxWidth - (columns - 1) * 10) / columns;
+            return Wrap(spacing: 10, runSpacing: 10, children: [
+              for (final (icon, title, subtitle, action) in actions.take(4))
+                SizedBox(
+                    width: width,
+                    child: _ChildAction(
+                        icon: icon,
+                        title: title,
+                        subtitle: subtitle,
+                        onTap: action))
+            ]);
+          }),
+          const SizedBox(height: 8),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('More family tools'),
+            subtitle: const Text('Web rules, browsing and parent check-ins'),
+            children: [
+              for (final (icon, title, subtitle, action) in actions.skip(4))
+                ListTile(
+                    leading: Icon(icon),
+                    title: Text(title),
+                    subtitle: Text(subtitle),
+                    enabled: action != null,
+                    onTap: action)
+            ],
+          ),
+          if (!online)
+            Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Text(
+                    'Live sessions are available when the child device is confirmed online.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: context.muted))),
+        ]));
+    return embedded ? content : Card(child: content);
+  }
+}
+
+class CompactChildCard extends StatelessWidget {
+  final Child child;
+  final SocketService? socketService;
+  final bool statusCurrent, expanded;
+  final VoidCallback onToggle;
+  const CompactChildCard(
+      {super.key,
+      required this.child,
+      required this.onToggle,
+      this.socketService,
+      this.statusCurrent = true,
+      this.expanded = false});
+  @override
+  Widget build(BuildContext context) {
+    final status = !statusCurrent ||
+            (child.device != null &&
+                !['ONLINE', 'OFFLINE'].contains(child.device!.status))
+        ? 'Unverified'
+        : child.device == null
+            ? 'Setup needed'
+            : child.isOnline
+                ? 'Online'
+                : 'Offline';
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Semantics(
+          button: true,
+          expanded: expanded,
+          label: child.name,
+          child: InkWell(
+            key: ValueKey('child-toggle-${child.id}'),
+            onTap: onToggle,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 76),
+              child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(children: [
+                    CircleAvatar(
+                        radius: 20,
+                        child: Text(child.name.isEmpty
+                            ? '?'
+                            : child.name.characters.first.toUpperCase())),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                          Text(child.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall),
+                          const SizedBox(height: 2),
+                          Text(
+                              child.device?.lastSeen == null
+                                  ? 'No device update yet'
+                                  : 'Last seen ${FamilyDateTime.format(child.device!.lastSeen, pattern: 'MMM d, h:mm a')}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: context.muted)),
+                          const SizedBox(height: 2),
+                          Text(status,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                      color: status == 'Online'
+                                          ? context.colors.primary
+                                          : context.muted)),
+                        ])),
+                    const SizedBox(width: 6),
+                    Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 22),
+                  ])),
+            ),
+          ),
+        ),
+        AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            alignment: Alignment.topCenter,
+            child: expanded
+                ? ChildOverviewCard(
+                    child: child,
+                    socketService: socketService,
+                    statusCurrent: statusCurrent,
+                    embedded: true)
+                : const SizedBox(width: double.infinity)),
+      ]),
+    );
   }
 }
 

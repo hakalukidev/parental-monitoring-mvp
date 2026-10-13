@@ -7,7 +7,7 @@ The child app explains permissions during guardian setup. Missing permissions le
 - Usage access: foreground application activity, app limits and screen-state events.
 - Accessibility: foreground-app restrictions and supported browser address/title information for family web rules/history. It never approves screen-capture prompts or obstructs Android permission/settings controls.
 - Overlay: a truthful restriction explanation and temporary-access request. It does not disguise blocking as an app loading failure.
-- Camera/microphone: optional and requested in a visible approval flow for that session.
+- Camera/microphone: optional initial Android grants, reused for parent requests when Android permits activation. Capture stays visible and stoppable; Android-required device actions remain.
 - MediaProjection: fresh Android consent for every screen-share session. Android's indicators remain visible; Stop releases capture resources.
 - Installed-app visibility: app inventory needed for policies. One child account is intended for one primary child device.
 
@@ -31,6 +31,8 @@ TTL schema definitions are available, but production `autoIndex` is disabled. An
 
 `node scripts/retention-preview.cjs` (from backend, after building) is read-only: it reports policy enablement and counts of already-tagged expired records. It never creates indexes or deletes records.
 
-Calls/SMS and private social messages are not extracted. Notification-listener monitoring would require explicit Android notification access, a guardian-selected allowlist, exclusion of passwords/OTP/payment notifications, minimal metadata and separate retention. It must not circumvent protected/redacted notifications. A privacy-preserving image/video detector needs a real on-device model, a consensual data source and measured false-positive/negative evaluation; no detection capability is claimed here.
+Supported public call/SMS records are collected only after guardian configuration and legitimate Android grants; authorized message content is optional. The communications queue and backend content are AES-GCM encrypted. Conservative secret filtering excludes recognized OTP/password/security content before queueing and again on ingestion. Private encrypted-app messages are excluded. Notification monitoring uses explicit Android listener access, a guardian-selected allowlist and sensitive-package exclusions, and reads only package/event/time metadata without notification extras or bodies. It does not circumvent protected/redacted notifications. A privacy-preserving image/video detector needs a real on-device model, a consensual data source and measured false-positive/negative evaluation; no detection capability is claimed here.
 
 Map tiles, reverse geocoding and directions use external map services. Coordinates for viewed routes/geocoding are sent to those providers without child names or authentication tokens; review provider privacy policies before production rollout. Offline logout clears local credentials/data immediately; server revocation is best effort while connectivity or authentication is unavailable.
+
+Detailed communications have bounded initial import, bounded queues, separate guardian-configured retention and confirmed category deletion. Deletion removes content and retains expiring opaque deduplication markers to prevent old records returning. Existing historical location/browsing/usage retention remains separately disabled unless configured. See the [current report](ENGINEERING_REPORT_1_3.md).

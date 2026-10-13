@@ -1,3 +1,5 @@
+import { AudioSession } from "../models/AudioSession";
+import { featureEnabled } from "../services/features";
 import { MediaLease } from "../models/MediaLease";
 import { releaseMediaSession, notifySessionEnd } from "../services/mediaSessions";
 import { Model } from "mongoose";
@@ -21,7 +23,8 @@ import { setChildSocket, removeChildSocket, getChildSocketIds, addParentSocket, 
 
 type SocketActor = Actor & { token: string };
 type Ack = (result: { ok: boolean; code?: string }) => void;
-const sessionModels: Model<IScreenShareSession>[] = [ScreenShareSession, CameraStreamSession as unknown as Model<IScreenShareSession>];
+const sessionModels: Model<IScreenShareSession>[] = [ScreenShareSession, CameraStreamSession as unknown as Model<IScreenShareSession>, AudioSession];
+const sessionPrefixes = ["screen_share", "camera_stream", "audio_session"] as const;
 
 export function registerSocketHandlers(io: Server): void {
   const emitParent = (parentId: string, event: string, data: unknown) => {
@@ -32,7 +35,7 @@ export function registerSocketHandlers(io: Server): void {
       const sessions = await Model.find({ [role === "CHILD" ? "childId" : "parentId"]: userId, status: { $in: openSessionStates } });
       for (const session of sessions) {
         const changed = await Model.updateOne({ _id: session._id, status: { $in: openSessionStates } }, { $set: { status: "ENDED", endedAt: new Date(), endedBy: "SYSTEM" } });
-        if (changed.modifiedCount) { await releaseMediaSession(session.id); notifySessionEnd(session, index === 0 ? "screen_share_stopped" : "camera_stream_stopped", "SYSTEM", reason); }
+        if (changed.modifiedCount) { await releaseMediaSession(session.id); notifySessionEnd(session, `${sessionPrefixes[index]}_stopped`, "SYSTEM", reason); }
       }
     }
   }
@@ -43,7 +46,7 @@ export function registerSocketHandlers(io: Server): void {
         const sessions = await Model.find({ status: { $in: openSessionStates } });
         for (const session of sessions) if (sessionExpired(session)) {
           const changed = await Model.updateOne({ _id: session._id, status: session.status }, { $set: { status: "ENDED", endedAt: new Date(), endedBy: "SYSTEM" } });
-          if (changed.modifiedCount) { await releaseMediaSession(session.id); notifySessionEnd(session, index === 0 ? "screen_share_stopped" : "camera_stream_stopped", "SYSTEM", "session_expired"); }
+          if (changed.modifiedCount) { await releaseMediaSession(session.id); notifySessionEnd(session, `${sessionPrefixes[index]}_stopped`, "SYSTEM", "session_expired"); }
         }
       }
     })().catch(() => console.error("[socket] session expiry check failed"));
@@ -91,17 +94,23 @@ export function registerSocketHandlers(io: Server): void {
         });
       });
     }
-    async function sessionFor(sessionId: string, states = openSessionStates, kind?: "screen" | "camera", enforceConsent = true) {
-      const screen = kind === "camera" ? null : await ScreenShareSession.findById(sessionId);
-      const session = screen ?? (kind === "screen" ? null : await CameraStreamSession.findById(sessionId));
+    async function sessionFor(sessionId: string, states = openSessionStates, kind?: "screen" | "camera" | "audio", enforceConsent = true) {
+      const index = kind === "screen" ? 0 : kind === "camera" ? 1 : kind === "audio" ? 2 : undefined;
+      let foundIndex = -1;
+      let session: IScreenShareSession | null = null;
+      for (const candidate of index === undefined ? [0, 1, 2] : [index]) {
+        session = await sessionModels[candidate].findById(sessionId);
+        if (session) { foundIndex = candidate; break; }
+      }
       if (!session) throw new AppError("Session not found", 404);
       assertSessionParticipant(actor, session, states);
       if (enforceConsent) {
-        const device = await Device.findOne({ childId: session.childId }).sort({ updatedAt: -1 }).select("mediaConsentVersion").lean();
+        const device = await Device.findOne({ childId: session.childId }).sort({ updatedAt: -1 }).select("mediaConsentVersion audioCheckInVersion").lean();
         if (device?.mediaConsentVersion !== 2) throw new AppError("Update Seftly Child to enable consent", 409);
+        if (foundIndex === 2 && (!featureEnabled("AUDIO") || device.audioCheckInVersion !== 1)) throw new AppError("Audio check-in is unavailable", 409);
       }
       await ownedChild({ userId: session.parentId.toString(), role: "PARENT" }, session.childId.toString());
-      return { session, Model: screen ? sessionModels[0] : sessionModels[1], kind: screen ? "screen_share" : "camera_stream" };
+      return { session, Model: sessionModels[foundIndex], kind: sessionPrefixes[foundIndex] };
     }
     const joinParticipants = (session: { _id: { toString(): string }; parentId: { toString(): string }; childId: { toString(): string } }) => {
       for (const id of [...getParentSocketIds(session.parentId.toString()), ...getChildSocketIds(session.childId.toString())]) {
@@ -140,8 +149,8 @@ export function registerSocketHandlers(io: Server): void {
       await sessionFor(sessionId);
       await socket.join(`session:${sessionId}`);
     });
-    for (const kind of ["screen", "camera"] as const) {
-      const prefix = kind === "screen" ? "screen_share" : "camera_stream";
+    for (const kind of ["screen", "camera", "audio"] as const) {
+      const prefix = kind === "screen" ? "screen_share" : kind === "camera" ? "camera_stream" : "audio_session";
       on(`${prefix}_accept`, sessionPayload, async ({ sessionId }) => {
         requireChild();
         const { session, Model } = await sessionFor(sessionId, ["REQUESTED"], kind);

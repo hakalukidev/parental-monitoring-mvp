@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 import org.json.JSONObject
+import com.example.childapp.activity.ActivityMetadata
 
 data class CachedAppPolicy(
     val packageName: String,
@@ -57,7 +58,7 @@ class LocalDatabase private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "child_monitoring.db"
-        private const val DATABASE_VERSION = 6
+        private const val DATABASE_VERSION = 8
 
         @Volatile
         private var instance: LocalDatabase? = null
@@ -70,6 +71,8 @@ class LocalDatabase private constructor(context: Context) :
     }
 
     override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS activity_queue (kind TEXT NOT NULL, event_id TEXT NOT NULL, owner_child_id TEXT NOT NULL DEFAULT '', event_at INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,event_id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS activity_seen (kind TEXT NOT NULL, event_id TEXT NOT NULL, event_at INTEGER NOT NULL, PRIMARY KEY(kind,event_id))")
         db.execSQL("CREATE TABLE IF NOT EXISTS pending_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)")
         db.execSQL(
             """
@@ -170,6 +173,9 @@ class LocalDatabase private constructor(context: Context) :
         db.rawQuery("PRAGMA table_info(unblock_grants)", null).use { c -> while (c.moveToNext()) columns.add(c.getString(1)) }
         if ("expires_elapsed" !in columns) db.execSQL("ALTER TABLE unblock_grants ADD COLUMN expires_elapsed INTEGER")
         if ("boot_count" !in columns) db.execSQL("ALTER TABLE unblock_grants ADD COLUMN boot_count INTEGER")
+        val activityColumns=mutableSetOf<String>()
+        db.rawQuery("PRAGMA table_info(activity_queue)",null).use {c->while(c.moveToNext())activityColumns.add(c.getString(1))}
+        if("owner_child_id" !in activityColumns)db.execSQL("ALTER TABLE activity_queue ADD COLUMN owner_child_id TEXT NOT NULL DEFAULT ''")
     }
     @Synchronized fun queueLocation(payload: JSONObject) {
         writableDatabase.insert("pending_locations", null, ContentValues().apply { put("payload", payload.toString()) })
@@ -187,7 +193,7 @@ class LocalDatabase private constructor(context: Context) :
     @Synchronized fun clearAccountData() {
         val db = writableDatabase; db.beginTransaction()
         try {
-            for (table in listOf("app_policies", "web_rules", "browsing_history", "unblock_grants", "device_state", "geofences", "blocked_events", "pending_locations")) db.delete(table, null, null)
+            for (table in listOf("app_policies", "web_rules", "browsing_history", "unblock_grants", "device_state", "geofences", "blocked_events", "pending_locations", "activity_queue", "activity_seen")) db.delete(table, null, null)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
@@ -195,6 +201,31 @@ class LocalDatabase private constructor(context: Context) :
     // ==========================================
     // Device Lockdown State
     // ==========================================
+    @Synchronized fun setLocalState(key: String, value: String) {
+        writableDatabase.insertWithOnConflict("device_state",null,ContentValues().apply {put("key",key);put("value",value)},SQLiteDatabase.CONFLICT_REPLACE)
+    }
+    @Synchronized fun localState(key: String): String? = readableDatabase.rawQuery("SELECT value FROM device_state WHERE key = ?",arrayOf(key)).use { if(it.moveToFirst())it.getString(0) else null }
+    @Synchronized fun queueActivity(event: JSONObject, expectedChildId: String) {
+        if(SessionStore(appContext).childId!=expectedChildId)return
+        val kind=event.getString("kind"); val id=ActivityMetadata.hash("$expectedChildId:${event.getString("eventId")}")
+        val ownedEvent=JSONObject(event.toString()).put("eventId",id)
+        val at=java.time.Instant.parse(event.getString("eventAt")).toEpochMilli()
+        val db=writableDatabase;db.beginTransaction()
+        try {
+            val seen=db.insertWithOnConflict("activity_seen",null,ContentValues().apply {put("kind",kind);put("event_id",id);put("event_at",at)},SQLiteDatabase.CONFLICT_IGNORE)
+            if(seen != -1L) {
+                db.insertWithOnConflict("activity_queue",null,ContentValues().apply {put("kind",kind);put("event_id",id);put("owner_child_id",expectedChildId);put("event_at",at);put("payload",ownedEvent.toString())},SQLiteDatabase.CONFLICT_IGNORE)
+                val removed=db.delete("activity_queue","kind = ? AND event_id NOT IN (SELECT event_id FROM activity_queue WHERE kind = ? ORDER BY event_at DESC LIMIT 2000)",arrayOf(kind,kind))
+                if(removed>0) setLocalState("activity_dropped",((localState("activity_dropped")?.toIntOrNull() ?: 0)+removed).toString())
+                db.delete("activity_seen","kind = ? AND event_id NOT IN (SELECT event_id FROM activity_seen WHERE kind = ? ORDER BY event_at DESC LIMIT 4000)",arrayOf(kind,kind))
+            }
+            db.setTransactionSuccessful()
+        } finally {db.endTransaction()}
+    }
+    @Synchronized fun pendingActivity(kind:String): List<JSONObject> = readableDatabase.rawQuery("SELECT payload FROM activity_queue WHERE kind = ? AND owner_child_id = ? ORDER BY event_at ASC LIMIT 100",arrayOf(kind,SessionStore(appContext).childId ?: "NONE")).use { c -> mutableListOf<JSONObject>().apply {while(c.moveToNext())add(JSONObject(c.getString(0)))} }
+    @Synchronized fun markActivitySynced(kind:String, ids:List<String>) {for(id in ids)writableDatabase.delete("activity_queue","kind = ? AND event_id = ?",arrayOf(kind,id))}
+    @Synchronized fun clearPendingActivity(kind:String) {writableDatabase.delete("activity_queue","kind = ?",arrayOf(kind))}
+    @Synchronized fun activityQueueCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM activity_queue WHERE owner_child_id = ?",arrayOf(SessionStore(appContext).childId ?: "NONE")).use {it.moveToFirst();it.getInt(0)}
     @Synchronized
     fun setDevicePaused(isPaused: Boolean) {
         val db = writableDatabase

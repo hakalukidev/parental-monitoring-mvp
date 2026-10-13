@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { requireAuth, requireRole } from "../middleware/auth";
+import { getMyActivityPolicy, getActivityPolicy, updateActivityPolicy, reportActivityCapabilities, ingestActivity, listActivity, deleteActivity, reviewSafetyEvent } from "../controllers/activityController";
+const router = Router(), child = [requireAuth,requireRole("CHILD")], parent = [requireAuth,requireRole("PARENT")];
+router.get("/my-policy",...child,getMyActivityPolicy);
+router.post("/capabilities",...child,reportActivityCapabilities);
+router.post("/ingest",...child,ingestActivity);
+router.get("/policy/:childId",...parent,getActivityPolicy);
+router.put("/policy/:childId",...parent,updateActivityPolicy);
+router.patch("/:childId/SAFETY/:eventId/review",...parent,reviewSafetyEvent);
+router.get("/:childId/:kind",...parent,listActivity);
+router.delete("/:childId/:kind",...parent,deleteActivity);
+export default router;

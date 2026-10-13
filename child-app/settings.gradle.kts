@@ -15,3 +15,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "child-app"
 include(":app")
+// Synthetic notification source is never included in a production build.
+if (providers.gradleProperty("seftlyQa").orNull == "true") include(":notification-fixture")

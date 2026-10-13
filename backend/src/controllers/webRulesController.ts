@@ -6,6 +6,21 @@ import { WebBlockRule } from "../models/WebBlockRule";
 import { getIO } from "../socket/io";
 import { getChildSocketIds } from "../socket/presence";
 import { createWebRuleSchema, updateWebRuleSchema } from "../utils/validation";
+import { normalizeWebsiteTarget, WebsiteRuleType } from "../services/webTargets";
+import { Device } from "../models/Device";
+
+function normalized(type: WebsiteRuleType, target: string) {
+  try { return normalizeWebsiteTarget(type, target); }
+  catch (error) { throw new AppError(error instanceof Error ? error.message : "Invalid website address", 422); }
+}
+
+export const previewWebRule = asyncHandler(async (req: AuthedRequest, res: Response) => {
+  await assertParentOwnsChild(req.user!.id, req.params.childId);
+  const data = createWebRuleSchema.parse(req.body);
+  const target = normalized(data.ruleType, data.target);
+  const device = await Device.findOne({ childId: req.params.childId }).sort({ updatedAt: -1 }).select("policyProtocolVersion").lean();
+  res.json({ ...target, requiresChildUpdate: target.ruleType === "URL" && device?.policyProtocolVersion !== 2 });
+});
 
 // GET /api/children/:childId/web-rules (Parent only)
 export const listWebRules = asyncHandler(async (req: AuthedRequest, res: Response) => {
@@ -24,11 +39,12 @@ export const createWebRule = asyncHandler(async (req: AuthedRequest, res: Respon
   await assertParentOwnsChild(parentId, childId);
 
   const data = createWebRuleSchema.parse(req.body);
+  const target = normalized(data.ruleType, data.target);
+  if (target.ruleType === "URL" && (await Device.findOne({childId}).sort({updatedAt:-1}).select("policyProtocolVersion").lean())?.policyProtocolVersion !== 2) throw new AppError("Update Seftly Child before applying exact URL rules",409);
 
   const rule = await WebBlockRule.create({
     childId,
-    ruleType: data.ruleType,
-    target: data.target.toLowerCase().trim(),
+    ...target,
     action: data.action,
     isEnabled: data.isEnabled,
   });
@@ -55,9 +71,14 @@ export const updateWebRule = asyncHandler(async (req: AuthedRequest, res: Respon
 
   const data = updateWebRuleSchema.parse(req.body);
 
+  const existing = await WebBlockRule.findOne({ _id: ruleId, childId });
+  if (!existing) throw new AppError("Web rule not found", 404);
+  const targetChange = data.target !== undefined || data.ruleType !== undefined
+    ? normalized(data.ruleType ?? existing.ruleType, data.target ?? existing.target) : {};
+  if ("ruleType" in targetChange && targetChange.ruleType === "URL" && (await Device.findOne({childId}).sort({updatedAt:-1}).select("policyProtocolVersion").lean())?.policyProtocolVersion !== 2) throw new AppError("Update Seftly Child before applying exact URL rules",409);
   const rule = await WebBlockRule.findOneAndUpdate(
     { _id: ruleId, childId },
-    { $set: data },
+    { $set: { ...data, ...targetChange } },
     { new: true }
   );
   if (!rule) throw new AppError("Web rule not found", 404);

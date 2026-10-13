@@ -4,8 +4,8 @@ import { AppError } from "../utils/http";
 import { getIO } from "../socket/io";
 import { getChildSocketIds, getParentSocketIds } from "../socket/presence";
 
-export async function reserveMediaSession(kind: string, childId: string): Promise<Types.ObjectId> {
-  const id = new Types.ObjectId();
+export async function reserveMediaSession(kind: string, childId: string, existingId?: Types.ObjectId): Promise<Types.ObjectId> {
+  const id = existingId ?? new Types.ObjectId();
   try {
     await MediaLease.findOneAndUpdate({ _id: `${kind}:${childId}`, expiresAt: { $lte: new Date() } }, { $set: { sessionId: id, expiresAt: new Date(Date.now() + 120_000) } }, { upsert: true, new: true });
     return id;

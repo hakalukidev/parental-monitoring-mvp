@@ -241,10 +241,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Ben'), 500,
         scrollable: find.byType(Scrollable).first);
-    final card = find.ancestor(
-        of: find.text('Ben'), matching: find.byType(ChildOverviewCard));
+    await tester.tap(find.byKey(const ValueKey('child-toggle-child-b')));
+    await tester.pumpAndSettle();
+    final card = find.byType(ChildOverviewCard);
     final action = find.descendant(of: card, matching: find.text('App rules'));
-    await tester.ensureVisible(action);
+    await tester.scrollUntilVisible(action,180,scrollable:find.byType(Scrollable).first);
     await tester.pumpAndSettle();
     await tester.tap(action);
     await tester.runAsync(() async {

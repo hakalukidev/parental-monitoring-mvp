@@ -1,5 +1,7 @@
 package com.example.childapp.ui
 
+import com.example.childapp.audio.AudioCheckInService
+import com.example.childapp.activity.ActivitySync
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -20,6 +22,14 @@ import kotlinx.coroutines.*
 class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
     private lateinit var api: ApiClient
+    override fun onResume() {
+        super.onResume()
+        if(session.accessToken!=null&&session.isSetupCompleted)com.example.childapp.consent.SessionConsentController.foreground(this)
+    }
+    override fun onPause() {
+        com.example.childapp.consent.SessionConsentController.background(this)
+        super.onPause()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         session = SessionStore(this); api = ApiClient(session)
@@ -63,9 +73,12 @@ class MainActivity : ComponentActivity() {
                         if (departingToken != null) lifecycleScope.launch(Dispatchers.IO) { runCatching { api.logout(departingToken) } }
                         ScreenCaptureService.stop(this@MainActivity)
                         CameraStreamService.stop(this@MainActivity)
+                        AudioCheckInService.stop(this@MainActivity)
+                        ActivitySync.stop(this@MainActivity)
                         LocationService.stop(this@MainActivity)
                         ChildMonitoringService.stop(this@MainActivity)
                         com.example.childapp.data.LocalDatabase.getInstance(this@MainActivity).clearAccountData()
+                        com.example.childapp.communication.CommunicationQueue(this@MainActivity).use {it.clear()}
                         session.clear(); loggedIn = false; setupDone = false
                     }
                 )
@@ -76,7 +89,7 @@ class MainActivity : ComponentActivity() {
         val token = session.accessToken ?: return
         try {
             ChildMonitoringService.start(this)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) LocationService.start(this, token)
+            if (!com.example.childapp.BuildConfig.QA_SAFE_FIXTURES && (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED)) LocationService.start(this, token)
         } catch (_: SecurityException) { /* Permission recovery is visible on the home/setup screens. */ }
     }
 }

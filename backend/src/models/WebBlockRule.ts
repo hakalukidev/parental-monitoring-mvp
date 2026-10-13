@@ -1,6 +1,6 @@
 import { Schema, model, Types, Document } from "mongoose";
 
-export type WebRuleType = "DOMAIN" | "KEYWORD" | "CATEGORY";
+export type WebRuleType = "DOMAIN" | "URL" | "KEYWORD" | "CATEGORY";
 export type WebRuleAction = "BLOCK" | "ALLOW";
 
 export interface IWebBlockRule extends Document {
@@ -19,7 +19,7 @@ const webBlockRuleSchema = new Schema<IWebBlockRule>(
     childId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     ruleType: {
       type: String,
-      enum: ["DOMAIN", "KEYWORD", "CATEGORY"],
+      enum: ["DOMAIN", "URL", "KEYWORD", "CATEGORY"],
       required: true,
     },
     target: { type: String, required: true },

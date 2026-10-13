@@ -1,6 +1,6 @@
 # Seftly family safety
 
-Seftly connects a Flutter parent app, a Kotlin/Compose Android child app and a TypeScript/Express/MongoDB backend. Parents manage each child's app rules, usage reports, supported-browser rules/history, location history and safety zones. Screen and camera check-ins require explicit approval on the child device. The backend relays WebRTC signaling; it does not record media.
+Seftly connects a Flutter parent app, a Kotlin/Compose Android child app and a TypeScript/Express/MongoDB backend. Parents manage each child's app rules, usage reports, supported-browser rules/history, location history and safety zones. Camera/audio check-ins reuse Android permissions; Android-required foreground activation and fresh screen-sharing consent remain. The backend relays WebRTC signaling; it does not record media.
 
 Production IDs remain `com.example.parent_app` and `com.example.childapp`. The child is distributed as a signed standalone APK. Debug packages use `.debug` and do not replace installed production apps.
 
@@ -68,11 +68,11 @@ From the repository root, run `python3 scripts/check_security.py`. CI runs compi
 
 Read [release and deployment instructions](docs/RELEASE.md) before generating artifacts or changing production. Existing keys are preserved locally; exposed historical keys/environment values still require a continuity-aware remediation plan. Removing a file from Git tracking does not erase Git history.
 
-Backend 1.1.0 was deployed to `https://api.hakaluki.dev` on 2026-10-13 with a restore-tested backup and verified public authentication/Socket.IO checks. See the [deployment and rollback record](docs/PRODUCTION_DEPLOYMENT.md). Approved media check-ins require the updated child app to register consent capability version 2.
+Backend 1.3.0 was deployed to `https://api.hakaluki.dev` on 2026-10-13 with a restore-tested backup and verified public authentication/Socket.IO checks. See the [deployment and rollback record](docs/PRODUCTION_DEPLOYMENT.md). Authorized media check-ins require the updated child app to register consent capability version 2.
 
 This is a single-instance Socket.IO deployment with in-memory presence. Use one child account per primary child device. Android permissions and vendor battery management can limit monitoring. Reboot recovery does not silently restart camera, microphone or screen capture. Foreground location resumes from the visible child app because while-in-use permission alone cannot authorize a background boot start.
 
-Calls/SMS extraction, social-message extraction, a standalone Sound Around feature, notification monitoring, image/video safety inference and verified payment transactions are not complete features in this repository. Do not infer completion from related filenames or camera audio support.
+Supported public call/SMS history, Sound Around and selected notification metadata are implemented. Detailed history is parent opt-in and encrypted at rest. Private encrypted-app messages and MMS attachments are unsupported. Photo/video safety infrastructure remains disabled until a licensed evaluated model is available. See the current engineering report for actual device evidence and remaining acceptance limits. Payments/subscriptions were excluded.
 
 ## Documentation and previews
 

@@ -6,7 +6,7 @@ npm run build
 npm run lint
 npm test
 npm audit --audit-level=high
-seftly_release="$(git rev-parse --short HEAD)-working-tree"
+seftly_release="$(node -p 'require("./package.json").version')-$(git rev-parse --short HEAD)-working-tree"
 mkdir -p "$seftly_root/release_artifacts"
 seftly_stage="$(mktemp -d "$seftly_root/release_artifacts/backend-stage.XXXXXX")"
 trap 'rm -rf "$seftly_stage"' EXIT

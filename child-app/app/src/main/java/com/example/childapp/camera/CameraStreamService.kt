@@ -1,5 +1,7 @@
 package com.example.childapp.camera
 
+import com.example.childapp.audio.AudioCheckInService
+import com.example.childapp.audio.MediaCaptureState
 import android.app.*
 import android.content.Context
 import android.content.Intent
@@ -24,7 +26,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * starts WebRTC camera capture, relays signaling via [SocketManager], and always shows
  * a persistent "Camera streaming active" notification with a Stop action while running.
  */
-class CameraStreamService : Service() {
+open class CameraStreamService : Service() {
+
+    protected open val audioOnly: Boolean = false
+    private val captureState: MediaCaptureState get() = if (audioOnly) AudioCheckInService.captureState else cameraCaptureState
+    private val notificationId: Int get() = if (audioOnly) 44 else NOTIFICATION_ID
 
     private val isStopping = AtomicBoolean(false)
     private var socketManager: SocketManager? = null
@@ -48,30 +54,29 @@ class CameraStreamService : Service() {
             return START_NOT_STICKY
         }
 
-        audioEnabled = withAudio
+        captureState.audioEnabled = false
         sessionId = sid
-        currentSessionId = sid
-        isSessionRunning.set(true)
-        currentSessionId = sid
-        statusState.value = "CONNECTING"
+        captureState.sessionId = sid
+        captureState.running.set(true)
+        captureState.sessionId = sid
+        captureState.status.value = "CONNECTING"
         isStopping.set(false)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            var serviceType = if (audioOnly) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
             if (withAudio) {
                 serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             }
-            startForeground(NOTIFICATION_ID, buildNotification(), serviceType)
+            startForeground(notificationId, buildNotification(), serviceType)
         } else {
-            startForeground(NOTIFICATION_ID, buildNotification())
+            startForeground(notificationId, buildNotification())
         }
 
         val socket = SocketManager(token).also { socketManager = it }
         socket.onDisconnected = { android.os.Handler(android.os.Looper.getMainLooper()).post { stopStreaming() } }
 
-        socket.onCameraStreamStopped = { stoppedId ->
-            if (stoppedId == sessionId) stopStreaming()
-        }
+        val stopped: (String) -> Unit = { stoppedId -> if (stoppedId == sessionId) stopStreaming() }
+        if (audioOnly) socket.onAudioSessionStopped = stopped else socket.onCameraStreamStopped = stopped
         socket.onCameraStreamSwitchCamera = { switchSid, _ ->
             if (switchSid == sessionId) {
                 cameraWebRtcManager?.switchCamera()
@@ -103,7 +108,8 @@ class CameraStreamService : Service() {
             },
             onStateChange = { state ->
                 if (state == PeerConnection.PeerConnectionState.CONNECTED) {
-                    statusState.value = "LIVE"
+                    captureState.status.value = "LIVE"
+                    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(notificationId, buildNotification())
                     socket.notifyMediaConnected(sid)
                 }
                 Log.d(TAG, "Camera WebRTC state changed: $state")
@@ -117,9 +123,10 @@ class CameraStreamService : Service() {
                     }
                 }
             },
+            onMicrophoneState = { captureState.audioEnabled = it },
             onError = { reason ->
                 Log.e(TAG, "Camera streaming error: $reason")
-                socket.rejectCameraStream(sid, reason)
+                if (audioOnly) socket.rejectAudioSession(sid, reason) else socket.rejectCameraStream(sid, reason)
                 stopStreaming()
             }
         ).also { cameraWebRtcManager = it }
@@ -128,13 +135,13 @@ class CameraStreamService : Service() {
         fun beginCapture(iceServers: List<PeerConnection.IceServer>) {
             if (isStopping.get()) return
             Log.i(TAG, "Beginning WebRTC camera capture with ${iceServers.size} ICE servers")
-            socket.acceptCameraStream(sid) { accepted ->
+            val acceptedCallback: (Boolean) -> Unit = { accepted ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     if (!accepted) stopStreaming()
-                    else if (!isStopping.get()) try { webRtc.startStreaming(cameraFacing = cameraFacing, withAudio = withAudio, iceServers = iceServers) } catch (_: Exception) { stopStreaming() }
+                    else if (!isStopping.get()) try { webRtc.startStreaming(cameraFacing = cameraFacing, withAudio = withAudio, iceServers = iceServers, audioOnly = audioOnly) } catch (_: Exception) { stopStreaming() }
                 }
             }
-
+            if (audioOnly) socket.acceptAudioSession(sid, acceptedCallback) else socket.acceptCameraStream(sid, acceptedCallback)
         }
 
         // Fetch server ICE configuration asynchronously in background thread
@@ -168,16 +175,17 @@ class CameraStreamService : Service() {
         }.start()
 
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (currentSessionId == sid && statusState.value != "LIVE") stopStreaming()
+            if (captureState.sessionId == sid && captureState.status.value != "LIVE") stopStreaming()
         }, 45_000)
         return START_NOT_STICKY
     }
 
     private fun stopStreaming() {
         if (isStopping.getAndSet(true)) return
-        isSessionRunning.set(false)
-        statusState.value = "OFF"
-        currentSessionId = null
+        captureState.running.set(false)
+        captureState.audioEnabled = false
+        captureState.status.value = "OFF"
+        captureState.sessionId = null
         val sid = sessionId
         sessionId = null
         val rtc = cameraWebRtcManager
@@ -187,9 +195,9 @@ class CameraStreamService : Service() {
         if (sid != null) {
             try {
                 val sock = socketManager ?: ChildMonitoringService.activeSocket
-                sock?.notifyCameraStopped(sid)
+                if (audioOnly) sock?.notifyAudioStopped(sid) else sock?.notifyCameraStopped(sid)
                 val api = ApiClient(SessionStore(applicationContext))
-                Thread { runCatching { api.stopCameraStream(sid) } }.start()
+                Thread { runCatching { if (audioOnly) api.stopAudioSession(sid) else api.stopCameraStream(sid) } }.start()
             } catch (_: Exception) {
                 // best-effort
             }
@@ -201,8 +209,8 @@ class CameraStreamService : Service() {
     }
 
     override fun onDestroy() {
-        isSessionRunning.set(false)
-        currentSessionId = null
+        captureState.running.set(false)
+        captureState.sessionId = null
         stopStreaming()
         super.onDestroy()
     }
@@ -210,33 +218,34 @@ class CameraStreamService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun buildNotification(): Notification {
-        val channelId = "camera_stream_channel"
+        val channelId = if (audioOnly) "audio_check_in_channel" else "seftly_camera_checkin_v2"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                channelId, "Remote Camera Streaming", NotificationManager.IMPORTANCE_HIGH
+                channelId, if (audioOnly) "Audio check-in" else "Remote Camera Streaming", NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Notifies child when camera streaming is actively running."
-                setShowBadge(true)
+                description = if (audioOnly) "Visible microphone check-in with a Stop action." else "Visible camera check-in with a Stop action."
+                setShowBadge(false)
             }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(channel)
         }
 
-        val stopIntent = Intent(this, CameraStreamService::class.java).apply { action = ACTION_STOP }
+        val stopIntent = Intent(this, if (audioOnly) AudioCheckInService::class.java else CameraStreamService::class.java).apply { action = ACTION_STOP }
         val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent,
+            this, notificationId, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Remote camera active")
-            .setContentText("Your camera is streaming for parental safety verification.")
+            .setContentTitle(if (audioOnly) "Seftly microphone check-in" else "Seftly camera check-in")
+            .setContentText(if (audioOnly) "Microphone session is ${captureState.status.value.lowercase()}. Tap Stop to end." else "Camera session is ${captureState.status.value.lowercase()}. Tap Stop to end.")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .addAction(0, "Stop Camera", stopPendingIntent)
+            .addAction(0, "Stop sharing", stopPendingIntent)
             .build()
     }
 
@@ -255,12 +264,16 @@ class CameraStreamService : Service() {
     }
 
     companion object {
-        @Volatile var audioEnabled = false
-        private val statusState = MutableStateFlow("OFF")
-        val status = statusState.asStateFlow()
+        private val cameraCaptureState = MediaCaptureState()
+        var audioEnabled: Boolean
+            get() = cameraCaptureState.audioEnabled
+            set(value) { cameraCaptureState.audioEnabled = value }
+        val status = cameraCaptureState.status.asStateFlow()
         private const val TAG = "CameraStreamService"
-        val isSessionRunning = AtomicBoolean(false)
-        @Volatile var currentSessionId: String? = null
+        val isSessionRunning = cameraCaptureState.running
+        var currentSessionId: String?
+            get() = cameraCaptureState.sessionId
+            set(value) { cameraCaptureState.sessionId = value }
         const val ACTION_STOP = "com.example.childapp.action.STOP_CAMERA_STREAM"
         const val EXTRA_ACCESS_TOKEN = "extra_access_token"
         const val EXTRA_SESSION_ID = "extra_session_id"

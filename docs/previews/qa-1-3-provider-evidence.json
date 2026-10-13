@@ -1,0 +1,35 @@
+{
+  "emulatorApi": 36,
+  "defaultSmsRole": false,
+  "defaultDialerRole": false,
+  "calls": 1,
+  "messages": 3,
+  "messageContentStates": [
+    "AVAILABLE",
+    "WITHHELD_SECURITY",
+    "AVAILABLE"
+  ],
+  "callFields": [
+    "durationSeconds",
+    "eventAt",
+    "observedAt",
+    "phoneAccountComponent",
+    "phoneAccountId",
+    "phoneNumber",
+    "sourceId"
+  ],
+  "smsFields": [
+    "address",
+    "body",
+    "contentStatus",
+    "dateSent",
+    "deliveryStatus",
+    "eventAt",
+    "observedAt",
+    "read",
+    "sourceId",
+    "subscriptionId",
+    "threadId"
+  ],
+  "privatePhoneProvidersUsed": false
+}
