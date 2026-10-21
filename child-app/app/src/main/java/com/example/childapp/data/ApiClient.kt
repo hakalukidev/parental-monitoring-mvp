@@ -18,7 +18,7 @@ class ApiClient(private val session: SessionStore) {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .hostnameVerifier { hostname, session ->
-            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "192.168.0.150" || hostname == "localhost") true
+            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "10.95.254.124" || hostname == "192.168.0.150" || hostname == "localhost") true
             else javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
         }
 
