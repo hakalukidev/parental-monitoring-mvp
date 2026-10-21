@@ -18,14 +18,15 @@ android {
         buildConfigField(
             "String",
             "API_BASE_URL",
-            "\"https://api.hakaluki.dev\""
+            "\"http://192.168.0.150:4000\""
         )
 
         buildConfigField(
             "String",
             "SOCKET_URL",
-            "\"https://api.hakaluki.dev\""
+            "\"http://192.168.0.150:4000\""
         )
+
     }
 
     // =========================================================
@@ -175,4 +176,10 @@ dependencies {
     implementation(
         "androidx.security:security-crypto:1.1.0-alpha06"
     )
+
+    // =========================================================
+    // TENSORFLOW LITE (On-Device Safety & Inappropriate Content AI)
+    // =========================================================
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 }

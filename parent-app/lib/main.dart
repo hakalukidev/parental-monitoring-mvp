@@ -11,8 +11,9 @@ class MyHttpOverrides extends HttpOverrides {
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
       ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        return host == '163.227.239.88' || host == 'api.hakaluki.dev';
+        return host == '163.227.239.88' || host == 'api.hakaluki.dev' || host == '192.168.0.150' || host == 'localhost';
       };
+
   }
 }
 

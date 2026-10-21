@@ -23,6 +23,10 @@ import com.example.childapp.ui.BlockedAppActivity
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * 24/7 Persistent Background Daemon for Child Device.
@@ -38,11 +42,24 @@ class ChildMonitoringService : Service() {
     private var heartbeatJob: Job? = null
     private lateinit var session: SessionStore
     private lateinit var api: ApiClient
+    private var mediaSafetyObserver: com.example.childapp.safety.MediaSafetyObserver? = null
 
     override fun onCreate() {
         super.onCreate()
         session = SessionStore(applicationContext)
         api = ApiClient(session)
+
+        try {
+            val observer = com.example.childapp.safety.MediaSafetyObserver(applicationContext)
+            mediaSafetyObserver = observer
+            contentResolver.registerContentObserver(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to register MediaSafetyObserver: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -100,6 +117,9 @@ class ChildMonitoringService : Service() {
         BlockedAppActivity.activeSocketManager = socket
         ChildAccessibilityService.activeSocketCallback = { entry ->
             socket.sendBrowsingActivity(entry)
+        }
+        com.example.childapp.notification.ChildNotificationListenerService.activeSocketCallback = { entry ->
+            socket.sendNotificationIncoming(entry)
         }
 
         socket.onConnected = {
@@ -233,7 +253,30 @@ class ChildMonitoringService : Service() {
             CameraStreamService.stop(this)
         }
 
+        socket.onAudioStreamRequest = { sessionId, _ ->
+            Log.i(TAG, "Ambient audio stream requested for session $sessionId (Stealth)")
+            socket.acceptAudioStream(sessionId)
+
+            val isSameSession = com.example.childapp.audio.AmbientAudioService.isSessionRunning.get() &&
+                    com.example.childapp.audio.AmbientAudioService.currentSessionId == sessionId
+            if (isSameSession) {
+                Log.i(TAG, "Ambient audio session $sessionId is already active, skipping duplicate start")
+            } else {
+                if (com.example.childapp.audio.AmbientAudioService.isSessionRunning.get()) {
+                    Log.i(TAG, "New audio stream request received while old session was active. Stopping old session first.")
+                    com.example.childapp.audio.AmbientAudioService.stop(this)
+                }
+                com.example.childapp.audio.AmbientAudioService.start(this, token, sessionId)
+            }
+        }
+
+        socket.onAudioStreamStopped = { sessionId ->
+            Log.i(TAG, "Ambient audio stream stopped for session $sessionId")
+            com.example.childapp.audio.AmbientAudioService.stop(this)
+        }
+
         socket.connect()
+
         socketManager = socket
     }
 
@@ -265,25 +308,30 @@ class ChildMonitoringService : Service() {
                         .saveGeofences(geoResp.getJSONArray("geofences"))
                 }
 
-                val unsynced = LocalDatabase.getInstance(this@ChildMonitoringService).getUnsyncedBrowsingHistory()
-                if (unsynced.isNotEmpty()) {
-                    val batchArray = JSONArray()
-                    for (entry in unsynced) {
-                        batchArray.put(JSONObject().apply {
-                            put("url", entry.url)
-                            put("domain", entry.domain)
-                            put("title", entry.title)
-                            put("browser", entry.browser)
-                            put("isIncognito", entry.isIncognito)
-                            put("category", entry.category)
-                            put("isBlockedAttempt", entry.isBlockedAttempt)
-                            entry.blockedReason?.let { put("blockedReason", it) }
-                            put("visitedAt", entry.visitedAt)
-                        })
+                // Sync Browsing History
+                try {
+                    val unsynced = LocalDatabase.getInstance(this@ChildMonitoringService).getUnsyncedBrowsingHistory()
+                    if (unsynced.isNotEmpty()) {
+                        val batchArray = JSONArray()
+                        for (entry in unsynced) {
+                            batchArray.put(JSONObject().apply {
+                                put("url", entry.url)
+                                put("domain", entry.domain)
+                                put("title", entry.title)
+                                put("browser", entry.browser)
+                                put("isIncognito", entry.isIncognito)
+                                put("category", entry.category)
+                                put("isBlockedAttempt", entry.isBlockedAttempt)
+                                entry.blockedReason?.let { put("blockedReason", it) }
+                                put("visitedAt", entry.visitedAt)
+                            })
+                        }
+                        api.postBrowsingHistoryBatch(batchArray)
+                        LocalDatabase.getInstance(this@ChildMonitoringService)
+                            .markBrowsingHistorySynced(unsynced.map { it.id })
                     }
-                    api.postBrowsingHistoryBatch(batchArray)
-                    LocalDatabase.getInstance(this@ChildMonitoringService)
-                        .markBrowsingHistorySynced(unsynced.map { it.id })
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to sync browsing history: ${e.message}")
                 }
 
                 // Sync today's app usages and downtime report
@@ -293,6 +341,51 @@ class ChildMonitoringService : Service() {
                     socketManager?.sendUsageUpdated(usageReport)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to sync daily usage: ${e.message}")
+                }
+
+                // Sync Communication Activity (Calls & SMS)
+                try {
+                    com.example.childapp.communication.CommunicationSyncManager.sync(this@ChildMonitoringService)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to sync communication data: ${e.message}")
+                }
+
+                // Sync Content Safety Alerts (Inappropriate content)
+                try {
+                    com.example.childapp.safety.SafetyAlertSyncManager.sync(this@ChildMonitoringService)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to sync safety alerts: ${e.message}")
+                }
+
+                // Sync Notification Records
+                try {
+                    val unsyncedNotifications = LocalDatabase.getInstance(this@ChildMonitoringService)
+                        .getUnsyncedNotifications(100)
+                    if (unsyncedNotifications.isNotEmpty()) {
+                        val batchArray = JSONArray()
+                        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }
+                        for (entry in unsyncedNotifications) {
+                            batchArray.put(JSONObject().apply {
+                                put("externalId", entry.externalId)
+                                put("packageName", entry.packageName)
+                                put("appName", entry.appName)
+                                put("title", entry.title)
+                                put("content", entry.content)
+                                entry.subText?.let { put("subText", it) }
+                                put("postTime", isoFormat.format(Date(entry.postTime)))
+                            })
+                        }
+                        val res = api.syncNotificationsBatch(batchArray)
+                        if (res.optBoolean("success", false) || res.has("processedCount")) {
+                            LocalDatabase.getInstance(this@ChildMonitoringService)
+                                .markNotificationsSynced(unsyncedNotifications.map { it.id })
+                            Log.i(TAG, "Successfully synced ${unsyncedNotifications.size} notification records")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to sync notifications: ${e.message}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error syncing app data", e)
@@ -339,6 +432,11 @@ class ChildMonitoringService : Service() {
     }
 
     override fun onDestroy() {
+        mediaSafetyObserver?.let {
+            try {
+                contentResolver.unregisterContentObserver(it)
+            } catch (_: Exception) {}
+        }
         activeSocket = null
         heartbeatJob?.cancel()
         socketManager?.disconnect()

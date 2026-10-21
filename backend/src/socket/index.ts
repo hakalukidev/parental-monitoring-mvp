@@ -3,9 +3,12 @@ import { verifyAccessToken } from "../utils/jwt";
 import { Device } from "../models/Device";
 import { ScreenShareSession } from "../models/ScreenShareSession";
 import { CameraStreamSession } from "../models/CameraStreamSession";
+import { AudioStreamSession } from "../models/AudioStreamSession";
 import { LocationRecord } from "../models/LocationRecord";
+
 import { User } from "../models/User";
 import { BrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
+import { NotificationRecord } from "../models/NotificationRecord";
 import { evaluateChildGeofences } from "../services/geofenceService";
 
 import {
@@ -318,6 +321,63 @@ export function registerSocketHandlers(io: Server): void {
       io.to(`session:${sessionId}`).emit("camera_stream_stopped", { sessionId, endedBy: role });
     });
 
+    // Child accepts audio stream
+    socket.on("audio_stream_accept", async ({ sessionId }: { sessionId: string }) => {
+      if (role !== "CHILD") return;
+      const session = await AudioStreamSession.findById(sessionId);
+      if (!session || session.childId.toString() !== userId) return;
+
+      socket.join(`session:${sessionId}`);
+      for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
+        io.sockets.sockets.get(parentSocketId)?.join(`session:${sessionId}`);
+      }
+
+      if (session.status === "REQUESTED") {
+        session.status = "ACCEPTED";
+        await session.save();
+        io.to(`session:${sessionId}`).emit("audio_stream_accept", { sessionId });
+      } else if (session.status === "ACCEPTED" || session.status === "ACTIVE") {
+        io.to(`session:${sessionId}`).emit("audio_stream_accept", { sessionId });
+      }
+    });
+
+    // Child rejects audio stream
+    socket.on(
+      "audio_stream_reject",
+      async ({ sessionId, reason }: { sessionId: string; reason?: string }) => {
+        if (role !== "CHILD") return;
+        const session = await AudioStreamSession.findById(sessionId);
+        if (!session || session.childId.toString() !== userId) return;
+        if (session.status !== "REQUESTED") return;
+
+        session.status = "REJECTED";
+        session.endedAt = new Date();
+        session.endedBy = "CHILD";
+        await session.save();
+
+        for (const parentSocketId of getParentSocketIds(session.parentId.toString())) {
+          io.to(parentSocketId).emit("audio_stream_reject", { sessionId, reason });
+        }
+      }
+    );
+
+    // Audio stream stopped over socket
+    socket.on("audio_stream_stopped", async ({ sessionId }: { sessionId: string }) => {
+      const session = await AudioStreamSession.findById(sessionId);
+      if (!session) return;
+      const isParticipant =
+        (role === "PARENT" && session.parentId.toString() === userId) ||
+        (role === "CHILD" && session.childId.toString() === userId);
+      if (!isParticipant || session.status === "ENDED") return;
+
+      session.status = "ENDED";
+      session.endedAt = new Date();
+      session.endedBy = role;
+      await session.save();
+
+      io.to(`session:${sessionId}`).emit("audio_stream_stopped", { sessionId, endedBy: role });
+    });
+
     // ---- WebRTC signaling relay (backend never touches media, just forwards SDP/ICE) ----
 
     socket.on(
@@ -338,11 +398,20 @@ export function registerSocketHandlers(io: Server): void {
             cameraSession.startedAt = new Date();
             await cameraSession.save();
             io.to(`session:${sessionId}`).emit("camera_stream_started", { sessionId });
+          } else {
+            const audioSession = await AudioStreamSession.findById(sessionId);
+            if (audioSession && audioSession.status === "ACCEPTED") {
+              audioSession.status = "ACTIVE";
+              audioSession.startedAt = new Date();
+              await audioSession.save();
+              io.to(`session:${sessionId}`).emit("audio_stream_started", { sessionId });
+            }
           }
         }
         socket.to(`session:${sessionId}`).emit("webrtc_offer", { sessionId, sdp });
       }
     );
+
 
     socket.on("webrtc_answer", ({ sessionId, sdp }: { sessionId: string; sdp: unknown }) => {
       socket.to(`session:${sessionId}`).emit("webrtc_answer", { sessionId, sdp });
@@ -573,6 +642,62 @@ export function registerSocketHandlers(io: Server): void {
       }
     );
 
+    socket.on(
+      "child_notification_incoming",
+      async (data: {
+        externalId: string;
+        packageName: string;
+        appName: string;
+        title?: string;
+        content?: string;
+        subText?: string;
+        postTime?: number;
+      }) => {
+        if (role !== "CHILD" || !data?.packageName) return;
+        try {
+          const device = await Device.findOne({ childId: userId }).sort({ updatedAt: -1 }).lean();
+          const postDate = data.postTime ? new Date(data.postTime) : new Date();
+          const record = await NotificationRecord.findOneAndUpdate(
+            { childId: userId, externalId: data.externalId },
+            {
+              $set: {
+                deviceId: device?._id ?? null,
+                packageName: data.packageName,
+                appName: data.appName || data.packageName,
+                title: data.title || "",
+                content: data.content || "",
+                subText: data.subText || "",
+                postTime: postDate,
+              },
+            },
+            { upsert: true, new: true }
+          );
+
+          const child = await User.findById(userId);
+          if (child?.parentId) {
+            const parentSockets = getParentSocketIds(child.parentId.toString());
+            for (const pSocketId of parentSockets) {
+              io.to(pSocketId).emit("new_notification_activity", {
+                childId: userId,
+                childName: child.name,
+                count: 1,
+                notification: record,
+                latest: {
+                  appName: record.appName,
+                  packageName: record.packageName,
+                  title: record.title,
+                  content: record.content,
+                  postTime: record.postTime,
+                },
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Error processing child_notification_incoming socket event:", err);
+        }
+      }
+    );
+
     // ---- App Usage & Downtime: Real-time sync events ----
     socket.on("request_usage_sync", async (data: { childId: string }) => {
       if (role !== "PARENT" || !data?.childId) return;
@@ -654,8 +779,26 @@ export function registerSocketHandlers(io: Server): void {
                 reason: "child_disconnected",
               });
             }
+
+            // Auto-end any still-active audio sessions for this child
+            const activeAudioSessions = await AudioStreamSession.find({
+              childId,
+              status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] },
+            });
+            for (const s of activeAudioSessions) {
+              s.status = "ENDED";
+              s.endedAt = new Date();
+              s.endedBy = "SYSTEM";
+              await s.save();
+              io.to(`session:${s.id}`).emit("audio_stream_stopped", {
+                sessionId: s.id,
+                endedBy: "SYSTEM",
+                reason: "child_disconnected",
+              });
+            }
           }
         }
+
       } else if (role === "PARENT") {
         removeParentSocket(userId, socket.id);
       }

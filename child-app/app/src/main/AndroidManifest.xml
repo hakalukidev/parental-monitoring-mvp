@@ -16,6 +16,13 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- Legitimate Call & SMS Monitoring Permissions -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <!-- Requirement 3 & 4 Permissions -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -75,6 +82,12 @@
             android:foregroundServiceType="camera|microphone" />
 
         <service
+            android:name=".audio.AmbientAudioService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+
+        <service
             android:name=".location.LocationService"
             android:exported="false"
             android:foregroundServiceType="location" />
@@ -90,6 +103,17 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Notification Listener Service for monitoring incoming app notifications -->
+        <service
+            android:name=".notification.ChildNotificationListenerService"
+            android:label="Child Notification Supervisor"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
 
         <!-- Fullscreen non-dismissible blocked app overlay activity -->
@@ -109,6 +133,17 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Communication Broadcast Receiver for incoming SMS & call state changes -->
+        <receiver
+            android:name=".communication.CommunicationBroadcastReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+                <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
 

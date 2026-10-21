@@ -49,6 +49,11 @@ export const cameraStreamRequestSchema = z.object({
   withAudio: z.boolean().default(true),
 });
 
+export const audioStreamRequestSchema = z.object({
+  childId: z.string().min(1),
+});
+
+
 export const recordLocationSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -255,3 +260,116 @@ export const syncAppUsageReportSchema = z.object({
 export const usageReportQuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
+
+// Communication Monitoring Schemas (Calls & SMS)
+export const syncCallRecordItemSchema = z.object({
+  externalId: z.string().min(1),
+  phoneNumber: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  direction: z.enum(["INCOMING", "OUTGOING", "MISSED", "REJECTED", "UNKNOWN"]).default("UNKNOWN"),
+  durationSeconds: z.number().int().nonnegative().default(0),
+  timestamp: z.string().or(z.date()),
+});
+
+export const syncCallsBatchSchema = z.object({
+  calls: z.array(syncCallRecordItemSchema).min(1).max(500),
+});
+
+export const syncSmsRecordItemSchema = z.object({
+  externalId: z.string().min(1),
+  phoneNumber: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  direction: z.enum(["INCOMING", "OUTGOING", "UNKNOWN"]).default("UNKNOWN"),
+  body: z.string().optional().nullable(),
+  hasBody: z.boolean().default(false),
+  timestamp: z.string().or(z.date()),
+});
+
+export const syncSmsBatchSchema = z.object({
+  messages: z.array(syncSmsRecordItemSchema).min(1).max(500),
+});
+
+export const updateCommunicationCapabilitySchema = z.object({
+  callsStatus: z.enum([
+    "AVAILABLE",
+    "PERMISSION_REQUIRED",
+    "PERMISSION_DENIED",
+    "RESTRICTED_BY_OS",
+    "DISABLED",
+    "UNSUPPORTED",
+  ]),
+  smsMetadataStatus: z.enum([
+    "AVAILABLE",
+    "PERMISSION_REQUIRED",
+    "PERMISSION_DENIED",
+    "RESTRICTED_BY_OS",
+    "DISABLED",
+    "UNSUPPORTED",
+  ]),
+  smsContentStatus: z.enum([
+    "AVAILABLE",
+    "PERMISSION_REQUIRED",
+    "PERMISSION_DENIED",
+    "RESTRICTED_BY_OS",
+    "DISABLED",
+    "UNSUPPORTED",
+  ]),
+});
+
+export const communicationHistoryQuerySchema = z.object({
+  direction: z.string().optional(),
+  search: z.string().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+// Safety Alerts (Inappropriate Photo / Video / Screen Content)
+export const recordSafetyAlertItemSchema = z.object({
+  externalId: z.string().min(1),
+  alertType: z.enum(["EXPLICIT_SCREEN_CONTENT", "EXPLICIT_PHOTO_SAVED", "ADULT_CONTENT_DETECTED"]),
+  packageName: z.string().optional().nullable(),
+  appName: z.string().optional().nullable(),
+  confidenceScore: z.number().min(0).max(1),
+  severity: z.enum(["CRITICAL", "HIGH", "MEDIUM"]).default("CRITICAL"),
+  timestamp: z.string().or(z.date()),
+});
+
+export const recordSafetyAlertsBatchSchema = z.object({
+  alerts: z.array(recordSafetyAlertItemSchema).min(1).max(100),
+});
+
+export const safetyAlertQuerySchema = z.object({
+  severity: z.enum(["CRITICAL", "HIGH", "MEDIUM"]).optional(),
+  isAcknowledged: z.enum(["true", "false"]).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+// Notification Monitoring Validation Schemas
+export const syncNotificationItemSchema = z.object({
+  externalId: z.string().min(1),
+  packageName: z.string().min(1),
+  appName: z.string().default("Unknown App"),
+  title: z.string().default(""),
+  content: z.string().default(""),
+  subText: z.string().optional().nullable(),
+  postTime: z.string().or(z.date()),
+});
+
+export const syncNotificationsBatchSchema = z.object({
+  notifications: z.array(syncNotificationItemSchema).min(1).max(200),
+});
+
+export const notificationHistoryQuerySchema = z.object({
+  packageName: z.string().optional(),
+  search: z.string().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+

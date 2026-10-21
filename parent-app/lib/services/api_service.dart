@@ -235,6 +235,21 @@ class ApiService {
     _parseResponse(res);
   }
 
+  Future<Map<String, dynamic>> requestAudioStream(String childId) async {
+    final res = await _send(
+      'POST',
+      _u('/api/audio-stream/request'),
+      body: jsonEncode({'childId': childId}),
+    );
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<void> stopAudioStream(String sessionId) async {
+    final res = await _send('POST', _u('/api/audio-stream/$sessionId/stop'));
+    _parseResponse(res);
+  }
+
+
   Future<Map<String, dynamic>> getLatestLocation(String childId) async {
     final res = await _send('GET', _u('/api/location/latest/$childId'));
     return _parseResponse(res) as Map<String, dynamic>;
@@ -513,7 +528,133 @@ class ApiService {
     final res = await _send('POST', _u('/api/children/$childId/usage/request-sync'));
     return _parseResponse(res) as Map<String, dynamic>;
   }
+
+  // ==========================================
+  // Communication Monitoring APIs (Calls & SMS)
+  // ==========================================
+
+  Future<Map<String, dynamic>> getCallHistory(
+    String childId, {
+    String? direction,
+    String? search,
+    String? startDate,
+    String? endDate,
+    int page = 1,
+    int limit = 30,
+  }) async {
+    final query = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+      if (direction != null && direction.isNotEmpty) 'direction': direction,
+      if (search != null && search.isNotEmpty) 'search': search,
+      if (startDate != null && startDate.isNotEmpty) 'startDate': startDate,
+      if (endDate != null && endDate.isNotEmpty) 'endDate': endDate,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/communication/calls')
+        .replace(queryParameters: query);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getSmsHistory(
+    String childId, {
+    String? direction,
+    String? search,
+    String? startDate,
+    String? endDate,
+    int page = 1,
+    int limit = 30,
+  }) async {
+    final query = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+      if (direction != null && direction.isNotEmpty) 'direction': direction,
+      if (search != null && search.isNotEmpty) 'search': search,
+      if (startDate != null && startDate.isNotEmpty) 'startDate': startDate,
+      if (endDate != null && endDate.isNotEmpty) 'endDate': endDate,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/communication/sms')
+        .replace(queryParameters: query);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCommunicationCapabilities(String childId) async {
+    final res = await _send('GET', _u('/api/children/$childId/communication/capabilities'));
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  // ==========================================
+  // Inappropriate Content & Safety Alerts
+  // ==========================================
+
+  Future<Map<String, dynamic>> getSafetyAlerts(
+    String childId, {
+    String? severity,
+    bool? isAcknowledged,
+    String? startDate,
+    String? endDate,
+    int page = 1,
+    int limit = 30,
+  }) async {
+    final query = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+      if (severity != null && severity.isNotEmpty) 'severity': severity,
+      if (isAcknowledged != null) 'isAcknowledged': isAcknowledged.toString(),
+      if (startDate != null && startDate.isNotEmpty) 'startDate': startDate,
+      if (endDate != null && endDate.isNotEmpty) 'endDate': endDate,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/safety-alerts')
+        .replace(queryParameters: query);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> acknowledgeSafetyAlert(
+    String childId,
+    String alertId,
+  ) async {
+    final res = await _send(
+      'PATCH',
+      _u('/api/children/$childId/safety-alerts/$alertId/acknowledge'),
+    );
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  // ==========================================
+  // App Notifications Supervision
+  // ==========================================
+
+  Future<Map<String, dynamic>> getNotifications(
+    String childId, {
+    String? packageName,
+    String? search,
+    String? startDate,
+    String? endDate,
+    int page = 1,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+      if (packageName != null && packageName.isNotEmpty) 'packageName': packageName,
+      if (search != null && search.isNotEmpty) 'search': search,
+      if (startDate != null && startDate.isNotEmpty) 'startDate': startDate,
+      if (endDate != null && endDate.isNotEmpty) 'endDate': endDate,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/children/$childId/notifications')
+        .replace(queryParameters: query);
+    final res = await _send('GET', uri);
+    return _parseResponse(res) as Map<String, dynamic>;
+  }
+
+  Future<void> clearNotifications(String childId) async {
+    final res = await _send('DELETE', _u('/api/children/$childId/notifications'));
+    _parseResponse(res);
+  }
 }
+
 
 class ApiException implements Exception {
   final String message;

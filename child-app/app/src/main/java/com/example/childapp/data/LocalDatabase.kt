@@ -51,12 +51,59 @@ data class CachedGeofence(
     val colorHex: String
 )
 
+data class CachedCallRecord(
+    val id: Long = 0,
+    val externalId: String,
+    val phoneNumber: String?,
+    val contactName: String?,
+    val direction: String,
+    val durationSeconds: Int,
+    val timestamp: Long,
+    val isSynced: Boolean = false
+)
+
+data class CachedSmsRecord(
+    val id: Long = 0,
+    val externalId: String,
+    val phoneNumber: String?,
+    val contactName: String?,
+    val direction: String,
+    val body: String?,
+    val hasBody: Boolean,
+    val timestamp: Long,
+    val isSynced: Boolean = false
+)
+
+data class CachedSafetyAlert(
+    val id: Long = 0,
+    val externalId: String,
+    val alertType: String,
+    val packageName: String?,
+    val appName: String?,
+    val confidence: Double,
+    val severity: String,
+    val timestamp: Long,
+    val isSynced: Boolean = false
+)
+
+data class CachedNotificationRecord(
+    val id: Long = 0,
+    val externalId: String,
+    val packageName: String,
+    val appName: String,
+    val title: String,
+    val content: String,
+    val subText: String? = null,
+    val postTime: Long,
+    val isSynced: Boolean = false
+)
+
 class LocalDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "child_monitoring.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 7
 
         @Volatile
         private var instance: LocalDatabase? = null
@@ -158,6 +205,69 @@ class LocalDatabase private constructor(context: Context) :
             )
             """.trimIndent()
         )
+
+        db.execSQL(
+            """
+            CREATE TABLE cached_call_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                external_id TEXT UNIQUE,
+                phone_number TEXT,
+                contact_name TEXT,
+                direction TEXT,
+                duration_seconds INTEGER,
+                timestamp INTEGER,
+                is_synced INTEGER
+            )
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE cached_sms_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                external_id TEXT UNIQUE,
+                phone_number TEXT,
+                contact_name TEXT,
+                direction TEXT,
+                body TEXT,
+                has_body INTEGER,
+                timestamp INTEGER,
+                is_synced INTEGER
+            )
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE cached_safety_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                external_id TEXT UNIQUE,
+                alert_type TEXT,
+                package_name TEXT,
+                app_name TEXT,
+                confidence REAL,
+                severity TEXT,
+                timestamp INTEGER,
+                is_synced INTEGER
+            )
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE cached_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                external_id TEXT UNIQUE,
+                package_name TEXT,
+                app_name TEXT,
+                title TEXT,
+                content TEXT,
+                sub_text TEXT,
+                post_time INTEGER,
+                is_synced INTEGER
+            )
+            """.trimIndent()
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -168,6 +278,10 @@ class LocalDatabase private constructor(context: Context) :
         db.execSQL("DROP TABLE IF EXISTS device_state")
         db.execSQL("DROP TABLE IF EXISTS geofences")
         db.execSQL("DROP TABLE IF EXISTS blocked_events")
+        db.execSQL("DROP TABLE IF EXISTS cached_call_records")
+        db.execSQL("DROP TABLE IF EXISTS cached_sms_records")
+        db.execSQL("DROP TABLE IF EXISTS cached_safety_alerts")
+        db.execSQL("DROP TABLE IF EXISTS cached_notifications")
         onCreate(db)
     }
 
@@ -563,5 +677,216 @@ class LocalDatabase private constructor(context: Context) :
             }
         }
         return 0
+    }
+
+    // ==========================================
+    // Calls & SMS Activity Records
+    // ==========================================
+    @Synchronized
+    fun insertCallRecord(entry: CachedCallRecord): Long {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("external_id", entry.externalId)
+            put("phone_number", entry.phoneNumber)
+            put("contact_name", entry.contactName)
+            put("direction", entry.direction)
+            put("duration_seconds", entry.durationSeconds)
+            put("timestamp", entry.timestamp)
+            put("is_synced", if (entry.isSynced) 1 else 0)
+        }
+        return db.insertWithOnConflict("cached_call_records", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    @Synchronized
+    fun getUnsyncedCallRecords(limit: Int = 100): List<CachedCallRecord> {
+        val list = mutableListOf<CachedCallRecord>()
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT id, external_id, phone_number, contact_name, direction, duration_seconds, timestamp FROM cached_call_records WHERE is_synced = 0 ORDER BY timestamp ASC LIMIT ?",
+            arrayOf(limit.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    CachedCallRecord(
+                        id = cursor.getLong(0),
+                        externalId = cursor.getString(1),
+                        phoneNumber = cursor.getString(2),
+                        contactName = cursor.getString(3),
+                        direction = cursor.getString(4),
+                        durationSeconds = cursor.getInt(5),
+                        timestamp = cursor.getLong(6),
+                        isSynced = false
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    @Synchronized
+    fun markCallRecordsSynced(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val db = writableDatabase
+        val inClause = ids.joinToString(",") { it.toString() }
+        db.execSQL("UPDATE cached_call_records SET is_synced = 1 WHERE id IN ($inClause)")
+    }
+
+    @Synchronized
+    fun insertSmsRecord(entry: CachedSmsRecord): Long {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("external_id", entry.externalId)
+            put("phone_number", entry.phoneNumber)
+            put("contact_name", entry.contactName)
+            put("direction", entry.direction)
+            put("body", entry.body)
+            put("has_body", if (entry.hasBody) 1 else 0)
+            put("timestamp", entry.timestamp)
+            put("is_synced", if (entry.isSynced) 1 else 0)
+        }
+        return db.insertWithOnConflict("cached_sms_records", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    @Synchronized
+    fun getUnsyncedSmsRecords(limit: Int = 100): List<CachedSmsRecord> {
+        val list = mutableListOf<CachedSmsRecord>()
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT id, external_id, phone_number, contact_name, direction, body, has_body, timestamp FROM cached_sms_records WHERE is_synced = 0 ORDER BY timestamp ASC LIMIT ?",
+            arrayOf(limit.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    CachedSmsRecord(
+                        id = cursor.getLong(0),
+                        externalId = cursor.getString(1),
+                        phoneNumber = cursor.getString(2),
+                        contactName = cursor.getString(3),
+                        direction = cursor.getString(4),
+                        body = cursor.getString(5),
+                        hasBody = cursor.getInt(6) == 1,
+                        timestamp = cursor.getLong(7),
+                        isSynced = false
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    @Synchronized
+    fun markSmsRecordsSynced(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val db = writableDatabase
+        val inClause = ids.joinToString(",") { it.toString() }
+        db.execSQL("UPDATE cached_sms_records SET is_synced = 1 WHERE id IN ($inClause)")
+    }
+
+    // ==========================================
+    // Safety & Inappropriate Content Alerts
+    // ==========================================
+    @Synchronized
+    fun insertSafetyAlert(entry: CachedSafetyAlert): Long {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("external_id", entry.externalId)
+            put("alert_type", entry.alertType)
+            put("package_name", entry.packageName)
+            put("app_name", entry.appName)
+            put("confidence", entry.confidence)
+            put("severity", entry.severity)
+            put("timestamp", entry.timestamp)
+            put("is_synced", if (entry.isSynced) 1 else 0)
+        }
+        return db.insertWithOnConflict("cached_safety_alerts", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    @Synchronized
+    fun getUnsyncedSafetyAlerts(limit: Int = 50): List<CachedSafetyAlert> {
+        val list = mutableListOf<CachedSafetyAlert>()
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT id, external_id, alert_type, package_name, app_name, confidence, severity, timestamp FROM cached_safety_alerts WHERE is_synced = 0 ORDER BY timestamp ASC LIMIT ?",
+            arrayOf(limit.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    CachedSafetyAlert(
+                        id = cursor.getLong(0),
+                        externalId = cursor.getString(1),
+                        alertType = cursor.getString(2),
+                        packageName = cursor.getString(3),
+                        appName = cursor.getString(4),
+                        confidence = cursor.getDouble(5),
+                        severity = cursor.getString(6),
+                        timestamp = cursor.getLong(7),
+                        isSynced = false
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    @Synchronized
+    fun markSafetyAlertsSynced(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val db = writableDatabase
+        val inClause = ids.joinToString(",") { it.toString() }
+        db.execSQL("UPDATE cached_safety_alerts SET is_synced = 1 WHERE id IN ($inClause)")
+    }
+
+    // ==========================================
+    // Notification Records
+    // ==========================================
+    @Synchronized
+    fun insertNotification(entry: CachedNotificationRecord): Long {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("external_id", entry.externalId)
+            put("package_name", entry.packageName)
+            put("app_name", entry.appName)
+            put("title", entry.title)
+            put("content", entry.content)
+            put("sub_text", entry.subText)
+            put("post_time", entry.postTime)
+            put("is_synced", if (entry.isSynced) 1 else 0)
+        }
+        return db.insertWithOnConflict("cached_notifications", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    @Synchronized
+    fun getUnsyncedNotifications(limit: Int = 100): List<CachedNotificationRecord> {
+        val list = mutableListOf<CachedNotificationRecord>()
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT id, external_id, package_name, app_name, title, content, sub_text, post_time FROM cached_notifications WHERE is_synced = 0 ORDER BY post_time ASC LIMIT ?",
+            arrayOf(limit.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    CachedNotificationRecord(
+                        id = cursor.getLong(0),
+                        externalId = cursor.getString(1),
+                        packageName = cursor.getString(2),
+                        appName = cursor.getString(3),
+                        title = cursor.getString(4) ?: "",
+                        content = cursor.getString(5) ?: "",
+                        subText = cursor.getString(6),
+                        postTime = cursor.getLong(7),
+                        isSynced = false
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    @Synchronized
+    fun markNotificationsSynced(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val db = writableDatabase
+        val inClause = ids.joinToString(",") { it.toString() }
+        db.execSQL("UPDATE cached_notifications SET is_synced = 1 WHERE id IN ($inClause)")
     }
 }

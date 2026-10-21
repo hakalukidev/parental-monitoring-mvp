@@ -40,6 +40,7 @@ child-app/*.iml
 child-app/.idea/
 child-app/.gradle/
 child-app/local.properties
+child-app/key.properties
 child-app/build/
 child-app/app/build/
 child-app/gradle/wrapper/gradle-wrapper.jar

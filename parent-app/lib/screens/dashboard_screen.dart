@@ -16,7 +16,12 @@ import 'web_filter_screen.dart';
 import 'browsing_history_screen.dart';
 import 'geofences_screen.dart';
 import 'app_usage_report_screen.dart';
+import 'communication_monitoring_screen.dart';
+import 'safety_alerts_screen.dart';
+import 'notification_monitoring_screen.dart';
+import 'sound_around_screen.dart';
 import 'login_screen.dart';
+
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -250,12 +255,104 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           _showGeofenceAlertDialog(data);
         });
 
+        sock.onSafetyAlertTriggered((data) {
+          if (!mounted) return;
+          _showSafetyAlertDialog(data);
+        });
+
         _socketService = sock;
       }
     } catch (_) {}
   }
 
+  void _showSafetyAlertDialog(Map<String, dynamic> data) {
+    final childName = data['childName']?.toString() ?? 'Child';
+    final childId = data['childId']?.toString() ?? '';
+    final latestAlert = (data['latestAlert'] as Map<String, dynamic>?) ?? {};
+    final alertType = latestAlert['alertType']?.toString() ?? 'Content Violation';
+    final appName = latestAlert['appName']?.toString() ?? latestAlert['packageName']?.toString() ?? 'Unknown App';
+    final severity = latestAlert['severity']?.toString() ?? 'HIGH';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red.shade800, size: 28),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Content Safety Alert!')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Inappropriate content detected on $childName\'s device!',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Colors.red.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Type: $alertType',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
+                  ),
+                  Text(
+                    'App: $appName (Severity: $severity)',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Zero image data was transmitted. Tap "Review Now" to take action (Pause device or block app).',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Dismiss'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade800),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SafetyAlertsScreen(
+                    childId: childId,
+                    childName: childName,
+                    socketService: _socketService,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.shield_outlined, size: 18),
+            label: const Text('Review Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showGeofenceAlertDialog(Map<String, dynamic> data) {
+
     final childName = data['childName']?.toString() ?? 'Child';
     final childId = data['childId']?.toString() ?? '';
     final geofenceName = data['geofenceName']?.toString() ?? 'Boundary';
@@ -676,7 +773,7 @@ class _ChildCard extends StatelessWidget {
                             )
                         : null,
                     icon: const Icon(Icons.screen_share),
-                    label: const Text('Live Screen (Stealth)'),
+                    label: const Text('Live Screen'),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -697,6 +794,28 @@ class _ChildCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: online ? const Color(0xFFE0F2FE) : null,
+                  foregroundColor: online ? const Color(0xFF0369A1) : null,
+                ),
+                onPressed: online
+                    ? () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SoundAroundScreen(
+                              childId: child.id,
+                              childName: child.name,
+                            ),
+                          ),
+                        )
+                    : null,
+                icon: const Icon(Icons.mic, size: 20),
+                label: const Text('Sound Around Child (Live Audio)'),
+              ),
             ),
 
             const Divider(height: 20),
@@ -787,9 +906,82 @@ class _ChildCard extends StatelessWidget {
                 label: const Text('Browsing History & Activity'),
               ),
             ),
+            const SizedBox(height: 8),
+
+            // Requirement: Calls & SMS Activity Monitoring
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.purple.shade50,
+                  foregroundColor: Colors.purple.shade900,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => CommunicationMonitoringScreen(
+                      childId: child.id,
+                      childName: child.name,
+                      socketService: socketService,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.phone_in_talk_outlined, size: 18),
+                label: const Text('Calls & Messages Monitoring'),
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Inappropriate Content & Safety Alerts
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red.shade50,
+                  foregroundColor: Colors.red.shade900,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => SafetyAlertsScreen(
+                      childId: child.id,
+                      childName: child.name,
+                      socketService: socketService,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                label: const Text('Content & Safety Alerts'),
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Child App Notifications Monitoring
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.teal.shade50,
+                  foregroundColor: Colors.teal.shade900,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => NotificationMonitoringScreen(
+                      childId: child.id,
+                      childName: child.name,
+                      socketService: socketService,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.notifications_active_outlined, size: 18),
+                label: const Text('App Notifications Supervision'),
+              ),
+            ),
           ],
         ),
       ),
+
     );
   }
 }

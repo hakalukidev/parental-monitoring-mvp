@@ -150,6 +150,7 @@ class ChildAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 if (supportedBrowsers.containsKey(packageName)) {
+                    if (checkAndBlockIncognito(packageName)) return
                     inspectBrowserContent(packageName)
                 }
             }
@@ -192,6 +193,7 @@ class ChildAccessibilityService : AccessibilityService() {
 
         // Check browser if window state changed into browser
         if (supportedBrowsers.containsKey(packageName)) {
+            if (checkAndBlockIncognito(packageName)) return
             inspectBrowserContent(packageName)
         }
     }
@@ -252,7 +254,7 @@ class ChildAccessibilityService : AccessibilityService() {
             } catch (_: Exception) {
                 url
             }
-            val browserName = supportedBrowsers[packageName] ?: "Browser"
+            val browserName = supportedBrowsers[packageName] ?: "OTHER"
 
             if (lastRecordedUrl != url) {
                 lastRecordedUrl = url
@@ -350,13 +352,67 @@ class ChildAccessibilityService : AccessibilityService() {
         activeSocketCallback?.invoke(savedEntry)
     }
 
+    private var lastIncognitoBlockTime = 0L
+
+    private fun checkAndBlockIncognito(packageName: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val isIncognito = isIncognitoTab(root)
+        if (isIncognito) {
+            val now = System.currentTimeMillis()
+            if (now - lastIncognitoBlockTime > 1500L) {
+                lastIncognitoBlockTime = now
+                Log.w("ChildAccessibility", "Incognito mode detected in $packageName! Blocking...")
+                handler.post {
+                    android.widget.Toast.makeText(
+                        applicationContext,
+                        "Incognito / Private browsing is restricted by Parental Controls.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            return true
+        }
+        return false
+    }
+
     private fun isIncognitoTab(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         try {
-            val nodes = root.findAccessibilityNodeInfosByText("Incognito")
-            if (nodes.isNotEmpty()) return true
-            val privateNodes = root.findAccessibilityNodeInfosByText("Private")
-            if (privateNodes.isNotEmpty()) return true
+            // 1. Direct text indicators across Chrome, Samsung Internet, Edge, Firefox, Brave, Opera
+            if (root.findAccessibilityNodeInfosByText("You've gone incognito").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("You’ve gone incognito").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("New incognito tab").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("New private tab").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("InPrivate").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("Private Browsing").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("Secret mode").isNotEmpty()
+            ) {
+                return true
+            }
+
+            // 2. Check node tree for incognito markers in content descriptions or view IDs
+            fun searchNode(node: AccessibilityNodeInfo?): Boolean {
+                if (node == null) return false
+                val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+                val viewId = node.viewIdResourceName?.lowercase() ?: ""
+
+                if (desc.contains("incognito tab") || desc.contains("close incognito") ||
+                    desc.contains("selected incognito") || desc.contains("switch to incognito") ||
+                    viewId.contains("incognito_splash") || viewId.contains("incognito_desc") ||
+                    viewId.contains("incognito_toggle_button") || viewId.contains("incognito_badge") ||
+                    viewId.contains("secret_mode_header")
+                ) {
+                    return true
+                }
+
+                for (i in 0 until node.childCount) {
+                    if (searchNode(node.getChild(i))) return true
+                }
+                return false
+            }
+
+            return searchNode(root)
         } catch (_: Exception) {}
         return false
     }

@@ -18,9 +18,10 @@ class ApiClient(private val session: SessionStore) {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .hostnameVerifier { hostname, session ->
-            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev") true
+            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "192.168.0.150" || hostname == "localhost") true
             else javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
         }
+
         .build()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
@@ -116,6 +117,45 @@ class ApiClient(private val session: SessionStore) {
         return execute(req)
     }
 
+    /** POST /api/children/:childId/communication/calls/batch */
+    fun syncCallsBatch(calls: org.json.JSONArray): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val payload = JSONObject().put("calls", calls)
+        val req = authedRequest("/api/children/$childId/communication/calls/batch", "POST", payload).build()
+        return execute(req)
+    }
+
+    /** POST /api/children/:childId/communication/sms/batch */
+    fun syncSmsBatch(messages: org.json.JSONArray): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val payload = JSONObject().put("messages", messages)
+        val req = authedRequest("/api/children/$childId/communication/sms/batch", "POST", payload).build()
+        return execute(req)
+    }
+
+    /** POST /api/children/:childId/communication/capabilities */
+    fun reportCommunicationCapabilities(capabilities: JSONObject): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val req = authedRequest("/api/children/$childId/communication/capabilities", "POST", capabilities).build()
+        return execute(req)
+    }
+
+    /** POST /api/children/:childId/safety-alerts/batch */
+    fun syncSafetyAlertsBatch(alerts: org.json.JSONArray): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val payload = JSONObject().put("alerts", alerts)
+        val req = authedRequest("/api/children/$childId/safety-alerts/batch", "POST", payload).build()
+        return execute(req)
+    }
+
+    /** POST /api/children/:childId/notifications/batch */
+    fun syncNotificationsBatch(notifications: org.json.JSONArray): JSONObject {
+        val childId = session.childId ?: return JSONObject()
+        val payload = JSONObject().put("notifications", notifications)
+        val req = authedRequest("/api/children/$childId/notifications/batch", "POST", payload).build()
+        return execute(req)
+    }
+
     /** POST /api/children/:childId/usage/sync */
     fun syncDailyUsage(report: JSONObject): JSONObject {
         val childId = session.childId ?: return JSONObject()
@@ -147,6 +187,13 @@ class ApiClient(private val session: SessionStore) {
         val req = authedRequest("/api/camera-stream/$sessionId/stop", "POST").build()
         execute(req)
     }
+
+    /** POST /api/audio-stream/{id}/stop */
+    fun stopAudioStream(sessionId: String) {
+        val req = authedRequest("/api/audio-stream/$sessionId/stop", "POST").build()
+        execute(req)
+    }
+
 
     /** POST /api/location/record */
     fun postLocation(

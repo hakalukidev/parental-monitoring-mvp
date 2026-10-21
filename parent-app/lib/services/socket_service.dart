@@ -96,6 +96,23 @@ class SocketService {
     socket.on('camera_stream_stopped', (data) => cb(Map<String, dynamic>.from(data)));
   }
 
+  void onAudioStreamAccept(void Function(Map<String, dynamic>) cb) {
+    socket.on('audio_stream_accept', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onAudioStreamReject(void Function(Map<String, dynamic>) cb) {
+    socket.on('audio_stream_reject', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onAudioStreamStarted(void Function(Map<String, dynamic>) cb) {
+    socket.on('audio_stream_started', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onAudioStreamStopped(void Function(Map<String, dynamic>) cb) {
+    socket.on('audio_stream_stopped', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+
   void switchCamera(String sessionId, {String? cameraFacing}) {
     socket.emit('camera_stream_switch_camera', {
       'sessionId': sessionId,
@@ -196,5 +213,39 @@ class SocketService {
   void requestUsageSync(String childId) {
     socket.emit('request_usage_sync', {'childId': childId});
   }
+
+  // ==========================================
+  // Communication Activity Events (Calls & SMS)
+  // ==========================================
+
+  void onNewCallActivity(void Function(Map<String, dynamic>) cb) {
+    socket.on('new_call_activity', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onNewSmsActivity(void Function(Map<String, dynamic>) cb) {
+    socket.on('new_sms_activity', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  void onCommunicationCapabilitiesUpdated(void Function(Map<String, dynamic>) cb) {
+    socket.on('communication_capabilities_updated', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  // ==========================================
+  // Inappropriate Content & Safety Alerts
+  // ==========================================
+
+  void onSafetyAlertTriggered(void Function(Map<String, dynamic>) cb) {
+    socket.on('safety_alert_triggered', (data) => cb(Map<String, dynamic>.from(data)));
+  }
+
+  // ==========================================
+  // Child App Notifications Monitoring
+  // ==========================================
+
+  void onNewNotificationActivity(void Function(Map<String, dynamic>) cb) {
+    socket.on('new_notification_activity', (data) => cb(Map<String, dynamic>.from(data)));
+  }
 }
+
+
 

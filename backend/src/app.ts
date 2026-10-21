@@ -10,7 +10,9 @@ import childrenRoutes from "./routes/childrenRoutes";
 import deviceRoutes from "./routes/deviceRoutes";
 import screenShareRoutes from "./routes/screenShareRoutes";
 import cameraStreamRoutes from "./routes/cameraStreamRoutes";
+import audioStreamRoutes from "./routes/audioStreamRoutes";
 import configRoutes from "./routes/configRoutes";
+
 import locationRoutes from "./routes/locationRoutes";
 import appPolicyRoutes from "./routes/appPolicyRoutes";
 import webRulesRoutes from "./routes/webRulesRoutes";
@@ -18,6 +20,9 @@ import browsingHistoryRoutes from "./routes/browsingHistoryRoutes";
 import geofenceRoutes from "./routes/geofenceRoutes";
 import appUsageRoutes from "./routes/appUsageRoutes";
 import seftlyRoutes from "./routes/seftlyRoutes";
+import communicationRoutes from "./routes/communicationRoutes";
+import safetyAlertRoutes from "./routes/safetyAlertRoutes";
+import notificationRoutes from "./routes/notificationRoutes";
 
 export function createApp(): Express {
   const app = express();
@@ -42,11 +47,16 @@ export function createApp(): Express {
   app.use("/api/children", browsingHistoryRoutes);
   app.use("/api/children", geofenceRoutes);
   app.use("/api/children", appUsageRoutes);
+  app.use("/api/children", communicationRoutes);
+  app.use("/api/children", safetyAlertRoutes);
+  app.use("/api/children", notificationRoutes);
   app.use("/api/children", childrenRoutes);
   app.use("/api/devices", deviceRoutes);
   app.use("/api/screen-share", screenShareRoutes);
   app.use("/api/camera-stream", cameraStreamRoutes);
+  app.use("/api/audio-stream", audioStreamRoutes);
   app.use("/api/location", locationRoutes);
+
   app.use("/api/config", configRoutes);
   app.use("/api", seftlyRoutes);
 

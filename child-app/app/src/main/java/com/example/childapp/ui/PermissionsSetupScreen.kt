@@ -84,6 +84,16 @@ fun PermissionsSetupScreen(
         fineLoc && camera && audio && notif
     }
 
+    val hasCommunicationPermissions = remember(refreshTrigger) {
+        val calls = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val sms = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+        calls && sms
+    }
+
+    val hasNotificationAccess = remember(refreshTrigger) {
+        com.example.childapp.notification.ChildNotificationListenerService.isNotificationAccessGranted(context)
+    }
+
     val isAccessibilityActive = remember(refreshTrigger) {
         ChildAccessibilityService.isAccessibilityServiceEnabled(context)
     }
@@ -228,6 +238,39 @@ fun PermissionsSetupScreen(
                 onGrant = {
                     val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                     screenCaptureLauncher.launch(mgr.createScreenCaptureIntent())
+                }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            // Item 7: Call & SMS Supervision
+            SetupItemCard(
+                title = "Calls & SMS Supervision",
+                description = "Allows verified guardians to view incoming/outgoing call metadata and SMS history for safety.",
+                isGranted = hasCommunicationPermissions,
+                onGrant = {
+                    val list = mutableListOf(
+                        Manifest.permission.READ_CALL_LOG,
+                        Manifest.permission.READ_SMS,
+                        Manifest.permission.RECEIVE_SMS,
+                        Manifest.permission.READ_PHONE_STATE,
+                        Manifest.permission.READ_CONTACTS
+                    )
+                    permissionsLauncher.launch(list.toTypedArray())
+                }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            // Item 8: Notification Supervision
+            SetupItemCard(
+                title = "Notification Supervision",
+                description = "Allows guardians to view incoming notifications from messaging & social apps for safety monitoring.",
+                isGranted = hasNotificationAccess,
+                onGrant = {
+                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    context.startActivity(intent)
                 }
             )
 

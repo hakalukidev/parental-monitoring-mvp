@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
@@ -202,6 +204,55 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
         );
       }
     }
+  }
+
+  Future<void> _openUrl(String urlString) async {
+    final uri = Uri.tryParse(urlString);
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid URL format')),
+      );
+      return;
+    }
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open link: $urlString')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error opening link: $e')),
+        );
+      }
+    }
+  }
+
+  void _copyUrl(String urlString) {
+    Clipboard.setData(ClipboardData(text: urlString));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Link copied to clipboard'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  String _cleanDisplayTitle(BrowsingHistoryRecord record) {
+    if (record.title.isNotEmpty && !record.title.startsWith('http')) {
+      return record.title;
+    }
+    try {
+      final uri = Uri.parse(record.url);
+      final queryParam = uri.queryParameters['q'] ?? uri.queryParameters['query'];
+      if (queryParam != null && queryParam.trim().isNotEmpty) {
+        return '🔍 "${queryParam.trim()}"';
+      }
+    } catch (_) {}
+    return record.domain.isNotEmpty ? record.domain : record.url;
   }
 
   Widget _buildSummaryCard() {
@@ -488,6 +539,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                           itemBuilder: (ctx, idx) {
                             final record = filtered[idx];
                             return ListTile(
+                              onTap: () => _openUrl(record.url),
                               leading: CircleAvatar(
                                 backgroundColor: record.isBlockedAttempt
                                     ? Colors.red.shade100
@@ -501,7 +553,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      record.title.isNotEmpty ? record.title : record.domain,
+                                      _cleanDisplayTitle(record),
                                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -521,11 +573,38 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const SizedBox(height: 2),
-                                  Text(
-                                    record.url,
-                                    style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () => _openUrl(record.url),
+                                          child: Text(
+                                            record.url,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.blue.shade700,
+                                              decoration: TextDecoration.underline,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.open_in_new, size: 16, color: Colors.blue),
+                                        tooltip: 'Open in Browser',
+                                        constraints: const BoxConstraints(),
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        onPressed: () => _openUrl(record.url),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.copy, size: 16, color: Colors.grey),
+                                        tooltip: 'Copy URL',
+                                        constraints: const BoxConstraints(),
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        onPressed: () => _copyUrl(record.url),
+                                      ),
+                                    ],
                                   ),
                                   const SizedBox(height: 4),
                                   Row(

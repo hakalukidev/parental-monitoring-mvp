@@ -25,7 +25,10 @@ class SocketManager(private var accessToken: String) {
     var onCameraStreamRequest: ((sessionId: String, parentId: String, cameraFacing: String, withAudio: Boolean) -> Unit)? = null
     var onCameraStreamStopped: ((sessionId: String) -> Unit)? = null
     var onCameraStreamSwitchCamera: ((sessionId: String, cameraFacing: String) -> Unit)? = null
+    var onAudioStreamRequest: ((sessionId: String, parentId: String) -> Unit)? = null
+    var onAudioStreamStopped: ((sessionId: String) -> Unit)? = null
     var onWebrtcAnswer: ((sessionId: String, sdp: JSONObject) -> Unit)? = null
+
     var onIceCandidate: ((sessionId: String, candidate: JSONObject) -> Unit)? = null
     var onConnected: (() -> Unit)? = null
     var onDisconnected: (() -> Unit)? = null
@@ -48,8 +51,9 @@ class SocketManager(private var accessToken: String) {
         val uri = java.net.URI.create(BuildConfig.SOCKET_URL)
         android.util.Log.i("SocketManager", "Connecting socket to $uri")
         val okClient = okhttp3.OkHttpClient.Builder()
-            .hostnameVerifier { hostname, _ -> hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" }
+            .hostnameVerifier { hostname, _ -> hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "192.168.0.150" || hostname == "localhost" }
             .build()
+
         IO.setDefaultOkHttpCallFactory(okClient)
         IO.setDefaultOkHttpWebSocketFactory(okClient)
 
@@ -106,6 +110,18 @@ class SocketManager(private var accessToken: String) {
                     data.optString("cameraFacing", "BACK")
                 )
             }
+            s.on("audio_stream_request") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                onAudioStreamRequest?.invoke(
+                    data.getString("sessionId"),
+                    data.getString("parentId")
+                )
+            }
+            s.on("audio_stream_stopped") { args ->
+                val data = args.getOrNull(0) as? JSONObject ?: return@on
+                onAudioStreamStopped?.invoke(data.getString("sessionId"))
+            }
+
             s.on("webrtc_answer") { args ->
                 val data = args.getOrNull(0) as? JSONObject ?: return@on
                 val sid = data.getString("sessionId")
@@ -194,6 +210,24 @@ class SocketManager(private var accessToken: String) {
         socket?.emit("camera_stream_stopped", JSONObject().put("sessionId", sessionId))
     }
 
+    fun acceptAudioStream(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting audio_stream_accept for session $sessionId")
+        socket?.emit("audio_stream_accept", JSONObject().put("sessionId", sessionId))
+    }
+
+    fun rejectAudioStream(sessionId: String, reason: String? = null) {
+        val payload = JSONObject().put("sessionId", sessionId)
+        if (reason != null) payload.put("reason", reason)
+        android.util.Log.i("SocketManager", "Emitting audio_stream_reject for session $sessionId")
+        socket?.emit("audio_stream_reject", payload)
+    }
+
+    fun notifyAudioStopped(sessionId: String) {
+        android.util.Log.i("SocketManager", "Emitting audio_stream_stopped for session $sessionId")
+        socket?.emit("audio_stream_stopped", JSONObject().put("sessionId", sessionId))
+    }
+
+
     fun joinSession(sessionId: String) {
         android.util.Log.i("SocketManager", "Emitting join_session for session $sessionId, connected=${socket?.connected()}")
         socket?.emit("join_session", JSONObject().put("sessionId", sessionId))
@@ -257,6 +291,19 @@ class SocketManager(private var accessToken: String) {
 
     fun sendUsageUpdated(report: JSONObject) {
         socket?.emit("usage_updated", JSONObject().put("report", report))
+    }
+
+    fun sendNotificationIncoming(entry: com.example.childapp.data.CachedNotificationRecord) {
+        val payload = JSONObject().apply {
+            put("externalId", entry.externalId)
+            put("packageName", entry.packageName)
+            put("appName", entry.appName)
+            put("title", entry.title)
+            put("content", entry.content)
+            put("subText", entry.subText)
+            put("postTime", entry.postTime)
+        }
+        socket?.emit("child_notification_incoming", payload)
     }
 
     fun sendHeartbeat(batteryLevel: Int? = null, isGpsOn: Boolean? = null, deviceName: String? = null) {
