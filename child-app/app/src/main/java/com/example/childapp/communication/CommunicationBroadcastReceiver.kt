@@ -25,7 +25,10 @@ class CommunicationBroadcastReceiver : BroadcastReceiver() {
                 val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
                 // When phone state returns to IDLE (call finished or missed), trigger sync
                 if (state == TelephonyManager.EXTRA_STATE_IDLE) {
-                    CommunicationSyncManager.triggerSyncAsync(context.applicationContext)
+                    val appContext = context.applicationContext
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        CommunicationSyncManager.triggerSyncAsync(appContext)
+                    }, 1500L)
                 }
             }
         }

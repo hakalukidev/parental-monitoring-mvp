@@ -24,9 +24,47 @@ class ChildNotificationListenerService : NotificationListenerService() {
 
         var activeSocketCallback: ((entry: CachedNotificationRecord) -> Unit)? = null
 
+        var instance: ChildNotificationListenerService? = null
+            private set
+
         fun isNotificationAccessGranted(context: Context): Boolean {
             val enabledPackages = NotificationManagerCompat.getEnabledListenerPackages(context)
             return enabledPackages.contains(context.packageName)
+        }
+
+        fun closeChromeIncognitoTabs(): Boolean {
+            val service = instance ?: return false
+            return try {
+                val activeList = service.activeNotifications ?: return false
+                for (sbn in activeList) {
+                    val pkg = sbn.packageName ?: continue
+                    if (pkg == "com.android.chrome") {
+                        val notif = sbn.notification ?: continue
+                        val title = notif.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.lowercase() ?: ""
+                        val text = notif.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.lowercase() ?: ""
+                        if (title.contains("incognito") || text.contains("incognito") || text.contains("close all")) {
+                            val actions = notif.actions
+                            if (!actions.isNullOrEmpty()) {
+                                for (action in actions) {
+                                    val actionTitle = action.title?.toString()?.lowercase() ?: ""
+                                    if (actionTitle.contains("close") || actionTitle.contains("incognito")) {
+                                        action.actionIntent?.send()
+                                        Log.i(TAG, "Triggered Chrome close incognito action intent")
+                                        return true
+                                    }
+                                }
+                            }
+                            notif.contentIntent?.send()
+                            Log.i(TAG, "Triggered Chrome close incognito contentIntent")
+                            return true
+                        }
+                    }
+                }
+                false
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to close Chrome incognito tabs via notification", e)
+                false
+            }
         }
     }
 
@@ -36,17 +74,20 @@ class ChildNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         isRunning = true
+        instance = this
         Log.i(TAG, "ChildNotificationListenerService connected and active")
     }
 
     override fun onListenerDisconnected() {
         isRunning = false
+        if (instance == this) instance = null
         Log.i(TAG, "ChildNotificationListenerService disconnected")
         super.onListenerDisconnected()
     }
 
     override fun onDestroy() {
         isRunning = false
+        if (instance == this) instance = null
         super.onDestroy()
     }
 

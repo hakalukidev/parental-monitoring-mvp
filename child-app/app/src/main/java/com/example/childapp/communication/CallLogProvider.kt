@@ -36,7 +36,7 @@ object CallLogProvider {
 
         val selection = "${CallLog.Calls.DATE} > ?"
         val selectionArgs = arrayOf(afterTimestamp.toString())
-        val sortOrder = "${CallLog.Calls.DATE} ASC LIMIT $limit"
+        val sortOrder = "${CallLog.Calls.DATE} ASC"
 
         try {
             context.contentResolver.query(
@@ -52,7 +52,7 @@ object CallLogProvider {
                 val dateIdx = cursor.getColumnIndex(CallLog.Calls.DATE)
                 val durIdx = cursor.getColumnIndex(CallLog.Calls.DURATION)
 
-                while (cursor.moveToNext()) {
+                while (cursor.moveToNext() && records.size < limit) {
                     val rawNumber = if (numIdx >= 0) cursor.getString(numIdx) else null
                     val contactName = if (nameIdx >= 0) cursor.getString(nameIdx) else null
                     val rawType = if (typeIdx >= 0) cursor.getInt(typeIdx) else -1

@@ -9,6 +9,7 @@ import { LocationRecord } from "../models/LocationRecord";
 import { User } from "../models/User";
 import { BrowsingHistoryRecord } from "../models/BrowsingHistoryRecord";
 import { NotificationRecord } from "../models/NotificationRecord";
+import { SafetyAlert } from "../models/SafetyAlert";
 import { evaluateChildGeofences } from "../services/geofenceService";
 
 import {
@@ -633,6 +634,38 @@ export function registerSocketHandlers(io: Server): void {
                   childName: child.name,
                   record,
                 });
+              }
+
+              if (record.category === "ADULT") {
+                try {
+                  const safetyAlert = await SafetyAlert.findOneAndUpdate(
+                    { childId: userId, externalId: `web_${record._id}` },
+                    {
+                      $setOnInsert: {
+                        childId: userId,
+                        deviceId: device?._id ?? null,
+                        externalId: `web_${record._id}`,
+                        alertType: "ADULT_CONTENT_DETECTED",
+                        packageName: (record.browser as string) || "Browser",
+                        appName: `${record.browser || "Browser"}: ${record.domain}`,
+                        confidenceScore: 0.95,
+                        severity: "CRITICAL",
+                        isAcknowledged: false,
+                        timestamp: new Date(),
+                      },
+                    },
+                    { upsert: true, new: true }
+                  );
+
+                  io.to(pSocketId).emit("safety_alert_triggered", {
+                    childId: userId,
+                    childName: child.name,
+                    alert: safetyAlert,
+                    count: 1,
+                  });
+                } catch (e) {
+                  // Ignore duplicate externalId error
+                }
               }
             }
           }

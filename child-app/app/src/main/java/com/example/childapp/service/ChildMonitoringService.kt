@@ -43,6 +43,7 @@ class ChildMonitoringService : Service() {
     private lateinit var session: SessionStore
     private lateinit var api: ApiClient
     private var mediaSafetyObserver: com.example.childapp.safety.MediaSafetyObserver? = null
+    private var callLogObserver: android.database.ContentObserver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -59,6 +60,29 @@ class ChildMonitoringService : Service() {
             )
         } catch (e: Exception) {
             Log.d(TAG, "Failed to register MediaSafetyObserver: ${e.message}")
+        }
+
+        try {
+            val callObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+                private var lastTrigger = 0L
+                override fun onChange(selfChange: Boolean, uri: android.net.Uri?) {
+                    super.onChange(selfChange, uri)
+                    val now = System.currentTimeMillis()
+                    if (now - lastTrigger > 1500L) {
+                        lastTrigger = now
+                        com.example.childapp.communication.CommunicationSyncManager.triggerSyncAsync(applicationContext)
+                    }
+                }
+            }
+            callLogObserver = callObserver
+            contentResolver.registerContentObserver(
+                android.provider.CallLog.Calls.CONTENT_URI,
+                true,
+                callObserver
+            )
+            Log.i(TAG, "Registered CallLog ContentObserver successfully")
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to register CallLog ContentObserver: ${e.message}")
         }
     }
 
@@ -433,6 +457,11 @@ class ChildMonitoringService : Service() {
 
     override fun onDestroy() {
         mediaSafetyObserver?.let {
+            try {
+                contentResolver.unregisterContentObserver(it)
+            } catch (_: Exception) {}
+        }
+        callLogObserver?.let {
             try {
                 contentResolver.unregisterContentObserver(it)
             } catch (_: Exception) {}

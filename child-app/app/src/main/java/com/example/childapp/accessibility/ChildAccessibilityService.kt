@@ -21,6 +21,8 @@ import com.example.childapp.blocker.AppUsageTracker
 import com.example.childapp.blocker.WebFilterEvaluator
 import com.example.childapp.data.CachedBrowsingHistory
 import com.example.childapp.data.LocalDatabase
+import android.net.Uri
+import com.example.childapp.notification.ChildNotificationListenerService
 import com.example.childapp.ui.BlockedAppActivity
 import java.net.URI
 
@@ -273,6 +275,7 @@ class ChildAccessibilityService : AccessibilityService() {
                 val rowId = LocalDatabase.getInstance(this).insertBrowsingHistory(entry)
                 val savedEntry = entry.copy(id = rowId)
                 activeSocketCallback?.invoke(savedEntry)
+                checkAndRecordAdultSafetyAlert(packageName, browserName, check.category, normalizedUrl)
             }
 
             val intent = Intent(this, BlockedAppActivity::class.java).apply {
@@ -348,60 +351,180 @@ class ChildAccessibilityService : AccessibilityService() {
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
 
+        // Bridge to real-time Safety & Content Alerts if adult/NSFW content detected
+        checkAndRecordAdultSafetyAlert(packageName, browserName, check.category, normalizedUrl)
+
         // Notify active socket manager if online
         activeSocketCallback?.invoke(savedEntry)
+    }
+
+    private var lastAdultAlertTime = 0L
+
+    private fun checkAndRecordAdultSafetyAlert(packageName: String, browserName: String, category: String, url: String) {
+        if (category == "ADULT") {
+            val now = System.currentTimeMillis()
+            if (now - lastAdultAlertTime > 20000L) {
+                lastAdultAlertTime = now
+                Log.w("ChildAccessibility", "ADULT content detected on $url - recording urgent Safety Alert")
+                try {
+                    com.example.childapp.safety.SafetyAlertSyncManager.recordAlert(
+                        context = applicationContext,
+                        alertType = "ADULT_CONTENT_DETECTED",
+                        packageName = packageName,
+                        appName = browserName,
+                        confidence = 0.95,
+                        severity = "CRITICAL"
+                    )
+                } catch (e: Exception) {
+                    Log.e("ChildAccessibility", "Failed recording adult safety alert: ${e.message}")
+                }
+            }
+        }
     }
 
     private var lastIncognitoBlockTime = 0L
 
     private fun checkAndBlockIncognito(packageName: String): Boolean {
         val root = rootInActiveWindow ?: return false
-        val isIncognito = isIncognitoTab(root)
-        if (isIncognito) {
-            val now = System.currentTimeMillis()
-            if (now - lastIncognitoBlockTime > 1500L) {
-                lastIncognitoBlockTime = now
-                Log.w("ChildAccessibility", "Incognito mode detected in $packageName! Blocking...")
-                handler.post {
-                    android.widget.Toast.makeText(
-                        applicationContext,
-                        "Incognito / Private browsing is restricted by Parental Controls.",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-                performGlobalAction(GLOBAL_ACTION_BACK)
-            }
-            return true
+        val now = System.currentTimeMillis()
+        if (now - lastIncognitoBlockTime < 2000L) {
+            // Under cooldown from a recent remediation to normal mode
+            return false
         }
-        return false
+
+        val isIncognito = isIncognitoTab(root)
+        if (!isIncognito) return false
+
+        lastIncognitoBlockTime = now
+        Log.w("ChildAccessibility", "Incognito mode detected in $packageName! Remediation starting...")
+
+        // 1. Close incognito tabs via system notification listener if available
+        try {
+            ChildNotificationListenerService.closeChromeIncognitoTabs()
+        } catch (e: Exception) {
+            Log.w("ChildAccessibility", "Could not close incognito tabs via notification", e)
+        }
+
+        // 2. Try closing the incognito tab via Accessibility UI action
+        tryCloseIncognitoTab(root)
+
+        // 3. Immediately redirect child to normal browsing in the same browser
+        try {
+            val normalIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
+                setPackage(packageName)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            startActivity(normalIntent)
+        } catch (e: Exception) {
+            Log.e("ChildAccessibility", "Failed to launch normal tab intent", e)
+        }
+
+        // 4. Notify the child with parental restriction Toast
+        handler.post {
+            android.widget.Toast.makeText(
+                applicationContext,
+                "Incognito / Private browsing is restricted by Parental Controls.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+
+        return true
+    }
+
+    private fun tryCloseIncognitoTab(root: AccessibilityNodeInfo?) {
+        if (root == null) return
+        try {
+            fun searchAndClickClose(node: AccessibilityNodeInfo?): Boolean {
+                if (node == null) return false
+                val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+                val viewId = node.viewIdResourceName?.lowercase() ?: ""
+
+                // Check for close buttons in tab switcher or tab bar
+                if (desc.contains("close incognito") ||
+                    (desc.contains("close") && desc.contains("tab")) ||
+                    viewId.contains("tab_close_button") ||
+                    viewId.contains("close_button")
+                ) {
+                    if (node.isClickable) {
+                        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        return true
+                    }
+                    val parent = node.parent
+                    if (parent != null && parent.isClickable) {
+                        parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        return true
+                    }
+                }
+
+                // If in tab switcher, try clicking the standard tabs button if incognito tab tray is open
+                if (viewId.contains("standard_tabs_button") ||
+                    (desc.contains("standard tabs") && !node.isSelected) ||
+                    (desc.contains("open tabs") && !node.isSelected)
+                ) {
+                    if (node.isClickable) {
+                        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        return true
+                    }
+                }
+
+                for (i in 0 until node.childCount) {
+                    if (searchAndClickClose(node.getChild(i))) return true
+                }
+                return false
+            }
+            searchAndClickClose(root)
+        } catch (_: Exception) {}
     }
 
     private fun isIncognitoTab(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         try {
-            // 1. Direct text indicators across Chrome, Samsung Internet, Edge, Firefox, Brave, Opera
+            // 1. Direct text indicators on ACTIVE Incognito page content (NOT unselected menu items)
             if (root.findAccessibilityNodeInfosByText("You've gone incognito").isNotEmpty() ||
                 root.findAccessibilityNodeInfosByText("You’ve gone incognito").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("New incognito tab").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("New private tab").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("InPrivate").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("Private Browsing").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("Secret mode").isNotEmpty()
+                root.findAccessibilityNodeInfosByText("InPrivate browsing").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("Secret mode is on").isNotEmpty()
             ) {
                 return true
             }
 
-            // 2. Check node tree for incognito markers in content descriptions or view IDs
+            // 2. Check node tree for ACTIVE incognito markers (require isSelected/isVisibleToUser)
             fun searchNode(node: AccessibilityNodeInfo?): Boolean {
                 if (node == null) return false
                 val desc = node.contentDescription?.toString()?.lowercase() ?: ""
                 val viewId = node.viewIdResourceName?.lowercase() ?: ""
 
-                if (desc.contains("incognito tab") || desc.contains("close incognito") ||
-                    desc.contains("selected incognito") || desc.contains("switch to incognito") ||
-                    viewId.contains("incognito_splash") || viewId.contains("incognito_desc") ||
-                    viewId.contains("incognito_toggle_button") || viewId.contains("incognito_badge") ||
+                // View ID on incognito splash/landing pages
+                if (viewId.contains("incognito_splash") ||
+                    viewId.contains("incognito_desc") ||
                     viewId.contains("secret_mode_header")
+                ) {
+                    return true
+                }
+
+                // Address bar active incognito badge
+                if ((viewId.contains("incognito_badge") || viewId.contains("location_bar_incognito_badge")) &&
+                    node.isVisibleToUser
+                ) {
+                    return true
+                }
+
+                // Tab Switcher toggle button - ONLY if it is actively SELECTED!
+                // An unselected incognito_toggle_button exists in standard mode and must be ignored!
+                if (viewId.contains("incognito_toggle_button") ||
+                    viewId.contains("incognito_tabs_button") ||
+                    desc.contains("incognito tab") ||
+                    desc.contains("incognito tabs")
+                ) {
+                    if (node.isSelected || node.isChecked) {
+                        return true
+                    }
+                }
+
+                // Explicitly selected incognito description
+                if (desc.contains("selected incognito") ||
+                    desc.contains("incognito mode is on") ||
+                    desc.contains("inprivate mode is on")
                 ) {
                     return true
                 }

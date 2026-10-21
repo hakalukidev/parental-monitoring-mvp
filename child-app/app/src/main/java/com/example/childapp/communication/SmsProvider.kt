@@ -37,7 +37,7 @@ object SmsProvider {
 
         val selection = "${Telephony.Sms.DATE} > ?"
         val selectionArgs = arrayOf(afterTimestamp.toString())
-        val sortOrder = "${Telephony.Sms.DATE} ASC LIMIT $limit"
+        val sortOrder = "${Telephony.Sms.DATE} ASC"
 
         try {
             context.contentResolver.query(
@@ -52,7 +52,7 @@ object SmsProvider {
                 val dateIdx = cursor.getColumnIndex(Telephony.Sms.DATE)
                 val typeIdx = cursor.getColumnIndex(Telephony.Sms.TYPE)
 
-                while (cursor.moveToNext()) {
+                while (cursor.moveToNext() && records.size < limit) {
                     val rawAddress = if (addrIdx >= 0) cursor.getString(addrIdx) else null
                     val body = if (bodyIdx >= 0) cursor.getString(bodyIdx) else null
                     val date = if (dateIdx >= 0) cursor.getLong(dateIdx) else 0L

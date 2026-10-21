@@ -27,35 +27,31 @@ object CommunicationCapabilityEvaluator {
         val hasTelephony = pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
 
         // Evaluate Call Log capability
-        val callsStatus = if (!hasTelephony) {
+        val callLogGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CALL_LOG
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val callsStatus = if (callLogGranted) {
+            CapabilityStatus.AVAILABLE
+        } else if (!hasTelephony) {
             CapabilityStatus.UNSUPPORTED
         } else {
-            val callLogGranted = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_CALL_LOG
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (callLogGranted) {
-                CapabilityStatus.AVAILABLE
-            } else {
-                CapabilityStatus.PERMISSION_REQUIRED
-            }
+            CapabilityStatus.PERMISSION_REQUIRED
         }
 
         // Evaluate SMS capability
-        val smsMetadataStatus = if (!hasTelephony) {
+        val smsGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val smsMetadataStatus = if (smsGranted) {
+            CapabilityStatus.AVAILABLE
+        } else if (!hasTelephony) {
             CapabilityStatus.UNSUPPORTED
         } else {
-            val smsGranted = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_SMS
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (smsGranted) {
-                CapabilityStatus.AVAILABLE
-            } else {
-                CapabilityStatus.PERMISSION_REQUIRED
-            }
+            CapabilityStatus.PERMISSION_REQUIRED
         }
 
         // SMS content capability
