@@ -132,29 +132,36 @@ export const updateAppPolicy = asyncHandler(async (req: AuthedRequest, res: Resp
 
   const data = updateAppPolicySchema.parse(req.body);
 
+  const setFields: Record<string, any> = {
+    status: data.status,
+    schedules: data.schedules ?? [],
+  };
+  if (data.appName) setFields.appName = data.appName;
+  if (data.category) setFields.category = data.category;
+  if (data.status === "TIME_LIMITED" && data.dailyLimitMinutes != null) {
+    setFields.dailyLimitMinutes = data.dailyLimitMinutes;
+  }
+  if (data.isSystemWhitelisted !== undefined) {
+    setFields.isSystemWhitelisted = data.isSystemWhitelisted;
+  }
+
+  const setOnInsertFields: Record<string, any> = {};
+  if (!data.appName) setOnInsertFields.appName = packageName;
+  if (!data.category) setOnInsertFields.category = "OTHER";
+
+  const updateDoc: Record<string, any> = {
+    $set: setFields,
+  };
+  if (Object.keys(setOnInsertFields).length > 0) {
+    updateDoc.$setOnInsert = setOnInsertFields;
+  }
+  if (data.status !== "TIME_LIMITED" || data.dailyLimitMinutes == null) {
+    updateDoc.$unset = { dailyLimitMinutes: 1 };
+  }
+
   const policy = await AppPolicy.findOneAndUpdate(
     { childId, packageName },
-    {
-      $set: {
-        ...(data.appName ? { appName: data.appName } : {}),
-        ...(data.category ? { category: data.category } : {}),
-        status: data.status,
-        ...(data.dailyLimitMinutes != null
-          ? { dailyLimitMinutes: data.dailyLimitMinutes }
-          : {}),
-        schedules: data.schedules ?? [],
-        ...(data.isSystemWhitelisted !== undefined
-          ? { isSystemWhitelisted: data.isSystemWhitelisted }
-          : {}),
-      },
-      ...(data.status !== "TIME_LIMITED" || data.dailyLimitMinutes == null
-        ? { $unset: { dailyLimitMinutes: 1 } }
-        : {}),
-      $setOnInsert: {
-        appName: data.appName || packageName,
-        category: data.category || "OTHER",
-      },
-    },
+    updateDoc,
     { new: true, upsert: true }
   );
 
