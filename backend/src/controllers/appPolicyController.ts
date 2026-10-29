@@ -98,6 +98,26 @@ export const listChildApps = asyncHandler(async (req: AuthedRequest, res: Respon
     };
   });
 
+  // Include any custom or blocked AppPolicy not currently in installedApps
+  const appSet = new Set(installedApps.map((a) => a.packageName));
+  for (const policy of policies) {
+    if (!appSet.has(policy.packageName)) {
+      combined.push({
+        packageName: policy.packageName,
+        appName: policy.appName || policy.packageName,
+        category: policy.category || "OTHER",
+        status: policy.status || "ALWAYS_ALLOWED",
+        dailyLimitMinutes: policy.dailyLimitMinutes,
+        schedules: policy.schedules || [],
+        isSystemWhitelisted: policy.isSystemWhitelisted || false,
+        versionName: undefined,
+        syncedAt: (policy as any).updatedAt || (policy as any).createdAt || new Date(),
+      });
+    }
+  }
+
+  combined.sort((a, b) => a.appName.localeCompare(b.appName));
+
   res.json({
     apps: combined,
     isPaused: device?.isPaused ?? false,
@@ -125,9 +145,28 @@ export const updateAppPolicy = asyncHandler(async (req: AuthedRequest, res: Resp
           ? { isSystemWhitelisted: data.isSystemWhitelisted }
           : {}),
       },
+      $setOnInsert: {
+        appName: data.appName || packageName,
+        category: data.category || "OTHER",
+      },
     },
     { new: true, upsert: true }
   );
+
+  // Also ensure InstalledApp record exists so child app list remains in sync
+  try {
+    await InstalledApp.updateOne(
+      { childId, packageName },
+      {
+        $setOnInsert: {
+          appName: data.appName || packageName,
+          category: data.category || "OTHER",
+          syncedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+  } catch {}
 
   // Notify child via socket
   try {

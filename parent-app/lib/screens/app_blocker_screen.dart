@@ -97,6 +97,46 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
     }
   }
 
+  Future<void> _quickUnblock(InstalledAppInfo app) async {
+    final updated = InstalledAppInfo(
+      packageName: app.packageName,
+      appName: app.appName,
+      category: app.category,
+      status: 'ALWAYS_ALLOWED',
+      dailyLimitMinutes: app.dailyLimitMinutes,
+      schedules: app.schedules,
+      isSystemWhitelisted: app.isSystemWhitelisted,
+      versionName: app.versionName,
+      syncedAt: app.syncedAt,
+    );
+
+    try {
+      await ApiService.instance.updateAppPolicy(
+        widget.childId,
+        app.packageName,
+        updated.toPolicyJson(),
+      );
+      setState(() {
+        final idx = _apps.indexWhere((a) => a.packageName == app.packageName);
+        if (idx != -1) _apps[idx] = updated;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${app.appName} has been unblocked.'),
+            backgroundColor: Colors.green.shade800,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to unblock: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _openAppConfigSheet(InstalledAppInfo app) {
     showModalBottomSheet(
       context: context,
@@ -360,6 +400,7 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                                   return _AppListItem(
                                     app: app,
                                     onTap: () => _openAppConfigSheet(app),
+                                    onQuickUnblock: app.status == 'BLOCKED' ? () => _quickUnblock(app) : null,
                                   );
                                 },
                               ),
@@ -387,8 +428,13 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
 class _AppListItem extends StatelessWidget {
   final InstalledAppInfo app;
   final VoidCallback onTap;
+  final VoidCallback? onQuickUnblock;
 
-  const _AppListItem({required this.app, required this.onTap});
+  const _AppListItem({
+    required this.app,
+    required this.onTap,
+    this.onQuickUnblock,
+  });
 
   IconData _categoryIcon(String category) {
     switch (category.toUpperCase()) {
@@ -475,8 +521,22 @@ class _AppListItem extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _statusBadge(app.status),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right, color: Colors.grey),
+          if (app.status == 'BLOCKED' && onQuickUnblock != null) ...[
+            const SizedBox(width: 6),
+            FilledButton.tonal(
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                backgroundColor: Colors.green.shade100,
+                foregroundColor: Colors.green.shade900,
+              ),
+              onPressed: onQuickUnblock,
+              child: const Text('Unblock', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ] else ...[
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
         ],
       ),
       onTap: onTap,

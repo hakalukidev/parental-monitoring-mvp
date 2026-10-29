@@ -4,6 +4,7 @@ import '../models/safety_alert_entry.dart';
 import '../services/api_service.dart';
 import '../services/mock_communication_provider.dart';
 import '../services/socket_service.dart';
+import 'app_blocker_screen.dart';
 
 class SafetyAlertsScreen extends StatefulWidget {
   final String childId;
@@ -234,12 +235,28 @@ class _SafetyAlertsScreenState extends State<SafetyAlertsScreen> {
       await ApiService.instance.updateAppPolicy(
         widget.childId,
         packageName,
-        {'status': 'BLOCKED'},
+        {
+          'status': 'BLOCKED',
+          'appName': appName ?? packageName,
+        },
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${appName ?? packageName} has been blocked.'),
+            action: SnackBarAction(
+              label: 'View in Blocker',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AppBlockerScreen(
+                      childId: widget.childId,
+                      childName: widget.childName,
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         );
       }
