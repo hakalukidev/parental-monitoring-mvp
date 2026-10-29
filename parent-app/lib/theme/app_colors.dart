@@ -111,8 +111,8 @@ class AppColors {
     border: Color(0xFFE1EAEF),
     // --input: oklch(0.9809 0.0025 228.7836)
     input: Color(0xFFF7F9FA),
-    // --ring: oklch(0.6818 0.1584 243.3540)
-    ring: Color(0xFF1DA1F2),
+    // --ring: oklch(0.438 0.142 267.074)
+    ring: Color(0xFF2F4A9F),
     // --chart-1
     chart1: Color(0xFF2F4A9F),
     // --chart-2

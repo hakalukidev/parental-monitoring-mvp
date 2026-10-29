@@ -65,7 +65,7 @@ object AppColors {
         destructive = Color(0xFFF4212E),
         border = Color(0xFFE1EAEF),
         input = Color(0xFFF7F9FA),
-        ring = Color(0xFF1DA1F2),
+        ring = Color(0xFF2F4A9F),
         chart1 = Color(0xFF2F4A9F),
         chart2 = Color(0xFF00B87A),
         chart3 = Color(0xFFF7B928),

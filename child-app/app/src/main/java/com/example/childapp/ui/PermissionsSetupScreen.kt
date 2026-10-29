@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +34,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.example.childapp.accessibility.ChildAccessibilityService
 import com.example.childapp.blocker.AppUsageTracker
 import com.example.childapp.screen.ScreenCaptureService
+import com.example.childapp.ui.theme.AppTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -306,6 +308,8 @@ fun SetupItemCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(AppTheme.palette.radius),
+        border = BorderStroke(1.dp, AppTheme.palette.border.copy(alpha = 0.5f)),
         colors = CardDefaults.cardColors(
             containerColor = if (isGranted)
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
