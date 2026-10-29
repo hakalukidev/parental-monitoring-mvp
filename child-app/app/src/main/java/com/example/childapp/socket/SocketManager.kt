@@ -48,6 +48,13 @@ class SocketManager(private var accessToken: String) {
     }
 
     fun connect() {
+        socket?.let {
+            try {
+                it.off()
+                it.disconnect()
+            } catch (_: Exception) {}
+            socket = null
+        }
         val uri = java.net.URI.create(BuildConfig.SOCKET_URL)
         android.util.Log.i("SocketManager", "Connecting socket to $uri")
         val okClient = okhttp3.OkHttpClient.Builder()

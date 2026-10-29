@@ -212,6 +212,15 @@ class AmbientAudioWebRtcManager(
             peerConnection?.dispose()
         } catch (_: Exception) {}
         peerConnection = null
+
+        try {
+            audioDeviceModule?.release()
+        } catch (_: Exception) {}
+        audioDeviceModule = null
+
+        try {
+            if (::factory.isInitialized) factory.dispose()
+        } catch (_: Exception) {}
     }
 
     private open class SdpObserverAdapter : SdpObserver {

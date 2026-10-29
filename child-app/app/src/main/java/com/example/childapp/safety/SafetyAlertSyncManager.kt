@@ -1,12 +1,17 @@
 package com.example.childapp.safety
 
+import android.accessibilityservice.AccessibilityService
+import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.util.Log
+import com.example.childapp.accessibility.ChildAccessibilityService
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.CachedSafetyAlert
 import com.example.childapp.data.LocalDatabase
 import com.example.childapp.data.SessionStore
 import com.example.childapp.service.ChildMonitoringService
+import com.example.childapp.ui.BlockedAppActivity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -47,8 +52,55 @@ object SafetyAlertSyncManager {
         val rowId = db.insertSafetyAlert(alert)
         Log.w(TAG, "Recorded safety violation alert (ID: $rowId, type: $alertType, app: $appName, confidence: $confidence)")
 
-        // Trigger immediate background sync
+        // 1. Enforce immediate local block and close the offending app
+        val isSystemPkg = packageName.isNullOrEmpty() ||
+                packageName == context.packageName ||
+                packageName == "android" ||
+                packageName == "com.android.systemui" ||
+                packageName == "com.android.providers.media" ||
+                packageName == "com.android.settings" ||
+                packageName.contains("launcher")
+
+        if (!isSystemPkg && packageName != null) {
+            val resolvedAppName = appName ?: packageName
+            db.blockAppForSafety(packageName, resolvedAppName)
+            enforceImmediateAppCloseAndBlock(context, packageName, resolvedAppName, alertType)
+        }
+
+        // 2. Trigger immediate background sync
         triggerSyncAsync(context)
+    }
+
+    private fun enforceImmediateAppCloseAndBlock(
+        context: Context,
+        packageName: String,
+        appName: String,
+        alertType: String
+    ) {
+        try {
+            // A. Trigger HOME action via accessibility service if bound
+            ChildAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+
+            // B. Kill background process of target app
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            am?.killBackgroundProcesses(packageName)
+
+            // C. Launch BlockedAppActivity showing safety block details
+            val intent = Intent(context, BlockedAppActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("PACKAGE_NAME", packageName)
+                putExtra("APP_NAME", appName)
+                putExtra("REASON", "Inappropriate content detected. This app has been automatically blocked for your safety.")
+                putExtra("BLOCKED_TARGET", "Safety & Content Filter")
+                putExtra("IS_WEB_BLOCK", false)
+            }
+            context.startActivity(intent)
+            Log.i(TAG, "Enforced immediate safety close and block on $appName ($packageName)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enforce immediate safety close and block: ${e.message}", e)
+        }
     }
 
     fun triggerSyncAsync(context: Context) {

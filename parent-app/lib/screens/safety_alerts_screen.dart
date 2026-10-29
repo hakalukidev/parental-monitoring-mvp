@@ -48,6 +48,16 @@ class _SafetyAlertsScreenState extends State<SafetyAlertsScreen> {
     sock.onSafetyAlertTriggered((data) {
       if (!mounted) return;
       if (data['childId'] == widget.childId) {
+        final latest = data['latestAlert'] as Map<String, dynamic>?;
+        final pkg = latest?['packageName'] as String?;
+        final app = latest?['appName'] as String?;
+        if (pkg != null && pkg.isNotEmpty && pkg != 'com.android.providers.media') {
+          ApiService.instance.updateAppPolicy(widget.childId, pkg, {
+            'status': 'BLOCKED',
+            'appName': app ?? pkg,
+          }).catchError((_) => <String, dynamic>{});
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red.shade800,
@@ -57,7 +67,7 @@ class _SafetyAlertsScreenState extends State<SafetyAlertsScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Urgent: Inappropriate content detected on ${widget.childName}\'s device!',
+                    'Urgent: Inappropriate content detected on ${widget.childName}\'s device! App has been automatically closed and blocked.',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -625,23 +635,88 @@ class _SafetyAlertsScreenState extends State<SafetyAlertsScreen> {
             ),
             const SizedBox(height: 10),
 
+            if (alert.packageName != null &&
+                alert.packageName!.isNotEmpty &&
+                alert.packageName != 'com.android.providers.media')
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.shield_rounded, size: 16, color: Colors.red.shade800),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'App automatically closed & blocked for child safety',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.red.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
             // Acknowledgment status or Actions
             const Divider(height: 16),
             if (alert.isAcknowledged)
-              Row(
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  const Icon(Icons.check_circle, size: 16, color: Colors.green),
-                  const SizedBox(width: 6),
-                  Text(
-                    alert.acknowledgedAt != null
-                        ? 'Reviewed ${_dateFormat.format(alert.acknowledgedAt!)}'
-                        : 'Reviewed by parent',
-                    style: TextStyle(fontSize: 12, color: Colors.green.shade800),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                      const SizedBox(width: 6),
+                      Text(
+                        alert.acknowledgedAt != null
+                            ? 'Reviewed ${_dateFormat.format(alert.acknowledgedAt!)}'
+                            : 'Reviewed by parent',
+                        style: TextStyle(fontSize: 12, color: Colors.green.shade800),
+                      ),
+                    ],
                   ),
+                  if (alert.packageName != null &&
+                      alert.packageName!.isNotEmpty &&
+                      alert.packageName != 'com.android.providers.media')
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: Colors.blueGrey.shade800,
+                      ),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => AppBlockerScreen(
+                              childId: widget.childId,
+                              childName: widget.childName,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.app_blocking_rounded, size: 16),
+                      label: const Text('Manage in Blocker'),
+                    ),
                 ],
               )
             else
-              Row(
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -653,16 +728,25 @@ class _SafetyAlertsScreenState extends State<SafetyAlertsScreen> {
                     icon: const Icon(Icons.check, size: 16),
                     label: const Text('Mark Reviewed'),
                   ),
-                  const Spacer(),
-                  if (alert.packageName != null && alert.packageName!.isNotEmpty)
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
+                  if (alert.packageName != null &&
+                      alert.packageName!.isNotEmpty &&
+                      alert.packageName != 'com.android.providers.media')
+                    FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
                         visualDensity: VisualDensity.compact,
-                        foregroundColor: Colors.red.shade800,
                       ),
-                      onPressed: () => _blockApp(alert.packageName!, alert.appName),
-                      icon: const Icon(Icons.block, size: 16),
-                      label: const Text('Block App'),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => AppBlockerScreen(
+                              childId: widget.childId,
+                              childName: widget.childName,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.app_blocking_rounded, size: 16),
+                      label: const Text('Manage in Blocker'),
                     ),
                 ],
               ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/app_policy.dart';
 import '../services/api_service.dart';
+import '../theme/app_colors.dart';
 
 class WebFilterScreen extends StatefulWidget {
   final String childId;
@@ -209,18 +210,30 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
     );
 
     if (created == true && targetController.text.trim().isNotEmpty) {
+      String cleanTarget = targetController.text.trim().toLowerCase();
+      if (ruleType == 'DOMAIN') {
+        cleanTarget = cleanTarget
+            .replaceAll(RegExp(r'^https?://'), '')
+            .replaceAll(RegExp(r'^www\.'), '')
+            .replaceAll(RegExp(r'^\*\.?'), '')
+            .split('/')
+            .first
+            .trim();
+      }
+      if (cleanTarget.isEmpty) return;
+
       try {
         final newRuleMap = await ApiService.instance.createWebRule(
           widget.childId,
           ruleType: ruleType,
-          target: targetController.text.trim(),
+          target: cleanTarget,
           action: action,
           isEnabled: true,
         );
         setState(() => _rules.insert(0, WebBlockRule.fromJson(newRuleMap)));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Added rule: ${targetController.text.trim()}')),
+            SnackBar(content: Text('Added rule: $cleanTarget')),
           );
         }
       } catch (e) {
@@ -347,7 +360,7 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Switch(
+                                    _PrimaryBorderSwitch(
                                       value: rule.isEnabled,
                                       onChanged: (val) async {
                                         try {
@@ -407,8 +420,8 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
         icon = Icons.shield;
     }
 
-    return SwitchListTile(
-      secondary: CircleAvatar(
+    return ListTile(
+      leading: CircleAvatar(
         backgroundColor: isEnabled ? Colors.red.shade100 : Colors.grey.shade200,
         child: Icon(icon, color: isEnabled ? Colors.red.shade800 : Colors.grey.shade700),
       ),
@@ -417,8 +430,63 @@ class _WebFilterScreenState extends State<WebFilterScreen> with SingleTickerProv
         isEnabled ? 'Active (Blocked)' : 'Inactive (Allowed)',
         style: TextStyle(fontSize: 12, color: isEnabled ? Colors.red : Colors.grey),
       ),
-      value: isEnabled,
-      onChanged: (val) => _toggleCategory(categoryKey, val),
+      trailing: _PrimaryBorderSwitch(
+        value: isEnabled,
+        onChanged: (val) => _toggleCategory(categoryKey, val),
+      ),
+      onTap: () => _toggleCategory(categoryKey, !isEnabled),
+    );
+  }
+}
+
+class _PrimaryBorderSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  const _PrimaryBorderSwitch({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onChanged != null ? () => onChanged!(!value) : null,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        width: 48,
+        height: 28,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: value ? AppColors.primary : const Color(0xFFE5E7EB),
+          border: Border.all(
+            color: value ? AppColors.primary : AppColors.primary.withValues(alpha: 0.15),
+          ),
+        ),
+        alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white,
+            border: Border.all(
+              color: AppColors.primary,
+              width: 2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 3,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

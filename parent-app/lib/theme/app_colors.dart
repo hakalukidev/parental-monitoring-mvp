@@ -233,4 +233,21 @@ class AppColors {
   static Color get sidebarBorder => current.sidebarBorder;
   static Color get sidebarRing => current.sidebarRing;
   static double get radius => current.radius;
+
+  // Status colors
+  static const Color statusOnline = Color(0xFF16A34A);
+  static const Color statusOnlineLight = Color(0xFF69F0AE);
+  static const Color statusOnlineBg = Color(0xFFDCFCE7);
+  static const Color statusOffline = Color(0xFF6B7280);
+  static const Color statusOfflineBg = Color(0xFFF3F4F6);
+
+  // Feature icon & card pastel colors
+  static const Color iconBgPurple = Color(0xFFEDE9FE);
+  static const Color iconPurple = Color(0xFF6D28D9);
+  static const Color iconBgBlue = Color(0xFFE0E7FF);
+  static const Color iconBlue = Color(0xFF4338CA);
+  static const Color iconBgRed = Color(0xFFFEE2E2);
+  static const Color iconRed = Color(0xFFDC2626);
+  static const Color cardBgRed = Color(0xFFFEF2F2);
+  static const Color cardBorderRed = Color(0xFFFECACA);
 }

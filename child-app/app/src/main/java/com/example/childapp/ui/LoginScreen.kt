@@ -127,12 +127,12 @@ fun LoginScreen(
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    label = { Text("Email") },
+                    label = { Text("Username") },
                     singleLine = true,
                     shape = RoundedCornerShape(AppTheme.palette.radius),
                     colors = textFieldColors,
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Email,
+                        keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Next
                     ),
                     keyboardActions = KeyboardActions(

@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/routing_service.dart';
+import '../theme/app_colors.dart';
 
 class LocationTrackingScreen extends StatefulWidget {
   final String childId;
@@ -142,8 +143,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
     try {
       // 1. Fetch latest location
       final latestRes = await ApiService.instance.getLatestLocation(widget.childId);
-      if (latestRes['location'] != null) {
-        _latestLocation = LocationPoint.fromJson(latestRes['location'] as Map<String, dynamic>);
+      final rawLoc = latestRes['location'];
+      if (rawLoc != null && rawLoc is Map<String, dynamic> && rawLoc['latitude'] != null && rawLoc['longitude'] != null) {
+        _latestLocation = LocationPoint.fromJson(rawLoc);
         _updateReverseGeocoding(_latestLocation!.latitude, _latestLocation!.longitude);
       }
       _deviceStatus = latestRes['deviceStatus']?.toString() ?? 'OFFLINE';
@@ -476,7 +478,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: _deviceStatus == 'ONLINE' ? Colors.greenAccent : Colors.grey,
+                    color: _deviceStatus == 'ONLINE'
+                        ? AppColors.statusOnlineLight
+                        : theme.colorScheme.onPrimary.withValues(alpha: 0.5),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -485,9 +489,12 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                   _deviceStatus == 'ONLINE'
                       ? 'Live GPS • Online'
                       : 'Offline (${_lastSeen != null ? DateFormat('h:mm a').format(_lastSeen!) : 'Unknown'})',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _deviceStatus == 'ONLINE' ? Colors.green.shade700 : Colors.grey.shade600,
-                    fontWeight: FontWeight.w500,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _deviceStatus == 'ONLINE'
+                        ? AppColors.statusOnlineLight
+                        : theme.colorScheme.onPrimary.withValues(alpha: 0.7),
                   ),
                 ),
               ],
@@ -498,8 +505,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
           IconButton(
             icon: Icon(
               _showGeofences ? Icons.shield : Icons.shield_outlined,
-              color: _showGeofences ? Colors.teal : null,
+              color: _showGeofences ? AppColors.statusOnlineLight : null,
             ),
+            color: _showGeofences ? AppColors.statusOnlineLight : null,
             tooltip: _showGeofences ? 'Hide Geofences' : 'Show Geofences',
             onPressed: () => setState(() => _showGeofences = !_showGeofences),
           ),
@@ -857,9 +865,13 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 FloatingActionButton.small(
                   heroTag: 'toggle_map_layer',
                   backgroundColor: theme.colorScheme.surface,
+                  foregroundColor: theme.colorScheme.primary,
                   tooltip: _isSatelliteView ? 'Street View' : 'Satellite View',
                   onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
-                  child: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
+                  child: Icon(
+                    _isSatelliteView ? Icons.map : Icons.satellite_alt,
+                    color: theme.colorScheme.primary,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
@@ -868,8 +880,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       ? theme.colorScheme.primary
                       : theme.colorScheme.surface,
                   foregroundColor: _isFollowingChild
-                      ? Colors.white
-                      : theme.colorScheme.onSurface,
+                      ? theme.colorScheme.onPrimary
+                      : theme.colorScheme.primary,
                   tooltip: 'Follow Child',
                   onPressed: () {
                     setState(() => _isFollowingChild = true);
@@ -877,15 +889,24 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       _mapController.move(_latestLocation!.latLng, 16.0);
                     }
                   },
-                  child: const Icon(Icons.gps_fixed),
+                  child: Icon(
+                    Icons.gps_fixed,
+                    color: _isFollowingChild
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.primary,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
                   heroTag: 'fit_bounds',
                   backgroundColor: theme.colorScheme.surface,
+                  foregroundColor: theme.colorScheme.primary,
                   tooltip: 'Fit Route Bounds',
                   onPressed: _fitMapToBounds,
-                  child: const Icon(Icons.crop_free),
+                  child: Icon(
+                    Icons.crop_free,
+                    color: theme.colorScheme.primary,
+                  ),
                 ),
               ],
             ),

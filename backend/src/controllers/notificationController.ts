@@ -133,18 +133,21 @@ export const getNotifications = asyncHandler(async (req: AuthedRequest, res: Res
     NotificationRecord.countDocuments(filter),
   ]);
 
+  const mapped = notifications.map((n) => ({
+    id: n._id.toString(),
+    externalId: n.externalId,
+    packageName: n.packageName,
+    appName: n.appName,
+    title: n.title,
+    content: n.content,
+    subText: n.subText,
+    postTime: n.postTime.toISOString(),
+    createdAt: n.createdAt.toISOString(),
+  }));
+
   return res.json({
-    data: notifications.map((n) => ({
-      id: n._id.toString(),
-      externalId: n.externalId,
-      packageName: n.packageName,
-      appName: n.appName,
-      title: n.title,
-      content: n.content,
-      subText: n.subText,
-      postTime: n.postTime.toISOString(),
-      createdAt: n.createdAt.toISOString(),
-    })),
+    data: mapped,
+    notifications: mapped,
     pagination: {
       page,
       limit,

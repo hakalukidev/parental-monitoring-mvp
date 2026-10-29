@@ -87,7 +87,6 @@ class MainActivity : ComponentActivity() {
                                         if (isSetupDone) {
                                             startMonitoringServices()
                                         }
-                                        startSocket()
                                         deviceConnected = true
                                         syncAppData()
                                     } catch (e: ApiException) {
@@ -144,7 +143,6 @@ class MainActivity : ComponentActivity() {
         }
 
         if (session.accessToken != null) {
-            startSocket()
             if (session.isSetupCompleted) {
                 startMonitoringServices()
             }

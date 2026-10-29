@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/app_usage_report.dart';
-import '../models/app_policy.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
+import '../theme/app_colors.dart';
 
 class AppUsageReportScreen extends StatefulWidget {
   final String childId;
@@ -426,21 +426,26 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
             const SizedBox(height: 14),
 
             // Segmented Progress Bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                height: 16,
+            Container(
+              height: 16,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F8F8),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
                 child: Row(
                   children: [
                     if (summary.screenTimePercentage > 0)
                       Flexible(
                         flex: (summary.screenTimePercentage * 1000).toInt(),
-                        child: Container(color: Colors.blue.shade600),
+                        child: Container(color: AppColors.iconRed),
                       ),
                     if (summary.downtimePercentage > 0)
                       Flexible(
                         flex: (summary.downtimePercentage * 1000).toInt(),
-                        child: Container(color: Colors.indigo.shade300),
+                        child: Container(color: const Color(0xFFF7F8F8)),
                       ),
                   ],
                 ),
@@ -459,7 +464,10 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                     Container(
                       width: 12,
                       height: 12,
-                      decoration: BoxDecoration(color: Colors.blue.shade600, borderRadius: BorderRadius.circular(3)),
+                      decoration: BoxDecoration(
+                        color: AppColors.iconRed,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Text(
@@ -474,7 +482,11 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                     Container(
                       width: 12,
                       height: 12,
-                      decoration: BoxDecoration(color: Colors.indigo.shade300, borderRadius: BorderRadius.circular(3)),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F8F8),
+                        border: Border.all(color: AppColors.border),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Text(
@@ -511,13 +523,15 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
               ],
             ),
             const SizedBox(height: 16),
+
+            // Bar Chart Area (All 24 bars aligned on the exact same bottom baseline)
             SizedBox(
-              height: 100,
+              height: 80,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: hourly.map((h) {
                   final ratio = maxSec > 0 ? (h.screenTimeSeconds / maxSec) : 0.0;
-                  final height = (ratio * 70).clamp(4.0, 70.0);
+                  final height = (ratio * 76).clamp(4.0, 76.0);
                   final isPeak = maxSec > 0 && h.screenTimeSeconds == maxSec && maxSec > 0;
 
                   return Expanded(
@@ -525,33 +539,44 @@ class _AppUsageReportScreenState extends State<AppUsageReportScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 1.5),
                       child: Tooltip(
                         message: '${h.formattedHour}: ${h.screenTimeMinutes} min',
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Container(
-                              height: height,
-                              decoration: BoxDecoration(
-                                color: isPeak
-                                    ? Colors.amber.shade700
-                                    : (h.screenTimeSeconds > 0 ? Colors.blue.shade600 : Colors.grey.shade200),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            if (h.hour % 4 == 0)
-                              Text(
-                                '${h.hour}h',
-                                style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
-                              )
-                            else
-                              const SizedBox(height: 11),
-                          ],
+                        child: Container(
+                          height: height,
+                          decoration: BoxDecoration(
+                            color: isPeak
+                                ? Colors.amber.shade700
+                                : (h.screenTimeSeconds > 0
+                                    ? AppColors.primary
+                                    : AppColors.muted.withValues(alpha: 0.7)),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
                         ),
                       ),
                     ),
                   );
                 }).toList(),
               ),
+            ),
+            const SizedBox(height: 6),
+
+            // Subtle Baseline Divider
+            Container(
+              height: 1,
+              color: AppColors.border,
+            ),
+            const SizedBox(height: 6),
+
+            // X-Axis Labels (Dedicated row to prevent vertical wrapping)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('0h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text('4h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text('8h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text('12h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text('16h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text('20h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text('23h', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+              ],
             ),
           ],
         ),

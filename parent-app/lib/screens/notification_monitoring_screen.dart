@@ -66,7 +66,9 @@ class _NotificationMonitoringScreenState
       final childId = data['childId'] as String?;
       if (childId != widget.childId) return;
 
-      final rawNotif = data['notification'] as Map<String, dynamic>?;
+      final rawNotif = data['notification'] is Map
+          ? Map<String, dynamic>.from(data['notification'] as Map)
+          : null;
       if (rawNotif != null) {
         final entry = ChildNotificationEntry.fromJson(rawNotif);
         setState(() {
@@ -118,12 +120,17 @@ class _NotificationMonitoringScreenState
         limit: 40,
       );
 
-      final rawList = (res['notifications'] as List<dynamic>?) ?? [];
+      final rawList = (res['notifications'] as List<dynamic>?) ??
+          (res['data'] as List<dynamic>?) ??
+          [];
       final fetched = rawList
-          .map((e) => ChildNotificationEntry.fromJson(e as Map<String, dynamic>))
+          .whereType<Map>()
+          .map((e) => ChildNotificationEntry.fromJson(Map<String, dynamic>.from(e)))
           .toList();
 
-      final pagination = res['pagination'] as Map<String, dynamic>?;
+      final pagination = res['pagination'] is Map
+          ? Map<String, dynamic>.from(res['pagination'] as Map)
+          : null;
       final totalPages = pagination?['pages'] as int? ?? 1;
 
       setState(() {

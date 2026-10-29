@@ -40,6 +40,9 @@ class ChildAccessibilityService : AccessibilityService() {
         var isRunning = false
             private set
 
+        var currentForegroundPackage: String? = null
+            private set
+
         var activeSocketCallback: ((entry: CachedBrowsingHistory) -> Unit)? = null
 
         fun isAccessibilityServiceEnabled(context: Context): Boolean {
@@ -147,6 +150,7 @@ class ChildAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         instance = null
         isRunning = false
+        currentForegroundPackage = null
         handler.removeCallbacksAndMessages(null)
         try {
             safetyExecutor.shutdown()
@@ -156,6 +160,7 @@ class ChildAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         isRunning = false
+        currentForegroundPackage = null
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -180,6 +185,8 @@ class ChildAccessibilityService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+                if (checkAndEnforceAppBlock(packageName)) return
+
                 if (supportedBrowsers.containsKey(packageName)) {
                     if (checkAndBlockIncognito(packageName)) return
                     inspectBrowserContent(packageName)
@@ -190,6 +197,29 @@ class ChildAccessibilityService : AccessibilityService() {
                 checkScreenSafetyPeriodically(packageName)
             }
         }
+    }
+
+    private fun checkAndEnforceAppBlock(packageName: String): Boolean {
+        if (packageName == this.packageName ||
+            packageName == "com.android.systemui" ||
+            packageName.contains("launcher")
+        ) {
+            return false
+        }
+        val check = AppUsageTracker.evaluatePackage(this, packageName)
+        if (check.isBlocked) {
+            val intent = Intent(this, BlockedAppActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("PACKAGE_NAME", packageName)
+                putExtra("APP_NAME", check.policy?.appName ?: packageName)
+                putExtra("REASON", check.reason ?: "This app has been restricted by your parent.")
+            }
+            startActivity(intent)
+            return true
+        }
+        return false
     }
 
     private fun handleWindowStateChanged(packageName: String, event: AccessibilityEvent) {
@@ -210,19 +240,10 @@ class ChildAccessibilityService : AccessibilityService() {
         }
 
         lastPackage = packageName
+        currentForegroundPackage = packageName
 
         // 2. Evaluate App Policy (Blocked, Schedule, Time Limit, Device Pause)
-        val check = AppUsageTracker.evaluatePackage(this, packageName)
-        if (check.isBlocked) {
-            val intent = Intent(this, BlockedAppActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra("PACKAGE_NAME", packageName)
-                putExtra("APP_NAME", check.policy?.appName ?: packageName)
-                putExtra("REASON", check.reason ?: "This app has been restricted by your parent.")
-            }
-            startActivity(intent)
+        if (checkAndEnforceAppBlock(packageName)) {
             return
         }
 
@@ -264,6 +285,9 @@ class ChildAccessibilityService : AccessibilityService() {
     }
 
     private fun inspectBrowserContent(packageName: String) {
+        val appCheck = AppUsageTracker.evaluatePackage(this, packageName)
+        if (appCheck.isBlocked) return
+
         val root = rootInActiveWindow ?: return
         val urlAndTitle = findUrlAndTitle(root, packageName) ?: return
         val (url, title) = urlAndTitle
@@ -311,18 +335,7 @@ class ChildAccessibilityService : AccessibilityService() {
                 checkAndRecordAdultSafetyAlert(packageName, browserName, check.category, normalizedUrl)
             }
 
-            val intent = Intent(this, BlockedAppActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra("PACKAGE_NAME", packageName)
-                putExtra("APP_NAME", browserName)
-                putExtra("REASON", check.reason ?: "This content has been restricted by your parent.")
-                putExtra("BLOCKED_TARGET", check.matchedRule?.target ?: url)
-                putExtra("IS_WEB_BLOCK", true)
-            }
-            startActivity(intent)
-            performGlobalAction(GLOBAL_ACTION_BACK)
+            enforceWebFilterBlock(packageName, normalizedUrl)
             return
         }
 
@@ -368,20 +381,9 @@ class ChildAccessibilityService : AccessibilityService() {
         val rowId = LocalDatabase.getInstance(this).insertBrowsingHistory(entry)
         val savedEntry = entry.copy(id = rowId)
 
-        // If blocked: launch block screen and back navigation
+        // If blocked: redirect to safe tab and notify child
         if (check.isBlocked) {
-            val intent = Intent(this, BlockedAppActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra("PACKAGE_NAME", packageName)
-                putExtra("APP_NAME", browserName)
-                putExtra("REASON", check.reason ?: "This content has been restricted by your parent.")
-                putExtra("BLOCKED_TARGET", check.matchedRule?.target ?: normalizedUrl)
-                putExtra("IS_WEB_BLOCK", true)
-            }
-            startActivity(intent)
-            performGlobalAction(GLOBAL_ACTION_BACK)
+            enforceWebFilterBlock(packageName, normalizedUrl)
         }
 
         // Bridge to real-time Safety & Content Alerts if adult/NSFW content detected
@@ -389,6 +391,83 @@ class ChildAccessibilityService : AccessibilityService() {
 
         // Notify active socket manager if online
         activeSocketCallback?.invoke(savedEntry)
+    }
+
+    private var lastWebBlockTime = 0L
+    private var lastBlockedWebUrl: String? = null
+
+    private fun enforceWebFilterBlock(packageName: String, blockedUrl: String) {
+        val appCheck = AppUsageTracker.evaluatePackage(this, packageName)
+        if (appCheck.isBlocked) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastWebBlockTime < 1500L && blockedUrl == lastBlockedWebUrl) {
+            return
+        }
+        lastWebBlockTime = now
+        lastBlockedWebUrl = blockedUrl
+
+        Log.w("ChildAccessibility", "Blocked website detected: $blockedUrl in $packageName. Redirecting to safe page...")
+
+        // 1. Try closing the active tab if a close button exists in the accessibility hierarchy
+        val root = rootInActiveWindow
+        if (root != null) {
+            tryCloseActiveTab(root)
+        }
+
+        // 2. Immediately redirect browser to safe homepage (https://www.google.com) to replace blocked URL
+        try {
+            val safeIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
+                setPackage(packageName)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            startActivity(safeIntent)
+        } catch (e: Exception) {
+            Log.e("ChildAccessibility", "Failed to redirect browser to safe page", e)
+        }
+
+        // 3. Notify child with a Toast without locking or exiting the browser application
+        handler.post {
+            try {
+                android.widget.Toast.makeText(
+                    applicationContext,
+                    "This website is unaccessible",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun tryCloseActiveTab(root: AccessibilityNodeInfo?) {
+        if (root == null) return
+        try {
+            fun searchAndClickClose(node: AccessibilityNodeInfo?): Boolean {
+                if (node == null) return false
+                val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+                val viewId = node.viewIdResourceName?.lowercase() ?: ""
+
+                if ((desc.contains("close") && desc.contains("tab")) ||
+                    viewId.contains("tab_close_button") ||
+                    viewId.contains("close_button")
+                ) {
+                    if (node.isClickable) {
+                        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        return true
+                    }
+                    val parent = node.parent
+                    if (parent != null && parent.isClickable) {
+                        parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        return true
+                    }
+                }
+
+                for (i in 0 until node.childCount) {
+                    if (searchAndClickClose(node.getChild(i))) return true
+                }
+                return false
+            }
+            searchAndClickClose(root)
+        } catch (_: Exception) {}
     }
 
     private var lastAdultAlertTime = 0L

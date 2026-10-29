@@ -66,11 +66,31 @@ class MediaSafetyObserver(
 
                     if (result.isExplicit) {
                         Log.w(TAG, "Explicit image detected in gallery/download: $displayName (confidence: ${result.confidence})")
+                        val activePkg = com.example.childapp.accessibility.ChildAccessibilityService.currentForegroundPackage
+                        val isSystem = activePkg == null ||
+                                activePkg == context.packageName ||
+                                activePkg == "android" ||
+                                activePkg == "com.android.systemui" ||
+                                activePkg.contains("launcher")
+
+                        val targetPkg = if (!isSystem) activePkg else "com.android.providers.media"
+                        val targetAppName = if (!isSystem && activePkg != null) {
+                            try {
+                                val pm = context.packageManager
+                                val info = pm.getApplicationInfo(activePkg, 0)
+                                pm.getApplicationLabel(info).toString()
+                            } catch (_: Exception) {
+                                "Gallery / Downloads ($displayName)"
+                            }
+                        } else {
+                            "Gallery / Downloads ($displayName)"
+                        }
+
                         SafetyAlertSyncManager.recordAlert(
                             context = context,
                             alertType = "EXPLICIT_PHOTO_SAVED",
-                            packageName = "com.android.providers.media",
-                            appName = "Gallery / Downloads ($displayName)",
+                            packageName = targetPkg,
+                            appName = targetAppName,
                             confidence = result.confidence.toDouble(),
                             severity = result.severity
                         )

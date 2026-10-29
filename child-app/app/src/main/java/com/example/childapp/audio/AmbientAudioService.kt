@@ -44,6 +44,14 @@ class AmbientAudioService : Service() {
             return START_NOT_STICKY
         }
 
+        audioWebRtcManager?.let { oldRtc ->
+            Log.i(TAG, "Disposing previous AmbientAudioWebRtcManager before starting new session $sid")
+            audioWebRtcManager = null
+            try {
+                oldRtc.dispose()
+            } catch (_: Exception) {}
+        }
+
         sessionId = sid
         currentSessionId = sid
         isSessionRunning.set(true)
@@ -84,10 +92,6 @@ class AmbientAudioService : Service() {
             SocketManager(token).also { socketManager = it }
         }
 
-
-        socket.onAudioStreamStopped = { stoppedId ->
-            if (stoppedId == sessionId) stopStreaming()
-        }
         socket.onWebrtcAnswer = { sdpSessionId, sdp ->
             Log.i(TAG, "Received onWebrtcAnswer for audio session $sdpSessionId")
             if (sdpSessionId == sessionId) audioWebRtcManager?.handleRemoteAnswer(sdp)
@@ -117,7 +121,7 @@ class AmbientAudioService : Service() {
                 if (state == PeerConnection.PeerConnectionState.CLOSED ||
                     state == PeerConnection.PeerConnectionState.FAILED
                 ) {
-                    if (!isStopping.get()) {
+                    if (!isStopping.get() && sessionId == sid) {
                         Log.i(TAG, "Stopping audio stream due to state: $state")
                         stopStreaming()
                     }
@@ -136,37 +140,24 @@ class AmbientAudioService : Service() {
             socket.joinSession(sid)
             socket.acceptAudioStream(sid)
             webRtc.startStreaming(iceServers)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                com.example.childapp.camera.InvisibleCameraActivity.onCameraInitialized?.invoke()
+            }, 800)
         }
 
-        // Fetch server ICE configuration asynchronously in background thread
-        Thread {
-            val iceServers = try {
-                val api = ApiClient(SessionStore(applicationContext))
-                val config = api.getIceServers()
-                parseIceServers(config)
-            } catch (_: Exception) {
-                defaultIceServers
-            }
-            val finalIce = if (iceServers.isNotEmpty()) iceServers else defaultIceServers
-
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                if (audioWebRtcManager != null && !isStopping.get()) {
-                    if (socket.isConnected) {
-                        beginAudioStream(finalIce)
-                    } else {
-                        Log.i(TAG, "Socket not yet connected, waiting for onConnected...")
-                        socket.onConnected = {
-                            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                if (audioWebRtcManager != null && !isStopping.get()) {
-                                    beginAudioStream(finalIce)
-                                }
-                            }
-                        }
-                        socket.connect()
+        if (socket.isConnected) {
+            beginAudioStream(defaultIceServers)
+        } else {
+            Log.i(TAG, "Socket not yet connected, waiting for onConnected...")
+            socket.onConnected = {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (audioWebRtcManager != null && !isStopping.get() && sessionId == sid) {
+                        beginAudioStream(defaultIceServers)
                     }
                 }
             }
-        }.start()
+            socket.connect()
+        }
 
         return START_STICKY
     }

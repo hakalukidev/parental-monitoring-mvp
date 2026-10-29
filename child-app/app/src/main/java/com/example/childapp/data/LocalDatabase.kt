@@ -343,17 +343,57 @@ class LocalDatabase private constructor(context: Context) :
     // App Policies
     // ==========================================
     @Synchronized
+    fun blockAppForSafety(packageName: String, appName: String) {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("package_name", packageName)
+            put("app_name", appName)
+            put("status", "BLOCKED")
+        }
+        db.insertWithOnConflict("app_policies", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+
+        val stateCv = ContentValues().apply {
+            put("key", "safety_blocked_$packageName")
+            put("value", "1")
+        }
+        db.insertWithOnConflict("device_state", null, stateCv, SQLiteDatabase.CONFLICT_REPLACE)
+        db.delete("unblock_grants", "package_name = ?", arrayOf(packageName))
+    }
+
+    @Synchronized
+    fun clearSafetyBlock(packageName: String) {
+        val db = writableDatabase
+        db.delete("device_state", "key = ?", arrayOf("safety_blocked_$packageName"))
+    }
+
+    @Synchronized
+    fun isSafetyBlocked(packageName: String): Boolean {
+        val db = readableDatabase
+        db.rawQuery("SELECT value FROM device_state WHERE key = ?", arrayOf("safety_blocked_$packageName")).use { cursor ->
+            if (cursor.moveToFirst()) {
+                return cursor.getString(0) == "1"
+            }
+        }
+        return false
+    }
+
+    @Synchronized
     fun saveAppPolicies(policiesJson: JSONArray) {
         val db = writableDatabase
         db.beginTransaction()
         try {
             for (i in 0 until policiesJson.length()) {
                 val p = policiesJson.getJSONObject(i)
+                val packageName = p.getString("packageName")
+                val isSafety = isSafetyBlocked(packageName)
+                val incomingStatus = p.optString("status", "ALWAYS_ALLOWED")
+                val finalStatus = if (isSafety && incomingStatus != "BLOCKED") "BLOCKED" else incomingStatus
+
                 val cv = ContentValues().apply {
-                    put("package_name", p.getString("packageName"))
+                    put("package_name", packageName)
                     put("app_name", p.optString("appName", ""))
                     put("category", p.optString("category", "OTHER"))
-                    put("status", p.optString("status", "ALWAYS_ALLOWED"))
+                    put("status", finalStatus)
                     if (p.has("dailyLimitMinutes") && !p.isNull("dailyLimitMinutes")) {
                         put("daily_limit_minutes", p.getInt("dailyLimitMinutes"))
                     } else {
@@ -373,11 +413,16 @@ class LocalDatabase private constructor(context: Context) :
     @Synchronized
     fun upsertAppPolicy(policy: JSONObject) {
         val db = writableDatabase
+        val packageName = policy.getString("packageName")
+        val status = policy.optString("status", "ALWAYS_ALLOWED")
+        if (status != "BLOCKED") {
+            clearSafetyBlock(packageName)
+        }
         val cv = ContentValues().apply {
-            put("package_name", policy.getString("packageName"))
+            put("package_name", packageName)
             put("app_name", policy.optString("appName", ""))
             put("category", policy.optString("category", "OTHER"))
-            put("status", policy.optString("status", "ALWAYS_ALLOWED"))
+            put("status", status)
             if (policy.has("dailyLimitMinutes") && !policy.isNull("dailyLimitMinutes")) {
                 put("daily_limit_minutes", policy.getInt("dailyLimitMinutes"))
             } else {
@@ -439,6 +484,22 @@ class LocalDatabase private constructor(context: Context) :
     // ==========================================
     // Web Rules
     // ==========================================
+    private fun sanitizeWebTarget(ruleType: String, rawTarget: String): String {
+        val trimmed = rawTarget.lowercase().trim()
+        if (ruleType.equals("DOMAIN", ignoreCase = true)) {
+            val cleaned = trimmed
+                .removePrefix("https://")
+                .removePrefix("http://")
+                .removePrefix("www.")
+                .removePrefix("*.")
+                .removePrefix("*")
+                .removeSuffix("*")
+                .trim()
+            return if (cleaned.contains("/")) cleaned.substringBefore("/") else cleaned
+        }
+        return trimmed
+    }
+
     @Synchronized
     fun saveWebRules(rulesJson: JSONArray) {
         val db = writableDatabase
@@ -447,10 +508,11 @@ class LocalDatabase private constructor(context: Context) :
             db.delete("web_rules", null, null)
             for (i in 0 until rulesJson.length()) {
                 val r = rulesJson.getJSONObject(i)
+                val ruleType = r.getString("ruleType")
                 val cv = ContentValues().apply {
                     put("id", r.getString("_id"))
-                    put("rule_type", r.getString("ruleType"))
-                    put("target", r.getString("target").lowercase().trim())
+                    put("rule_type", ruleType)
+                    put("target", sanitizeWebTarget(ruleType, r.getString("target")))
                     put("action", r.optString("action", "BLOCK"))
                     put("is_enabled", if (r.optBoolean("isEnabled", true)) 1 else 0)
                 }
@@ -465,10 +527,11 @@ class LocalDatabase private constructor(context: Context) :
     @Synchronized
     fun upsertWebRule(rule: JSONObject) {
         val db = writableDatabase
+        val ruleType = rule.getString("ruleType")
         val cv = ContentValues().apply {
             put("id", rule.optString("_id", rule.optString("id")))
-            put("rule_type", rule.getString("ruleType"))
-            put("target", rule.getString("target").lowercase().trim())
+            put("rule_type", ruleType)
+            put("target", sanitizeWebTarget(ruleType, rule.getString("target")))
             put("action", rule.optString("action", "BLOCK"))
             put("is_enabled", if (rule.optBoolean("isEnabled", true)) 1 else 0)
         }

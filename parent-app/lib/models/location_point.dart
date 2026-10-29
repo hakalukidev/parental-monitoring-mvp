@@ -31,15 +31,15 @@ class LocationPoint {
   factory LocationPoint.fromJson(Map<String, dynamic> json) {
     return LocationPoint(
       id: json['id']?.toString() ?? json['_id']?.toString(),
-      latitude: (json['latitude'] as num).toDouble(),
-      longitude: (json['longitude'] as num).toDouble(),
-      accuracy: json['accuracy'] != null ? (json['accuracy'] as num).toDouble() : null,
-      altitude: json['altitude'] != null ? (json['altitude'] as num).toDouble() : null,
-      speed: json['speed'] != null ? (json['speed'] as num).toDouble() : null,
-      heading: json['heading'] != null ? (json['heading'] as num).toDouble() : null,
-      batteryLevel: json['batteryLevel'] != null ? (json['batteryLevel'] as num).toInt() : null,
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+      accuracy: json['accuracy'] != null ? (json['accuracy'] as num?)?.toDouble() : null,
+      altitude: json['altitude'] != null ? (json['altitude'] as num?)?.toDouble() : null,
+      speed: json['speed'] != null ? (json['speed'] as num?)?.toDouble() : null,
+      heading: json['heading'] != null ? (json['heading'] as num?)?.toDouble() : null,
+      batteryLevel: json['batteryLevel'] != null ? (json['batteryLevel'] as num?)?.toInt() : null,
       recordedAt: json['recordedAt'] != null
-          ? DateTime.parse(json['recordedAt'].toString()).toLocal()
+          ? DateTime.tryParse(json['recordedAt'].toString())?.toLocal() ?? DateTime.now()
           : DateTime.now(),
     );
   }

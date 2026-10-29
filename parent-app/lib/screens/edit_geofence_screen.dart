@@ -41,6 +41,7 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
   String? _resolvedAddress;
   bool _isSatelliteView = false;
   bool _saving = false;
+  bool _locatingParent = false;
   String? _error;
 
   @override
@@ -75,20 +76,106 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
   }
 
   Future<void> _centerOnParentLocation() async {
+    if (_locatingParent) return;
+    setState(() => _locatingParent = true);
+
     try {
-      final perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        final req = await Geolocator.requestPermission();
-        if (req == LocationPermission.denied || req == LocationPermission.deniedForever) return;
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please enable location services (GPS) on your device.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
       }
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      final newCenter = LatLng(pos.latitude, pos.longitude);
-      setState(() {
-        _center = newCenter;
-      });
-      _mapController.move(newCenter, 15);
-      _updateAddress(newCenter.latitude, newCenter.longitude);
-    } catch (_) {}
+
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location permission is required to detect your location.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // 1. FAST PATH: Instant cached / last known position
+      Position? pos = await Geolocator.getLastKnownPosition();
+      if (pos != null && mounted) {
+        final newCenter = LatLng(pos.latitude, pos.longitude);
+        setState(() {
+          _center = newCenter;
+        });
+        try {
+          _mapController.move(newCenter, 16);
+        } catch (_) {}
+        _updateAddress(newCenter.latitude, newCenter.longitude);
+      }
+
+      // 2. FRESH GPS FIX with timeout
+      try {
+        final livePos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 6),
+        );
+        if (mounted) {
+          final newCenter = LatLng(livePos.latitude, livePos.longitude);
+          setState(() {
+            _center = newCenter;
+          });
+          try {
+            _mapController.move(newCenter, 16);
+          } catch (_) {}
+          _updateAddress(newCenter.latitude, newCenter.longitude);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Boundary center set to your current location.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (pos == null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not obtain current location: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Boundary center set to your last known location.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Location error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _locatingParent = false);
+      }
+    }
   }
 
   Future<void> _save() async {
@@ -310,9 +397,15 @@ class _EditGeofenceScreenState extends State<EditGeofenceScreen> {
                               onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.my_location, size: 20),
+                              icon: _locatingParent
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.my_location, size: 20),
                               tooltip: 'Center on my location',
-                              onPressed: _centerOnParentLocation,
+                              onPressed: _locatingParent ? null : _centerOnParentLocation,
                             ),
                           ],
                         ),

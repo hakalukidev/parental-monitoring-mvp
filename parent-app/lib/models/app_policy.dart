@@ -68,7 +68,8 @@ class InstalledAppInfo {
         'appName': appName,
         'category': category,
         'status': status,
-        if (dailyLimitMinutes != null) 'dailyLimitMinutes': dailyLimitMinutes,
+        if (status == 'TIME_LIMITED' && dailyLimitMinutes != null)
+          'dailyLimitMinutes': dailyLimitMinutes,
         'schedules': schedules.map((s) => s.toJson()).toList(),
         'isSystemWhitelisted': isSystemWhitelisted,
       };

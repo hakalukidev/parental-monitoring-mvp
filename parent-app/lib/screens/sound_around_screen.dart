@@ -24,6 +24,8 @@ class SoundAroundScreen extends StatefulWidget {
 
 class _SoundAroundScreenState extends State<SoundAroundScreen>
     with SingleTickerProviderStateMixin {
+  static const int _maxRetries = 5;
+
   final SocketService _socketService = SocketService();
   final RTCVideoRenderer _audioRenderer = RTCVideoRenderer();
   RTCPeerConnection? _pc;
@@ -33,6 +35,11 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
   bool _remoteDescriptionSet = false;
   bool _isMuted = false;
   bool _isSpeakerOn = true;
+  bool _isUserStopped = false;
+  bool _isRetrying = false;
+  int _retryCount = 0;
+  Timer? _connectionWatchdog;
+  Timer? _retryTimer;
   MediaStreamTrack? _remoteAudioTrack;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
@@ -51,10 +58,10 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
       duration: const Duration(milliseconds: 1800),
     )..repeat();
 
-    _start();
+    _initAndStart();
   }
 
-  Future<void> _start() async {
+  Future<void> _initAndStart() async {
     try {
       await _audioRenderer.initialize();
     } catch (e) {
@@ -75,20 +82,31 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     _socketService.connect(token);
     _socketService.onAudioStreamAccept(_onAccept);
     _socketService.onAudioStreamReject((data) {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != null && incomingSid != _sessionId) return;
       final reason = data['reason']?.toString();
-      if (mounted) {
-        setState(() {
-          _state = _AudioViewState.error;
-          _errorMessage = reason == 'permission_denied'
-              ? 'Child device denied microphone permission.'
-              : reason == 'microphone_unavailable'
-                  ? 'Child device microphone is currently in use or unavailable.'
-                  : 'Child device declined the ambient audio stream.';
-        });
+      if (reason == 'permission_denied') {
+        _connectionWatchdog?.cancel();
+        if (mounted) {
+          setState(() {
+            _state = _AudioViewState.error;
+            _errorMessage = 'Child device denied microphone permission.';
+          });
+        }
+      } else {
+        _scheduleRetry(
+          reason == 'microphone_unavailable'
+              ? 'Child device microphone is currently in use or unavailable.'
+              : 'Child device declined the ambient audio stream.',
+        );
       }
     });
 
-    _socketService.onAudioStreamStarted((_) {
+    _socketService.onAudioStreamStarted((data) {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != null && incomingSid != _sessionId) return;
+      _connectionWatchdog?.cancel();
+      _retryCount = 0;
       if (mounted) {
         setState(() {
           _state = _AudioViewState.live;
@@ -97,35 +115,110 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
       }
     });
 
-    _socketService.onAudioStreamStopped((_) => _teardown(notifyBackend: false));
+    _socketService.onAudioStreamStopped((data) {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != null && incomingSid != _sessionId) return;
+      if (_isUserStopped) {
+        _teardown(notifyBackend: false);
+      } else {
+        _scheduleRetry('Ambient audio stream interrupted on child device.');
+      }
+    });
     _socketService.onWebrtcOffer(_onOffer);
     _socketService.onIceCandidate(_onRemoteIceCandidate);
 
+    await _startAttempt();
+  }
+
+  Future<void> _startAttempt() async {
+    if (!mounted || _isUserStopped) return;
+
+    _connectionWatchdog?.cancel();
+    _remoteDescriptionSet = false;
+    _pendingIceCandidates.clear();
+
+    try {
+      await _pc?.close();
+    } catch (_) {}
+    _pc = null;
+
+    if (mounted) {
+      setState(() {
+        _state = _AudioViewState.connecting;
+        _errorMessage = null;
+      });
+    }
+
     await _setupPeerConnection();
+
+    // Start 12-second watchdog timer for audio connection
+    _connectionWatchdog = Timer(const Duration(seconds: 12), () {
+      if (mounted && _state != _AudioViewState.live && !_isUserStopped) {
+        debugPrint('Audio connection watchdog timed out (attempt ${_retryCount + 1})');
+        _scheduleRetry('Connection timed out while waiting for child microphone.');
+      }
+    });
 
     try {
       final res = await ApiService.instance.requestAudioStream(widget.childId);
       _sessionId = res['sessionId'] as String;
       _socketService.joinSession(_sessionId!);
-      if (mounted) {
+      if (mounted && _state != _AudioViewState.live) {
         setState(() {
           _state = _AudioViewState.waitingForChild;
         });
       }
     } catch (e) {
+      final msg = e.toString().contains('offline')
+          ? '${widget.childName}\'s device is currently offline.'
+          : 'Failed to start sound monitoring: $e';
+      _scheduleRetry(msg);
+    }
+  }
+
+  void _scheduleRetry(String errorReason) {
+    if (!mounted || _isUserStopped || _isRetrying) return;
+    _connectionWatchdog?.cancel();
+    _durationTimer?.cancel();
+
+    if (_retryCount < _maxRetries - 1) {
+      _isRetrying = true;
+      _retryCount++;
+      debugPrint('Retrying audio stream (attempt ${_retryCount + 1} of $_maxRetries)... Reason: $errorReason');
+
+      if (_sessionId != null) {
+        final oldSid = _sessionId!;
+        _sessionId = null;
+        ApiService.instance.stopAudioStream(oldSid).catchError((_) {});
+      }
+
+      if (mounted) {
+        setState(() {
+          _state = _AudioViewState.connecting;
+          _errorMessage = null;
+        });
+      }
+
+      _retryTimer?.cancel();
+      _retryTimer = Timer(const Duration(milliseconds: 1800), () {
+        _isRetrying = false;
+        if (mounted && !_isUserStopped) {
+          _startAttempt();
+        }
+      });
+    } else {
+      _isRetrying = false;
       if (mounted) {
         setState(() {
           _state = _AudioViewState.error;
-          _errorMessage = e.toString().contains('offline')
-              ? '${widget.childName}\'s device is currently offline.'
-              : 'Failed to start sound monitoring: $e';
+          _errorMessage = errorReason;
         });
       }
     }
   }
 
   void _startTimer() {
-    _durationTimer?.cancel();
+    if (_durationTimer?.isActive == true) return;
     _secondsElapsed = 0;
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
@@ -168,7 +261,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     ];
 
     try {
-      final iceServersRaw = await ApiService.instance.getIceServers();
+      final iceServersRaw = await ApiService.instance
+          .getIceServers()
+          .timeout(const Duration(seconds: 2));
       if (iceServersRaw.isNotEmpty) {
         final fetched = iceServersRaw
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -200,6 +295,7 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     pc.onTrack = (RTCTrackEvent event) {
       if (event.track.kind == 'audio') {
         _remoteAudioTrack = event.track;
+        _remoteAudioTrack?.enabled = !_isMuted;
         if (event.streams.isNotEmpty) {
           final stream = event.streams.first;
           _audioRenderer.srcObject = stream;
@@ -213,6 +309,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
           Helper.setSpeakerphoneOn(_isSpeakerOn);
         } catch (_) {}
 
+        _connectionWatchdog?.cancel();
+        _retryCount = 0;
+
         if (mounted) {
           setState(() {
             _state = _AudioViewState.live;
@@ -224,20 +323,25 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
 
     pc.onConnectionState = (state) {
       debugPrint('WebRTC Connection state: $state');
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
-        if (mounted && _state == _AudioViewState.live) {
-          _teardown(notifyBackend: false);
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _connectionWatchdog?.cancel();
+        _retryCount = 0;
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        if (mounted && !_isUserStopped) {
+          _scheduleRetry('Audio WebRTC connection lost.');
         }
       }
     };
 
     pc.onIceConnectionState = (state) {
       debugPrint('WebRTC ICE Connection state: $state');
-      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
-          state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
-        if (mounted && _state == _AudioViewState.live) {
-          _teardown(notifyBackend: false);
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _connectionWatchdog?.cancel();
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        if (mounted && !_isUserStopped) {
+          _scheduleRetry('Audio ICE negotiation failed.');
         }
       }
     };
@@ -263,10 +367,14 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
       await _pc!.setRemoteDescription(offer);
       _remoteDescriptionSet = true;
 
-      for (final candidate in _pendingIceCandidates) {
-        await _pc!.addCandidate(candidate);
-      }
+      // Copy and clear list first to prevent ConcurrentModificationError
+      final pending = List<RTCIceCandidate>.from(_pendingIceCandidates);
       _pendingIceCandidates.clear();
+      for (final candidate in pending) {
+        try {
+          await _pc?.addCandidate(candidate);
+        } catch (_) {}
+      }
 
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
@@ -279,6 +387,7 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
       }
     } catch (e) {
       debugPrint('Error handling audio webrtc_offer: $e');
+      _scheduleRetry('Error negotiating audio stream.');
     }
   }
 
@@ -294,7 +403,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     );
 
     if (_pc != null && _remoteDescriptionSet) {
-      await _pc!.addCandidate(iceCandidate);
+      try {
+        await _pc!.addCandidate(iceCandidate);
+      } catch (_) {}
     } else {
       _pendingIceCandidates.add(iceCandidate);
     }
@@ -322,6 +433,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
   }
 
   Future<void> _stopStream() async {
+    _isUserStopped = true;
+    _connectionWatchdog?.cancel();
+    _retryTimer?.cancel();
     if (_sessionId != null) {
       try {
         await ApiService.instance.stopAudioStream(_sessionId!);
@@ -331,6 +445,8 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
   }
 
   Future<void> _teardown({required bool notifyBackend}) async {
+    _connectionWatchdog?.cancel();
+    _retryTimer?.cancel();
     _durationTimer?.cancel();
     if (mounted) {
       setState(() {
@@ -351,6 +467,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
 
   @override
   void dispose() {
+    _isUserStopped = true;
+    _connectionWatchdog?.cancel();
+    _retryTimer?.cancel();
     _durationTimer?.cancel();
     _animController.dispose();
     _pendingIceCandidates.clear();
@@ -362,6 +481,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
       _pc?.close();
     } catch (_) {}
     _pc = null;
+    try {
+      _socketService.disconnect();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -459,12 +581,16 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
       case _AudioViewState.connecting:
         bg = Colors.amber.withOpacity(0.15);
         dotColor = Colors.amber;
-        label = 'CONNECTING...';
+        label = _retryCount > 0
+            ? 'RECONNECTING (${_retryCount + 1}/$_maxRetries)...'
+            : 'CONNECTING...';
         break;
       case _AudioViewState.waitingForChild:
         bg = Colors.blue.withOpacity(0.15);
         dotColor = Colors.lightBlueAccent;
-        label = 'WAITING FOR CHILD DEVICE';
+        label = _retryCount > 0
+            ? 'RETRYING (${_retryCount + 1}/$_maxRetries)...'
+            : 'WAITING FOR CHILD DEVICE';
         break;
       case _AudioViewState.live:
         if (_isMuted) {
@@ -720,11 +846,9 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
               onPressed: () {
-                setState(() {
-                  _state = _AudioViewState.connecting;
-                  _errorMessage = null;
-                });
-                _start();
+                _retryCount = 0;
+                _isRetrying = false;
+                _startAttempt();
               },
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),

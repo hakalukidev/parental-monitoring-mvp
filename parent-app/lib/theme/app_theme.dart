@@ -40,6 +40,11 @@ class AppTheme {
           fontWeight: FontWeight.w600,
         ),
       ),
+      tabBarTheme: TabBarThemeData(
+        labelColor: colors.primaryForeground,
+        unselectedLabelColor: colors.primaryForeground.withValues(alpha: 0.7),
+        indicatorColor: colors.primaryForeground,
+      ),
       cardTheme: CardThemeData(
         color: colors.card,
         elevation: 0,

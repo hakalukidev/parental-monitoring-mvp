@@ -5,6 +5,7 @@ import '../models/geofence.dart';
 import '../models/geofence_event.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
+import '../theme/app_colors.dart';
 import 'edit_geofence_screen.dart';
 import 'location_tracking_screen.dart';
 
@@ -139,6 +140,17 @@ class _GeofencesScreenState extends State<GeofencesScreen> with SingleTickerProv
         title: Text('${widget.childName}\'s Safe Boundaries'),
         bottom: TabBar(
           controller: _tabController,
+          indicator: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          indicatorSize: TabBarIndicatorSize.tab,
+          indicatorPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          dividerColor: Colors.transparent,
+          labelColor: AppColors.primary,
+          unselectedLabelColor: Colors.white.withValues(alpha: 0.75),
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
           tabs: [
             const Tab(
               icon: Icon(Icons.shield_outlined),

@@ -23,10 +23,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.childapp.socket.SocketManager
 import com.example.childapp.ui.theme.ChildAppTheme
+import kotlinx.coroutines.delay
 
 class BlockedAppActivity : ComponentActivity() {
 
@@ -63,7 +65,7 @@ class BlockedAppActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    StealthLoadingScreen(
+                    BlockedAppScreen(
                         appName = resolvedAppName,
                         packageName = packageName,
                         iconBitmap = appIconBitmap,
@@ -109,7 +111,7 @@ class BlockedAppActivity : ComponentActivity() {
 }
 
 @Composable
-fun StealthLoadingScreen(
+fun BlockedAppScreen(
     appName: String,
     packageName: String,
     iconBitmap: ImageBitmap?,
@@ -136,6 +138,16 @@ fun StealthLoadingScreen(
         }
     }
 
+    // Realistic animated loading dots
+    var dotCount by remember { mutableStateOf(1) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500L)
+            dotCount = (dotCount % 3) + 1
+        }
+    }
+    val animatedDots = ".".repeat(dotCount)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -152,8 +164,8 @@ fun StealthLoadingScreen(
                     bitmap = iconBitmap,
                     contentDescription = appName,
                     modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(18.dp))
+                        .size(88.dp)
+                        .clip(RoundedCornerShape(20.dp))
                 )
                 Spacer(Modifier.height(20.dp))
             }
@@ -161,25 +173,26 @@ fun StealthLoadingScreen(
             Text(
                 text = appName,
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
 
             Spacer(Modifier.height(36.dp))
 
             CircularProgressIndicator(
-                modifier = Modifier.size(42.dp),
-                strokeWidth = 3.5.dp,
-                color = MaterialTheme.colorScheme.primary
+                modifier = Modifier.size(44.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.5.dp
             )
 
             Spacer(Modifier.height(20.dp))
 
             Text(
-                text = "Connecting...",
+                text = "Connecting$animatedDots",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                fontSize = 14.sp
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
             )
         }
     }

@@ -19,7 +19,6 @@ class AppBlockerScreen extends StatefulWidget {
 
 class _AppBlockerScreenState extends State<AppBlockerScreen> {
   List<InstalledAppInfo> _apps = [];
-  bool _isPaused = false;
   bool _loading = true;
   String? _error;
   String _searchQuery = '';
@@ -40,60 +39,14 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
     try {
       final res = await ApiService.instance.listChildApps(widget.childId);
       final rawApps = (res['apps'] as List<dynamic>?) ?? [];
-      final isPaused = res['isPaused'] as bool? ?? false;
 
       setState(() {
         _apps = rawApps.map((e) => InstalledAppInfo.fromJson(e as Map<String, dynamic>)).toList();
-        _isPaused = isPaused;
       });
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _togglePause(bool value) async {
-    final prev = _isPaused;
-    setState(() => _isPaused = value);
-    try {
-      await ApiService.instance.toggleDevicePause(widget.childId, value);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(value
-                ? 'Device paused! All non-essential apps are locked.'
-                : 'Device unpaused. Regular rules restored.'),
-            backgroundColor: value ? Colors.orange.shade800 : Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() => _isPaused = prev);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update pause state: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  Future<void> _bulkUpdate(String category, String status, {int? limit}) async {
-    try {
-      await ApiService.instance.bulkUpdatePolicy(
-        widget.childId,
-        category: category,
-        status: status,
-        dailyLimitMinutes: limit,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bulk updated $category apps to $status')),
-      );
-      _loadData();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bulk update failed: $e'), backgroundColor: Colors.red),
-      );
     }
   }
 
@@ -170,13 +123,17 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
               final idx = _apps.indexWhere((a) => a.packageName == app.packageName);
               if (idx != -1) _apps[idx] = updated;
             });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Updated rules for ${app.appName}')),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Updated rules for ${app.appName}')),
+              );
+            }
           } catch (e) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
+              );
+            }
           }
         },
       ),
@@ -220,58 +177,6 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (val) {
-              if (val == 'BLOCK_GAMES') _bulkUpdate('GAME', 'BLOCKED');
-              if (val == 'ALLOW_GAMES') _bulkUpdate('GAME', 'ALWAYS_ALLOWED');
-              if (val == 'BLOCK_SOCIAL') _bulkUpdate('SOCIAL', 'BLOCKED');
-              if (val == 'ALLOW_SOCIAL') _bulkUpdate('SOCIAL', 'ALWAYS_ALLOWED');
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: 'BLOCK_GAMES',
-                child: Row(
-                  children: [
-                    Icon(Icons.sports_esports, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Block All Games'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'ALLOW_GAMES',
-                child: Row(
-                  children: [
-                    Icon(Icons.sports_esports, color: Colors.green),
-                    SizedBox(width: 8),
-                    Text('Allow All Games'),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'BLOCK_SOCIAL',
-                child: Row(
-                  children: [
-                    Icon(Icons.people, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Block All Social Media'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'ALLOW_SOCIAL',
-                child: Row(
-                  children: [
-                    Icon(Icons.people, color: Colors.green),
-                    SizedBox(width: 8),
-                    Text('Allow All Social Media'),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ],
       ),
       body: _loading
@@ -291,60 +196,9 @@ class _AppBlockerScreenState extends State<AppBlockerScreen> {
                   onRefresh: _loadData,
                   child: Column(
                     children: [
-                      // Instant Lockdown Switch Banner
-                      Container(
-                        margin: const EdgeInsets.all(12),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: _isPaused ? Colors.red.shade50 : Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _isPaused ? Colors.red.shade300 : Colors.blue.shade200,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              _isPaused ? Icons.pause_circle_filled : Icons.shield,
-                              color: _isPaused ? Colors.red : Colors.blue,
-                              size: 32,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _isPaused ? 'Device Is Paused' : 'Instant Device Pause',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: _isPaused ? Colors.red.shade900 : Colors.blue.shade900,
-                                    ),
-                                  ),
-                                  Text(
-                                    _isPaused
-                                        ? 'All 3rd-party apps locked'
-                                        : 'Freeze non-essential apps instantly',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: _isPaused ? Colors.red.shade700 : Colors.blue.shade700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Switch(
-                              value: _isPaused,
-                              activeColor: Colors.red,
-                              onChanged: _togglePause,
-                            ),
-                          ],
-                        ),
-                      ),
-
                       // Search Bar
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                         child: TextField(
                           decoration: InputDecoration(
                             hintText: 'Search installed apps...',

@@ -423,7 +423,7 @@ class _BrowsingHistoryScreenState extends State<BrowsingHistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("${widget.childName}'s Browsing"),
+        title: Text("${widget.childName}'s Browsing History"),
         actions: [
           IconButton(
             icon: const Icon(Icons.calendar_month),

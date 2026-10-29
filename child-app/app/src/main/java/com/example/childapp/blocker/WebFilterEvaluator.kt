@@ -65,7 +65,7 @@ object WebFilterEvaluator {
                     isBlocked = true,
                     matchedRule = rule,
                     category = cat,
-                    reason = "Access to '${rule.target}' has been blocked by your parent."
+                    reason = "This website is unaccessible"
                 )
             }
         }
@@ -88,12 +88,39 @@ object WebFilterEvaluator {
 
         when (rule.ruleType) {
             "DOMAIN" -> {
-                val cleanTarget = target.removePrefix("*.").removePrefix("*").removeSuffix("*").trim()
+                val cleanTarget = target
+                    .removePrefix("https://")
+                    .removePrefix("http://")
+                    .removePrefix("www.")
+                    .removePrefix("*.")
+                    .removePrefix("*")
+                    .removeSuffix("*")
+                    .trim()
                 if (cleanTarget.isBlank()) return false
-                return lowerDomain == cleanTarget ||
-                        lowerDomain.endsWith(".$cleanTarget") ||
-                        lowerRaw == cleanTarget ||
-                        lowerRaw.startsWith("$cleanTarget/")
+
+                val targetHost = if (cleanTarget.contains("/")) cleanTarget.substringBefore("/") else cleanTarget
+                val cleanDomain = lowerDomain.removePrefix("www.").trim()
+
+                if (targetHost.isNotBlank()) {
+                    val domainMatches = cleanDomain == targetHost ||
+                            cleanDomain.endsWith(".$targetHost") ||
+                            lowerDomain == targetHost ||
+                            lowerDomain.endsWith(".$targetHost")
+
+                    if (domainMatches) return true
+                }
+
+                // If target specified a specific subpath/subpage, check lowerUrl or lowerRaw
+                if (cleanTarget.contains("/")) {
+                    if (lowerUrl.contains(cleanTarget) || lowerRaw.contains(cleanTarget)) {
+                        return true
+                    }
+                }
+
+                return lowerRaw == targetHost ||
+                        lowerRaw.startsWith("$targetHost/") ||
+                        lowerUrl.contains("://$targetHost") ||
+                        lowerUrl.contains(".$targetHost")
             }
             "KEYWORD" -> {
                 val cleanKeyword = target.removePrefix("*").removeSuffix("*").trim()

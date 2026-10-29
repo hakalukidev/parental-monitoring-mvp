@@ -11,7 +11,9 @@ import {
   safetyAlertQuerySchema,
 } from "../utils/validation";
 import { getIO } from "../socket/io";
-import { getParentSocketIds } from "../socket/presence";
+import { getParentSocketIds, getChildSocketIds } from "../socket/presence";
+import { AppPolicy } from "../models/AppPolicy";
+import { InstalledApp } from "../models/InstalledApp";
 
 // POST /api/children/:childId/safety-alerts/batch (child only)
 export const recordSafetyAlertsBatch = asyncHandler(async (req: AuthedRequest, res: Response) => {
@@ -55,6 +57,54 @@ export const recordSafetyAlertsBatch = asyncHandler(async (req: AuthedRequest, r
   }));
 
   const bulkRes = await SafetyAlert.bulkWrite(bulkOps as any);
+
+  // Automatically enforce AppPolicy status = BLOCKED for offending applications
+  for (const alert of alerts) {
+    if (
+      alert.packageName &&
+      alert.packageName !== "com.android.providers.media" &&
+      !alert.packageName.startsWith("com.android.systemui") &&
+      !alert.packageName.includes("launcher") &&
+      alert.packageName !== "android"
+    ) {
+      try {
+        const policy = await AppPolicy.findOneAndUpdate(
+          { childId: childObjectId, packageName: alert.packageName },
+          {
+            $set: {
+              status: "BLOCKED",
+              appName: alert.appName || alert.packageName,
+            },
+          },
+          { upsert: true, new: true }
+        );
+
+        await InstalledApp.updateOne(
+          { childId: childObjectId, packageName: alert.packageName },
+          {
+            $setOnInsert: {
+              appName: alert.appName || alert.packageName,
+              category: "OTHER",
+              syncedAt: new Date(),
+            },
+          },
+          { upsert: true }
+        ).catch(() => {});
+
+        // Broadcast policy_updated event to child socket
+        const io = getIO();
+        for (const cSocketId of getChildSocketIds(childId)) {
+          io.to(cSocketId).emit("policy_updated", {
+            type: "APP_POLICY",
+            packageName: alert.packageName,
+            policy,
+          });
+        }
+      } catch (err) {
+        console.error("Error auto-blocking offending app on safety alert:", err);
+      }
+    }
+  }
 
   // Broadcast real-time urgent safety alerts to active parent sockets
   if (bulkRes.upsertedCount > 0) {

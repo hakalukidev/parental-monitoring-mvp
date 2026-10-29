@@ -8,18 +8,9 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/notification_service.dart';
 import 'create_child_screen.dart';
-import 'screen_share_screen.dart';
-import 'camera_stream_screen.dart';
+import 'child_detail_screen.dart';
 import 'location_tracking_screen.dart';
-import 'app_blocker_screen.dart';
-import 'web_filter_screen.dart';
-import 'browsing_history_screen.dart';
-import 'geofences_screen.dart';
-import 'app_usage_report_screen.dart';
-import 'communication_monitoring_screen.dart';
 import 'safety_alerts_screen.dart';
-import 'notification_monitoring_screen.dart';
-import 'sound_around_screen.dart';
 import 'login_screen.dart';
 import '../theme/app_colors.dart';
 
@@ -596,8 +587,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      Text('My Children', style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 12),
+                      Text(
+                        'My Children',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.foreground,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
                       if (_children.isEmpty)
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 24),
@@ -607,6 +605,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                         _ChildCard(
                           child: child,
                           socketService: _socketService,
+                          onRefresh: _silentSync,
                         ),
                     ],
                   ),
@@ -628,10 +627,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 class _ChildCard extends StatelessWidget {
   final Child child;
   final SocketService? socketService;
+  final VoidCallback? onRefresh;
 
-  const _ChildCard({required this.child, this.socketService});
+  const _ChildCard({
+    required this.child,
+    this.socketService,
+    this.onRefresh,
+  });
 
-  String _formatRelativeLastSeen(DateTime dt) {
+  String _formatRelativeLastSeen(DateTime? dt) {
+    if (dt == null) return 'Offline';
     final diff = DateTime.now().difference(dt.toLocal());
     if (diff.inSeconds < 45) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
@@ -642,347 +647,163 @@ class _ChildCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final online = child.isOnline;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ChildDetailScreen(
+                  initialChild: child,
+                  socketService: socketService,
+                ),
+              ),
+            );
+            onRefresh?.call();
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
               children: [
+                // Avatar
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.iconBgPurple,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.face_rounded,
+                      size: 38,
+                      color: AppColors.iconPurple,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Child Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(child.name, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 2),
-                      Text('@${child.username}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600)),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: online ? Colors.green.shade50 : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: online ? Colors.green.shade300 : Colors.grey.shade300,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: online ? Colors.green.shade600 : Colors.grey.shade500,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
                       Text(
-                        online ? 'ONLINE' : 'OFFLINE',
+                        child.name,
                         style: TextStyle(
-                          fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: online ? Colors.green.shade800 : Colors.grey.shade700,
+                          fontSize: 18,
+                          color: AppColors.foreground,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (child.device != null) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Icon(Icons.smartphone, size: 14, color: Colors.grey.shade600),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${child.device!.deviceName} (${child.device!.platform})',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                  ),
-                  const Spacer(),
-                  Icon(Icons.access_time, size: 14, color: Colors.grey.shade500),
-                  const SizedBox(width: 4),
-                  Text(
-                    online ? 'Active now' : _formatRelativeLastSeen(child.device!.lastSeen),
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-                ],
-              ),
-            ],
-
-            const Divider(height: 20),
-
-            // Live Supervision Features
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => LocationTrackingScreen(
-                          childId: child.id,
-                          childName: child.name,
-                        ),
-                      ),
-                    ),
-                    icon: const Icon(Icons.location_on, size: 18),
-                    label: const Text('Live Location'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.accent.withValues(alpha: 0.15),
-                      foregroundColor: AppColors.primary,
-                    ),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => GeofencesScreen(
-                          childId: child.id,
-                          childName: child.name,
-                          socketService: socketService,
-                        ),
-                      ),
-                    ),
-                    icon: const Icon(Icons.shield_outlined, size: 18),
-                    label: const Text('Safe Zones'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: online
-                        ? () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => ScreenShareScreen(
-                                  childId: child.id,
-                                  childName: child.name,
-                                ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.phone_android_rounded,
+                            size: 14,
+                            color: AppColors.mutedForeground,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              '${child.device?.deviceName ?? 'Android Device'}\n(${child.device?.platform ?? 'Android'})',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: AppColors.foreground.withValues(alpha: 0.7),
+                                height: 1.2,
                               ),
-                            )
-                        : null,
-                    icon: const Icon(Icons.screen_share),
-                    label: const Text('Live Screen'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: online
-                        ? () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => CameraStreamScreen(
-                                  childId: child.id,
-                                  childName: child.name,
-                                ),
-                              ),
-                            )
-                        : null,
-                    icon: const Icon(Icons.videocam),
-                    label: const Text('Live Camera'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: online ? AppColors.accent.withValues(alpha: 0.2) : null,
-                  foregroundColor: online ? AppColors.primary : null,
-                ),
-                onPressed: online
-                    ? () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => SoundAroundScreen(
-                              childId: child.id,
-                              childName: child.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        )
-                    : null,
-                icon: const Icon(Icons.mic, size: 20),
-                label: const Text('Sound Around Child (Live Audio)'),
-              ),
-            ),
-
-            const Divider(height: 20),
-
-            // Requirement 3 & 4: Blocker & Web Filtering & Browsing History & Usage Reports
-            Text('Digital Wellbeing & Safety', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-
-            // Usage & Downtime Report Button
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: AppColors.primaryForeground,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => AppUsageReportScreen(
-                      childId: child.id,
-                      childName: child.name,
-                      socketService: socketService,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.analytics_outlined, size: 18),
-                label: const Text('App Usage & Downtime Report (Today)'),
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.card,
-                      foregroundColor: AppColors.primary,
-                    ),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => AppBlockerScreen(
-                          childId: child.id,
-                          childName: child.name,
-                        ),
+                        ],
                       ),
-                    ),
-                    icon: const Icon(Icons.block, size: 18),
-                    label: const Text('App Blocker'),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.accent.withValues(alpha: 0.2),
-                      foregroundColor: AppColors.primary,
-                    ),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => WebFilterScreen(
-                          childId: child.id,
-                          childName: child.name,
-                        ),
+                // Status Badge & Last Seen
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: online ? AppColors.statusOnlineBg : AppColors.statusOfflineBg,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: online ? AppColors.statusOnline : AppColors.statusOffline,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            online ? 'Online' : 'Offline',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: online ? AppColors.statusOnline : AppColors.statusOffline,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    icon: const Icon(Icons.language, size: 18),
-                    label: const Text('Web Filter'),
-                  ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          online ? Icons.wifi_rounded : Icons.access_time_rounded,
+                          size: 13,
+                          color: AppColors.mutedForeground,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          online ? 'Active now' : _formatRelativeLastSeen(child.device?.lastSeen),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.mutedForeground,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => BrowsingHistoryScreen(
-                      childId: child.id,
-                      childName: child.name,
-                      socketService: socketService,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.history),
-                label: const Text('Browsing History & Activity'),
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            // Requirement: Calls & SMS Activity Monitoring
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.card,
-                  foregroundColor: AppColors.primary,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => CommunicationMonitoringScreen(
-                      childId: child.id,
-                      childName: child.name,
-                      socketService: socketService,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.phone_in_talk_outlined, size: 18),
-                label: const Text('Calls & Messages Monitoring'),
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            // Inappropriate Content & Safety Alerts
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.destructive.withValues(alpha: 0.12),
-                  foregroundColor: AppColors.destructive,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => SafetyAlertsScreen(
-                      childId: child.id,
-                      childName: child.name,
-                      socketService: socketService,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.warning_amber_rounded, size: 18),
-                label: const Text('Content & Safety Alerts'),
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            // Child App Notifications Monitoring
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.card,
-                  foregroundColor: AppColors.primary,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => NotificationMonitoringScreen(
-                      childId: child.id,
-                      childName: child.name,
-                      socketService: socketService,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.notifications_active_outlined, size: 18),
-                label: const Text('App Notifications Supervision'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
-
     );
   }
 }

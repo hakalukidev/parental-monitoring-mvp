@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../services/api_service.dart';
@@ -5,7 +6,7 @@ import '../services/socket_service.dart';
 
 enum _CameraViewState { waiting, rejected, offline, live, ended, error }
 
-/// Parent-side live camera stream viewer.
+/// Parent-side live camera stream viewer with resilient auto-retry (up to 5 attempts).
 /// Flow: POST /api/camera-stream/request -> wait for child's `camera_stream_accept`
 /// over socket -> child sends `webrtc_offer` -> parent answers -> ICE exchange ->
 /// remote video + audio tracks render here.
@@ -28,6 +29,8 @@ class CameraStreamScreen extends StatefulWidget {
 }
 
 class _CameraStreamScreenState extends State<CameraStreamScreen> {
+  static const int _maxRetries = 5;
+
   final SocketService _socketService = SocketService();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _pc;
@@ -38,19 +41,27 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   bool _isStreamReady = false;
   bool _isRendererInitialized = false;
   bool _isMuted = false;
+  bool _isUserStopped = false;
+  bool _isRetrying = false;
+  int _retryCount = 0;
+  Timer? _connectionWatchdog;
+  Timer? _retryTimer;
   late String _currentFacing;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
+  MediaStreamTrack? _remoteAudioTrack;
 
   @override
   void initState() {
     super.initState();
     _currentFacing = widget.initialFacing;
-    _start();
+    _initAndStart();
   }
 
-  Future<void> _start() async {
-    await _remoteRenderer.initialize();
-    _isRendererInitialized = true;
+  Future<void> _initAndStart() async {
+    try {
+      await _remoteRenderer.initialize();
+      _isRendererInitialized = true;
+    } catch (_) {}
 
     final token = await ApiService.instance.accessToken;
     if (token == null) {
@@ -66,42 +77,128 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     _socketService.connect(token);
     _socketService.onCameraStreamAccept(_onAccept);
     _socketService.onCameraStreamReject((data) {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != null && incomingSid != _sessionId) return;
       final reason = data['reason']?.toString();
-      if (mounted) {
-        setState(() {
-          _state = _CameraViewState.rejected;
-          _errorMessage = reason == 'permission_denied'
-              ? 'Child device denied camera permission.'
-              : reason == 'camera_unavailable'
-                  ? 'Child device camera is unavailable or in use by another app.'
-                  : 'Child device rejected the camera stream request.';
-        });
+      if (reason == 'permission_denied') {
+        _connectionWatchdog?.cancel();
+        if (mounted) {
+          setState(() {
+            _state = _CameraViewState.rejected;
+            _errorMessage = 'Child device denied camera permission.';
+          });
+        }
+      } else {
+        _scheduleRetry(
+          reason == 'camera_unavailable'
+              ? 'Child device camera is busy or unavailable.'
+              : 'Child device rejected the camera stream request.',
+        );
       }
     });
-    _socketService.onCameraStreamStarted((_) {
+    _socketService.onCameraStreamStarted((data) {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != null && incomingSid != _sessionId) return;
       if (mounted && _isStreamReady) setState(() => _state = _CameraViewState.live);
     });
-    _socketService.onCameraStreamStopped((_) => _teardown(notifyBackend: false));
+    _socketService.onCameraStreamStopped((data) {
+      final incomingSid = data['sessionId']?.toString();
+      if (_sessionId != null && incomingSid != null && incomingSid != _sessionId) return;
+      if (_isUserStopped) {
+        _teardown(notifyBackend: false);
+      } else {
+        _scheduleRetry('Camera stream interrupted on child device.');
+      }
+    });
     _socketService.onWebrtcOffer(_onOffer);
     _socketService.onIceCandidate(_onRemoteIceCandidate);
 
+    await _startAttempt();
+  }
+
+  Future<void> _startAttempt() async {
+    if (!mounted || _isUserStopped) return;
+
+    _connectionWatchdog?.cancel();
+    _remoteDescriptionSet = false;
+    _isStreamReady = false;
+    _pendingIceCandidates.clear();
+
+    try {
+      await _pc?.close();
+    } catch (_) {}
+    _pc = null;
+
+    if (mounted) {
+      setState(() {
+        _state = _CameraViewState.waiting;
+        _errorMessage = null;
+      });
+    }
+
     await _setupPeerConnection();
+
+    // Start watchdog: if stream doesn't become live within 12 seconds, retry automatically
+    _connectionWatchdog = Timer(const Duration(seconds: 12), () {
+      if (mounted && _state != _CameraViewState.live && !_isUserStopped) {
+        debugPrint('Camera connection watchdog timed out (attempt ${_retryCount + 1})');
+        _scheduleRetry('Connection timed out while waiting for camera video.');
+      }
+    });
 
     try {
       final res = await ApiService.instance.requestCameraStream(
         widget.childId,
-        cameraFacing: widget.initialFacing,
+        cameraFacing: _currentFacing,
         withAudio: widget.withAudio,
       );
       _sessionId = res['sessionId'] as String;
       _socketService.joinSession(_sessionId!);
     } catch (e) {
+      final isOffline = e.toString().toLowerCase().contains('offline');
+      _scheduleRetry(
+        e.toString(),
+        isOffline: isOffline,
+      );
+    }
+  }
+
+  void _scheduleRetry(String errorReason, {bool isOffline = false}) {
+    if (!mounted || _isUserStopped || _isRetrying) return;
+    _connectionWatchdog?.cancel();
+
+    if (_retryCount < _maxRetries - 1) {
+      _isRetrying = true;
+      _retryCount++;
+      debugPrint('Retrying camera stream (attempt ${_retryCount + 1} of $_maxRetries)... Reason: $errorReason');
+
+      if (_sessionId != null) {
+        final oldSid = _sessionId!;
+        _sessionId = null;
+        ApiService.instance.stopCameraStream(oldSid).catchError((_) {});
+      }
+
       if (mounted) {
         setState(() {
-          _state = e.toString().contains('offline')
-              ? _CameraViewState.offline
-              : _CameraViewState.error;
-          _errorMessage = e.toString();
+          _state = _CameraViewState.waiting;
+          _errorMessage = null;
+        });
+      }
+
+      _retryTimer?.cancel();
+      _retryTimer = Timer(const Duration(milliseconds: 1800), () {
+        _isRetrying = false;
+        if (mounted && !_isUserStopped) {
+          _startAttempt();
+        }
+      });
+    } else {
+      // Exhausted all 5 attempts
+      _isRetrying = false;
+      if (mounted) {
+        setState(() {
+          _state = isOffline ? _CameraViewState.offline : _CameraViewState.error;
+          _errorMessage = errorReason;
         });
       }
     }
@@ -140,7 +237,9 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       ...fallbackTurnServers,
     ];
     try {
-      final iceServersRaw = await ApiService.instance.getIceServers();
+      final iceServersRaw = await ApiService.instance
+          .getIceServers()
+          .timeout(const Duration(seconds: 2));
       if (iceServersRaw.isNotEmpty) {
         final fetched = iceServersRaw
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -161,6 +260,19 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     });
     _pc = pc;
 
+    try {
+      await pc.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+      if (widget.withAudio) {
+        await pc.addTransceiver(
+          kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+          init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+        );
+      }
+    } catch (_) {}
+
     pc.onTrack = (RTCTrackEvent event) {
       if (event.track.kind == 'video') {
         if (event.streams.isNotEmpty) {
@@ -174,6 +286,8 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
             _remoteRenderer.srcObject = stream;
           });
         }
+        _connectionWatchdog?.cancel();
+        _retryCount = 0; // Reset retry counter on successful live stream!
         if (mounted) {
           setState(() {
             _isStreamReady = true;
@@ -181,28 +295,35 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
           });
         }
       } else if (event.track.kind == 'audio') {
-        if (_remoteRenderer.srcObject != null) {
-          _remoteRenderer.srcObject!.addTrack(event.track);
-        }
+        _remoteAudioTrack = event.track;
+        _remoteAudioTrack?.enabled = !_isMuted;
+        try {
+          Helper.setSpeakerphoneOn(true);
+        } catch (_) {}
       }
     };
 
     pc.onConnectionState = (state) {
       debugPrint('WebRTC Connection state: $state');
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
-        if (mounted && _state == _CameraViewState.live) {
-          _teardown(notifyBackend: false);
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _connectionWatchdog?.cancel();
+        _retryCount = 0;
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        if (mounted && !_isUserStopped) {
+          _scheduleRetry('Camera WebRTC connection lost.');
         }
       }
     };
 
     pc.onIceConnectionState = (state) {
       debugPrint('WebRTC ICE Connection state: $state');
-      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
-          state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
-        if (mounted && _state == _CameraViewState.live) {
-          _teardown(notifyBackend: false);
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _connectionWatchdog?.cancel();
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        if (mounted && !_isUserStopped) {
+          _scheduleRetry('Camera ICE negotiation failed.');
         }
       }
     };
@@ -228,10 +349,14 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       await _pc!.setRemoteDescription(offer);
       _remoteDescriptionSet = true;
 
-      for (final candidate in _pendingIceCandidates) {
-        await _pc!.addCandidate(candidate);
-      }
+      // Copy and clear list first to prevent ConcurrentModificationError
+      final pending = List<RTCIceCandidate>.from(_pendingIceCandidates);
       _pendingIceCandidates.clear();
+      for (final candidate in pending) {
+        try {
+          await _pc?.addCandidate(candidate);
+        } catch (_) {}
+      }
 
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
@@ -244,6 +369,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       }
     } catch (e) {
       debugPrint('Error handling camera webrtc_offer: $e');
+      _scheduleRetry('Error negotiating video stream.');
     }
   }
 
@@ -259,7 +385,9 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     );
 
     if (_pc != null && _remoteDescriptionSet) {
-      await _pc!.addCandidate(iceCandidate);
+      try {
+        await _pc!.addCandidate(iceCandidate);
+      } catch (_) {}
     } else {
       _pendingIceCandidates.add(iceCandidate);
     }
@@ -284,6 +412,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     setState(() {
       _isMuted = !_isMuted;
     });
+    _remoteAudioTrack?.enabled = !_isMuted;
     if (_remoteRenderer.srcObject != null) {
       for (final track in _remoteRenderer.srcObject!.getAudioTracks()) {
         track.enabled = !_isMuted;
@@ -292,6 +421,9 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   }
 
   Future<void> _stopStream() async {
+    _isUserStopped = true;
+    _connectionWatchdog?.cancel();
+    _retryTimer?.cancel();
     if (_sessionId != null) {
       try {
         await ApiService.instance.stopCameraStream(_sessionId!);
@@ -301,6 +433,8 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   }
 
   Future<void> _teardown({required bool notifyBackend}) async {
+    _connectionWatchdog?.cancel();
+    _retryTimer?.cancel();
     if (mounted) {
       setState(() {
         _isStreamReady = false;
@@ -309,6 +443,7 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     }
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
+    _remoteAudioTrack = null;
     try {
       _remoteRenderer.srcObject = null;
     } catch (_) {}
@@ -320,9 +455,13 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
 
   @override
   void dispose() {
+    _isUserStopped = true;
+    _connectionWatchdog?.cancel();
+    _retryTimer?.cancel();
     _isStreamReady = false;
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
+    _remoteAudioTrack = null;
     try {
       _remoteRenderer.srcObject = null;
     } catch (_) {}
@@ -392,19 +531,24 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
   Widget _buildBody() {
     switch (_state) {
       case _CameraViewState.waiting:
-        return const Column(
+        return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 16),
+            const CircularProgressIndicator(color: Colors.white),
+            const SizedBox(height: 16),
             Text(
-              'Connecting to child camera...',
-              style: TextStyle(color: Colors.white),
+              _retryCount > 0
+                  ? 'Reconnecting to child camera (Attempt ${_retryCount + 1} of $_maxRetries)...'
+                  : 'Connecting to child camera...',
+              style: const TextStyle(color: Colors.white),
+              textAlign: TextAlign.center,
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
-              'Initializing stream on device.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              _retryCount > 0
+                  ? 'Recovering video stream automatically.'
+                  : 'Initializing stream on device.',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ],
         );
@@ -421,20 +565,40 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white, fontSize: 16),
               ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () {
+                  _retryCount = 0;
+                  _isRetrying = false;
+                  _startAttempt();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
+              ),
             ],
           ),
         );
       case _CameraViewState.offline:
-        return const Padding(
-          padding: EdgeInsets.all(24),
+        return Padding(
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.cloud_off, size: 64, color: Colors.grey),
-              SizedBox(height: 16),
-              Text(
+              const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
                 'Child device is currently offline.',
                 style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () {
+                  _retryCount = 0;
+                  _isRetrying = false;
+                  _startAttempt();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
               ),
             ],
           ),
@@ -451,6 +615,16 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
                 _errorMessage ?? 'Something went wrong.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () {
+                  _retryCount = 0;
+                  _isRetrying = false;
+                  _startAttempt();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
               ),
             ],
           ),

@@ -18,7 +18,8 @@ class CameraWebRtcManager(
     private val onLocalOffer: (sdp: JSONObject) -> Unit,
     private val onIceCandidate: (candidate: JSONObject) -> Unit,
     private val onStateChange: (PeerConnection.PeerConnectionState) -> Unit,
-    private val onError: ((String) -> Unit)? = null
+    private val onError: ((String) -> Unit)? = null,
+    private val onFirstFrame: (() -> Unit)? = null
 ) {
     private lateinit var factory: PeerConnectionFactory
     private var peerConnection: PeerConnection? = null
@@ -130,6 +131,9 @@ class CameraWebRtcManager(
                 capturer.startCapture(1280, 720, 30)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed startCapture at 1280x720, falling back to 640x480: ${e.message}")
+                try {
+                    Thread.sleep(300)
+                } catch (_: Exception) {}
                 capturer.startCapture(640, 480, 30)
             }
         } catch (e: Exception) {
@@ -233,6 +237,7 @@ class CameraWebRtcManager(
         }
         override fun onFirstFrameAvailable() {
             Log.d(TAG, "Camera first frame available")
+            onFirstFrame?.invoke()
         }
         override fun onCameraClosed() {
             Log.d(TAG, "Camera closed")

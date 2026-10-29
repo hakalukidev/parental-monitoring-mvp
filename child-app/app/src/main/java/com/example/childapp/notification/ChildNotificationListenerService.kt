@@ -32,6 +32,17 @@ class ChildNotificationListenerService : NotificationListenerService() {
             return enabledPackages.contains(context.packageName)
         }
 
+        fun ensureListenerBound(context: Context) {
+            if (!isRunning && isNotificationAccessGranted(context)) {
+                try {
+                    requestRebind(android.content.ComponentName(context, ChildNotificationListenerService::class.java))
+                    Log.i(TAG, "Requested rebind for ChildNotificationListenerService")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to requestRebind for ChildNotificationListenerService: ${e.message}")
+                }
+            }
+        }
+
         fun closeChromeIncognitoTabs(): Boolean {
             val service = instance ?: return false
             return try {
