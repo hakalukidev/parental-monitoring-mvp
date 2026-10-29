@@ -84,7 +84,7 @@ export const updateAppPolicySchema = z.object({
     .enum(["GAME", "SOCIAL", "ENTERTAINMENT", "EDUCATION", "PRODUCTIVITY", "OTHER"])
     .optional(),
   status: z.enum(["ALWAYS_ALLOWED", "BLOCKED", "TIME_LIMITED", "SCHEDULED"]),
-  dailyLimitMinutes: z.number().min(0).max(1440).optional(),
+  dailyLimitMinutes: z.number().min(0).max(1440).nullable().optional(),
   schedules: z
     .array(
       z.object({
@@ -100,7 +100,7 @@ export const updateAppPolicySchema = z.object({
 export const bulkUpdatePolicySchema = z.object({
   category: z.enum(["GAME", "SOCIAL", "ENTERTAINMENT", "EDUCATION", "PRODUCTIVITY", "OTHER"]),
   status: z.enum(["ALWAYS_ALLOWED", "BLOCKED", "TIME_LIMITED", "SCHEDULED"]),
-  dailyLimitMinutes: z.number().min(0).max(1440).optional(),
+  dailyLimitMinutes: z.number().min(0).max(1440).nullable().optional(),
 });
 
 export const toggleDevicePauseSchema = z.object({

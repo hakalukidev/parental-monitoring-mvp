@@ -25,10 +25,22 @@ export const createWebRule = asyncHandler(async (req: AuthedRequest, res: Respon
 
   const data = createWebRuleSchema.parse(req.body);
 
+  let target = data.target.toLowerCase().trim();
+  if (data.ruleType === "DOMAIN") {
+    target = target
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/^\*\./, "")
+      .replace(/^\*/, "")
+      .replace(/\*$/, "")
+      .split("/")[0]
+      .trim();
+  }
+
   const rule = await WebBlockRule.create({
     childId,
     ruleType: data.ruleType,
-    target: data.target.toLowerCase().trim(),
+    target,
     action: data.action,
     isEnabled: data.isEnabled,
   });

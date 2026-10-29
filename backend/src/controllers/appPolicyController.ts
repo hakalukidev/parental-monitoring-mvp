@@ -139,12 +139,17 @@ export const updateAppPolicy = asyncHandler(async (req: AuthedRequest, res: Resp
         ...(data.appName ? { appName: data.appName } : {}),
         ...(data.category ? { category: data.category } : {}),
         status: data.status,
-        dailyLimitMinutes: data.dailyLimitMinutes,
+        ...(data.dailyLimitMinutes != null
+          ? { dailyLimitMinutes: data.dailyLimitMinutes }
+          : {}),
         schedules: data.schedules ?? [],
         ...(data.isSystemWhitelisted !== undefined
           ? { isSystemWhitelisted: data.isSystemWhitelisted }
           : {}),
       },
+      ...(data.status !== "TIME_LIMITED" || data.dailyLimitMinutes == null
+        ? { $unset: { dailyLimitMinutes: 1 } }
+        : {}),
       $setOnInsert: {
         appName: data.appName || packageName,
         category: data.category || "OTHER",
