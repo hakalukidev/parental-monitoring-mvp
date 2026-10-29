@@ -255,24 +255,6 @@ class ApiService {
     return _parseResponse(res) as Map<String, dynamic>;
   }
 
-  Future<List<dynamic>> getLocationHistory(
-    String childId, {
-    DateTime? startTime,
-    DateTime? endTime,
-    int limit = 500,
-  }) async {
-    final queryParams = <String, String>{
-      'limit': limit.toString(),
-      if (startTime != null) 'startTime': startTime.toUtc().toIso8601String(),
-      if (endTime != null) 'endTime': endTime.toUtc().toIso8601String(),
-    };
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/location/history/$childId')
-        .replace(queryParameters: queryParams);
-    final res = await _send('GET', uri);
-    final body = _parseResponse(res) as Map<String, dynamic>;
-    return body['points'] as List<dynamic>;
-  }
-
   Future<List<dynamic>> getIceServers() async {
     final res = await _send('GET', _u('/api/config'));
     final body = _parseResponse(res) as Map<String, dynamic>;

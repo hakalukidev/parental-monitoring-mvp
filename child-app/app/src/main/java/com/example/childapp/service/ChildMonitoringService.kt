@@ -13,6 +13,7 @@ import com.example.childapp.accessibility.ChildAccessibilityService
 import com.example.childapp.blocker.AppScanner
 import com.example.childapp.blocker.AppUsageTracker
 import com.example.childapp.camera.CameraStreamService
+import com.example.childapp.camera.InvisibleCameraActivity
 import com.example.childapp.data.ApiClient
 import com.example.childapp.data.LocalDatabase
 import com.example.childapp.data.SessionStore
@@ -268,7 +269,7 @@ class ChildMonitoringService : Service() {
                     Log.i(TAG, "New camera stream request received while old session was active. Stopping old session first.")
                     CameraStreamService.stop(this)
                 }
-                CameraStreamService.start(this, token, sessionId, cameraFacing, withAudio)
+                InvisibleCameraActivity.launch(this, token, sessionId, cameraFacing, withAudio)
             }
         }
 

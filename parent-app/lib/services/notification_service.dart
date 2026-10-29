@@ -5,7 +5,7 @@ import 'package:latlong2/latlong.dart';
 import '../screens/location_tracking_screen.dart';
 
 /// Central Notification Service managing OS-level Heads-Up Notifications
-/// and Deep-Linking into History Trail Mode upon notification click.
+/// and Deep-Linking into child location tracking upon notification click.
 class NotificationService {
   NotificationService._internal();
   static final NotificationService instance = NotificationService._internal();
@@ -96,7 +96,6 @@ class NotificationService {
               builder: (_) => LocationTrackingScreen(
                 childId: childId,
                 childName: childName,
-                initialTrackingMode: MapTrackingMode.historyTrail,
                 focusTimestamp: timestamp,
                 focusLocation: focusLocation,
                 highlightGeofenceId: geofenceId,
@@ -138,7 +137,7 @@ class NotificationService {
             : (isExit ? '🛡️ Restricted Area Exited: $geofenceName' : '⚠️ Restricted Area Entered: $geofenceName'));
 
     final actionText = isExit ? 'left' : 'entered';
-    final notifBody = body ?? '$childName $actionText $geofenceName. Tap to view route trail.';
+    final notifBody = body ?? '$childName $actionText $geofenceName. Tap to view location.';
 
     final payload = jsonEncode({
       'type': 'GEOFENCE_ALERT',

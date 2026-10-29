@@ -11,25 +11,10 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/routing_service.dart';
-import 'geofences_screen.dart';
-
-enum MapTrackingMode {
-  directionsToChild,
-  historyTrail,
-}
-
-enum RouteTimeFilter {
-  liveOnly,
-  today,
-  past24Hours,
-  past7Days,
-  custom,
-}
 
 class LocationTrackingScreen extends StatefulWidget {
   final String childId;
   final String childName;
-  final MapTrackingMode initialTrackingMode;
   final DateTime? focusTimestamp;
   final LatLng? focusLocation;
   final String? highlightGeofenceId;
@@ -39,7 +24,6 @@ class LocationTrackingScreen extends StatefulWidget {
     super.key,
     required this.childId,
     required this.childName,
-    this.initialTrackingMode = MapTrackingMode.directionsToChild,
     this.focusTimestamp,
     this.focusLocation,
     this.highlightGeofenceId,
@@ -56,20 +40,18 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   final GeocodingService _geocodingService = GeocodingService();
   final RoutingService _routingService = RoutingService();
 
-  late MapTrackingMode _trackingMode;
   bool _isSatelliteView = false;
   bool _breachBannerDismissed = false;
   bool _hasInitialCenteredOnBreach = false;
 
   LocationPoint? _latestLocation;
   String? _resolvedAddress;
-  List<LocationPoint> _routeHistory = [];
   bool _loading = true;
   String? _error;
   String _deviceStatus = 'UNKNOWN';
   DateTime? _lastSeen;
 
-  // Directions mode state
+  // Directions state
   Position? _parentPosition;
   StreamSubscription<Position>? _parentLocationSubscription;
   bool _loadingRoute = false;
@@ -78,11 +60,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   int? _routeDurationMinutes;
   String? _routeError;
 
-  // History mode state
-  RouteTimeFilter _selectedFilter = RouteTimeFilter.today;
-  DateTimeRange? _customDateRange;
-  int? _scrubbedPointIndex;
-  bool _showBreadcrumbs = true;
   bool _isFollowingChild = true;
 
   // Geofences layer state
@@ -92,21 +69,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    _trackingMode = widget.initialTrackingMode;
-    if (widget.focusTimestamp != null) {
-      _trackingMode = MapTrackingMode.historyTrail;
-      final now = DateTime.now();
-      final focus = widget.focusTimestamp!.toLocal();
-      if (focus.year == now.year && focus.month == now.month && focus.day == now.day) {
-        _selectedFilter = RouteTimeFilter.today;
-      } else {
-        _selectedFilter = RouteTimeFilter.custom;
-        _customDateRange = DateTimeRange(
-          start: DateTime(focus.year, focus.month, focus.day),
-          end: DateTime(focus.year, focus.month, focus.day).add(const Duration(days: 1)),
-        );
-      }
-    }
     _loadLocationData();
     _loadGeofences();
     _setupSocketListener();
@@ -143,19 +105,15 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               _latestLocation = newPoint;
               _deviceStatus = 'ONLINE';
               _lastSeen = DateTime.now();
-
-              if (_selectedFilter != RouteTimeFilter.liveOnly) {
-                _routeHistory.add(newPoint);
-              }
             });
 
             _updateReverseGeocoding(newPoint.latitude, newPoint.longitude);
 
-            if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null) {
+            if (_parentPosition != null) {
               _calculateDrivingRoute();
             }
 
-            if (_isFollowingChild && _trackingMode == MapTrackingMode.historyTrail) {
+            if (_isFollowingChild) {
               _mapController.move(newPoint.latLng, _mapController.camera.zoom);
             }
           }
@@ -179,7 +137,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
     setState(() {
       _loading = true;
       _error = null;
-      _scrubbedPointIndex = null;
     });
 
     try {
@@ -194,57 +151,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         _lastSeen = DateTime.parse(latestRes['lastSeen'].toString()).toLocal();
       }
 
-      // 2. Fetch history if filter is not liveOnly
-      if (_selectedFilter != RouteTimeFilter.liveOnly) {
-        DateTime? startTime;
-        DateTime? endTime;
-        final now = DateTime.now();
-
-        switch (_selectedFilter) {
-          case RouteTimeFilter.today:
-            startTime = DateTime(now.year, now.month, now.day);
-            break;
-          case RouteTimeFilter.past24Hours:
-            startTime = now.subtract(const Duration(hours: 24));
-            break;
-          case RouteTimeFilter.past7Days:
-            startTime = now.subtract(const Duration(days: 7));
-            break;
-          case RouteTimeFilter.custom:
-            if (_customDateRange != null) {
-              startTime = _customDateRange!.start;
-              endTime = _customDateRange!.end.add(const Duration(days: 1));
-            }
-            break;
-          case RouteTimeFilter.liveOnly:
-            break;
-        }
-
-        final historyRaw = await ApiService.instance.getLocationHistory(
-          widget.childId,
-          startTime: startTime,
-          endTime: endTime,
-        );
-
-        final parsedList = historyRaw
-            .map((e) => LocationPoint.fromJson(e as Map<String, dynamic>))
-            .toList();
-
-        // Strictly sort by recordedAt
-        parsedList.sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
-
-        // Filter stationary jitter (< 15 meters)
-        _routeHistory = _filterStationaryJitter(parsedList);
-      } else {
-        _routeHistory = [];
-      }
-
-      // 3. If in Directions mode, fetch parent location and route
-      if (_trackingMode == MapTrackingMode.directionsToChild) {
-        await _fetchParentLocationAndRoute();
-      } else {
-        _fitMapToBounds();
-      }
+      // 2. Fetch parent location and calculate route to child
+      await _fetchParentLocationAndRoute();
     } catch (e) {
       if (mounted) {
         setState(() => _error = e.toString());
@@ -254,35 +162,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         setState(() => _loading = false);
       }
     }
-  }
-
-  List<LocationPoint> _filterStationaryJitter(List<LocationPoint> points) {
-    if (points.length <= 2) return points;
-    const distanceCalc = Distance();
-    final filtered = <LocationPoint>[points.first];
-
-    for (int i = 1; i < points.length; i++) {
-      final lastKept = filtered.last;
-      final current = points[i];
-      final distMeters = distanceCalc.as(
-        LengthUnit.Meter,
-        lastKept.latLng,
-        current.latLng,
-      );
-
-      // Keep if moved >= 15 meters or if significant time elapsed (>= 5 minutes)
-      if (distMeters >= 15.0 ||
-          current.recordedAt.difference(lastKept.recordedAt).inMinutes >= 5) {
-        filtered.add(current);
-      }
-    }
-
-    // Always include the latest point if available
-    if (points.isNotEmpty && filtered.last != points.last) {
-      filtered.add(points.last);
-    }
-
-    return filtered;
   }
 
   Future<void> _fetchParentLocationAndRoute() async {
@@ -324,7 +203,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         return;
       }
 
-      // 1. FAST PATH: Read cached / last-known position immediately (0ms response)
+      // 1. FAST PATH: Read cached / last-known position immediately
       Position? pos = await Geolocator.getLastKnownPosition();
       if (pos != null && mounted) {
         setState(() {
@@ -334,18 +213,17 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         await _calculateDrivingRoute();
       }
 
-      // 2. LIVE PATH: Start background live position stream for fresh satellite lock & movement tracking
+      // 2. LIVE PATH: Start background live position stream for fresh movement tracking
       _parentLocationSubscription?.cancel();
       _parentLocationSubscription = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          distanceFilter: 15, // Update whenever parent moves 15+ meters
+          distanceFilter: 15,
         ),
       ).listen(
         (Position freshPos) async {
           if (!mounted) return;
 
-          // Check if parent moved significantly from last calculated position
           bool shouldRecalculate = false;
           if (_parentPosition != null) {
             final movedMeters = const Distance().as(
@@ -372,7 +250,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
         },
         onError: (err) {
           debugPrint('Parent live position stream error: $err');
-          // If we already have a cached position, do not show an intrusive error
           if (_parentPosition == null && mounted) {
             setState(() {
               _routeError = 'Could not acquire GPS fix: $err';
@@ -396,9 +273,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
             });
             await _calculateDrivingRoute();
           }
-        } catch (_) {
-          // Handled by live stream or error banner
-        }
+        } catch (_) {}
       }
     } catch (e) {
       if (_parentPosition == null && mounted) {
@@ -451,9 +326,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       return;
     }
 
-    if (_latestLocation == null && _routeHistory.isEmpty && _parentPosition == null) return;
+    if (_latestLocation == null && _parentPosition == null) return;
 
-    if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null && _latestLocation != null) {
+    if (_parentPosition != null && _latestLocation != null) {
       final parentLatLng = LatLng(_parentPosition!.latitude, _parentPosition!.longitude);
       final points = [parentLatLng, _latestLocation!.latLng];
       if (_osrmRoutePoints.isNotEmpty) points.addAll(_osrmRoutePoints);
@@ -467,62 +342,37 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
       return;
     }
 
-    if (_routeHistory.isNotEmpty && _selectedFilter != RouteTimeFilter.liveOnly) {
-      final points = _routeHistory.map((p) => p.latLng).toList();
-      if (_latestLocation != null) points.add(_latestLocation!.latLng);
-
-      if (points.length > 1) {
-        final bounds = LatLngBounds.fromPoints(points);
-        _mapController.fitCamera(
-          CameraFit.bounds(
-            bounds: bounds,
-            padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 100),
-          ),
-        );
-        return;
-      }
-    }
-
     if (_latestLocation != null) {
       _mapController.move(_latestLocation!.latLng, 16.0);
     }
   }
 
-  double _calculateTotalDistanceKm() {
-    if (_routeHistory.length < 2) return 0.0;
-    const distance = Distance();
-    double totalMeters = 0.0;
-    for (int i = 0; i < _routeHistory.length - 1; i++) {
-      totalMeters += distance.as(
-        LengthUnit.Meter,
-        _routeHistory[i].latLng,
-        _routeHistory[i + 1].latLng,
-      );
-    }
-    return totalMeters / 1000.0;
-  }
-
   Future<void> _launchGoogleMapsNavigation(double lat, double lng) async {
-    final navUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
-    final webFallback = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+    final googleMapsUrl = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    final webUrl = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
 
     try {
-      if (await canLaunchUrl(navUri)) {
-        await launchUrl(navUri);
+      if (await canLaunchUrl(googleMapsUrl)) {
+        await launchUrl(googleMapsUrl);
+      } else if (await canLaunchUrl(webUrl)) {
+        await launchUrl(webUrl, mode: LaunchMode.externalApplication);
       } else {
-        await launchUrl(webFallback, mode: LaunchMode.externalApplication);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open navigation application.')),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open navigation: $e')),
+          SnackBar(content: Text('Navigation error: $e')),
         );
       }
     }
   }
 
   void _showChildDetailsModal(LocationPoint loc) {
-    final theme = Theme.of(context);
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -538,11 +388,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               Row(
                 children: [
                   CircleAvatar(
-                    backgroundColor: theme.colorScheme.primary,
-                    child: Text(
-                      widget.childName.isNotEmpty ? widget.childName[0].toUpperCase() : 'C',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    child: const Icon(Icons.person, color: Colors.white),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -551,16 +398,13 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       children: [
                         Text(
                           widget.childName,
-                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          _deviceStatus == 'ONLINE'
-                              ? 'Live • Connected'
-                              : 'Last updated ${DateFormat('MMM d, h:mm a').format(loc.recordedAt)}',
-                          style: TextStyle(
-                            color: _deviceStatus == 'ONLINE' ? Colors.green.shade700 : Colors.grey.shade600,
-                            fontSize: 12,
-                          ),
+                          _resolvedAddress ?? 'Lat: ${loc.latitude.toStringAsFixed(4)}, Lon: ${loc.longitude.toStringAsFixed(4)}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -569,39 +413,31 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               ),
               const Divider(height: 24),
               Row(
-                children: [
-                  const Icon(Icons.location_on, color: Colors.red, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _resolvedAddress ?? 'Resolving address...',
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _MetricItem(
-                    icon: Icons.battery_charging_full,
-                    label: 'Battery',
-                    value: loc.batteryLevel != null ? '${loc.batteryLevel}%' : '--',
-                  ),
                   _MetricItem(
                     icon: Icons.speed,
                     label: 'Speed',
                     value: loc.speedKmh != null ? '${loc.speedKmh!.toStringAsFixed(1)} km/h' : '0 km/h',
                   ),
                   _MetricItem(
-                    icon: Icons.gps_fixed,
-                    label: 'GPS Accuracy',
+                    icon: Icons.battery_charging_full,
+                    label: 'Battery',
+                    value: loc.batteryLevel != null ? '${loc.batteryLevel}%' : '--',
+                  ),
+                  _MetricItem(
+                    icon: Icons.gps_not_fixed,
+                    label: 'Accuracy',
                     value: loc.accuracy != null ? '±${loc.accuracy!.toStringAsFixed(0)}m' : '--',
+                  ),
+                  _MetricItem(
+                    icon: Icons.access_time,
+                    label: 'Recorded',
+                    value: DateFormat('h:mm a').format(loc.recordedAt),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -620,93 +456,75 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
     );
   }
 
-  Future<void> _selectCustomDateRange() async {
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime.now().subtract(const Duration(days: 90)),
-      lastDate: DateTime.now(),
-      initialDateRange: _customDateRange ??
-          DateTimeRange(
-            start: DateTime.now().subtract(const Duration(days: 3)),
-            end: DateTime.now(),
-          ),
-    );
-    if (picked != null) {
-      setState(() {
-        _customDateRange = picked;
-        _selectedFilter = RouteTimeFilter.custom;
-      });
-      _loadLocationData();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final activeLocation = _scrubbedPointIndex != null &&
-            _scrubbedPointIndex! < _routeHistory.length
-        ? _routeHistory[_scrubbedPointIndex!]
-        : _latestLocation;
-
-    final initialCenter = _latestLocation?.latLng ??
-        (_routeHistory.isNotEmpty ? _routeHistory.last.latLng : const LatLng(23.8103, 90.4125));
+    final activeLocation = _latestLocation;
 
     return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${widget.childName}\'s Location'),
             Text(
-              _deviceStatus == 'ONLINE'
-                  ? 'Live GPS • Online'
-                  : 'Last seen: ${_lastSeen != null ? DateFormat('MMM d, h:mm a').format(_lastSeen!) : 'Offline'}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: _deviceStatus == 'ONLINE' ? Colors.green.shade700 : Colors.grey.shade600,
-              ),
+              '${widget.childName}\'s Location',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _deviceStatus == 'ONLINE' ? Colors.greenAccent : Colors.grey,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _deviceStatus == 'ONLINE'
+                      ? 'Live GPS • Online'
+                      : 'Offline (${_lastSeen != null ? DateFormat('h:mm a').format(_lastSeen!) : 'Unknown'})',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _deviceStatus == 'ONLINE' ? Colors.green.shade700 : Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: Icon(_showGeofences ? Icons.shield : Icons.shield_outlined,
-                color: _showGeofences ? Colors.teal : null),
-            tooltip: 'Safety Boundaries & Geofences',
-            onPressed: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => GeofencesScreen(
-                    childId: widget.childId,
-                    childName: widget.childName,
-                    latestChildLocation: _latestLocation?.latLng,
-                    socketService: _socketService,
-                  ),
-                ),
-              );
-              _loadGeofences();
-            },
+            icon: Icon(
+              _showGeofences ? Icons.shield : Icons.shield_outlined,
+              color: _showGeofences ? Colors.teal : null,
+            ),
+            tooltip: _showGeofences ? 'Hide Geofences' : 'Show Geofences',
+            onPressed: () => setState(() => _showGeofences = !_showGeofences),
           ),
           IconButton(
-            icon: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
-            tooltip: _isSatelliteView ? 'Switch to Street Map' : 'Switch to Satellite Map',
+            icon: Icon(_isSatelliteView ? Icons.layers_clear : Icons.satellite_alt),
+            tooltip: _isSatelliteView ? 'Standard Map' : 'Satellite Map',
             onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
+            tooltip: 'Refresh Location',
             onPressed: _loadLocationData,
           ),
         ],
       ),
       body: Stack(
         children: [
-          // FlutterMap Tile & Overlay Layers
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: initialCenter,
+              initialCenter: activeLocation?.latLng ?? const LatLng(23.8103, 90.4125),
               initialZoom: 15.0,
-              maxZoom: 20.0,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
+              ),
               onPositionChanged: (pos, hasGesture) {
                 if (hasGesture && _isFollowingChild) {
                   setState(() => _isFollowingChild = false);
@@ -714,10 +532,9 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
               },
             ),
             children: [
-              // High-resolution Google Maps Tile Layer
+              // Map Tile Layer
               if (_isSatelliteView)
                 TileLayer(
-                  // Google Hybrid: High-res satellite imagery + roads + all place/shop labels
                   urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                   subdomains: const ['0', '1', '2', '3'],
                   userAgentPackageName: 'com.example.parentapp',
@@ -727,7 +544,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                 )
               else
                 TileLayer(
-                  // Google Street: Full street map with local POIs (mosques, shops, schools, markets, Bengali/English labels)
                   urlTemplate: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                   subdomains: const ['0', '1', '2', '3'],
                   userAgentPackageName: 'com.example.parentapp',
@@ -736,8 +552,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                   fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 ),
 
-              // Road-following Route Polyline (Directions Mode)
-              if (_trackingMode == MapTrackingMode.directionsToChild && _osrmRoutePoints.isNotEmpty)
+              // Road-following Route Polyline (Directions to Child)
+              if (_osrmRoutePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
@@ -746,20 +562,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       color: const Color(0xFF2563EB),
                       borderColor: Colors.white,
                       borderStrokeWidth: 2.0,
-                    ),
-                  ],
-                ),
-
-              // Breadcrumb Polylines (History Trail Mode)
-              if (_trackingMode == MapTrackingMode.historyTrail && _showBreadcrumbs && _routeHistory.length > 1)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: _routeHistory.map((p) => p.latLng).toList(),
-                      strokeWidth: 4.5,
-                      color: Colors.blue.shade600.withValues(alpha: 0.85),
-                      borderStrokeWidth: 1.5,
-                      borderColor: Colors.white,
                     ),
                   ],
                 ),
@@ -892,8 +694,8 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       ),
                     ),
 
-                  // Parent Marker (Directions Mode)
-                  if (_trackingMode == MapTrackingMode.directionsToChild && _parentPosition != null)
+                  // Parent Marker ("You")
+                  if (_parentPosition != null)
                     Marker(
                       point: LatLng(_parentPosition!.latitude, _parentPosition!.longitude),
                       width: 70,
@@ -927,30 +729,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                         ],
                       ),
                     ),
-
-                  // Historical waypoint dots (History Trail Mode)
-                  if (_trackingMode == MapTrackingMode.historyTrail && _showBreadcrumbs && _routeHistory.isNotEmpty)
-                    for (int i = 0; i < _routeHistory.length; i++)
-                      Marker(
-                        point: _routeHistory[i].latLng,
-                        width: 14,
-                        height: 14,
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() => _scrubbedPointIndex = i);
-                            _mapController.move(_routeHistory[i].latLng, _mapController.camera.zoom);
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: i == 0
-                                  ? Colors.green
-                                  : (i == _routeHistory.length - 1 ? Colors.red : Colors.blue.shade700),
-                              border: Border.all(color: Colors.white, width: 2),
-                            ),
-                          ),
-                        ),
-                      ),
 
                   // Child Pin Marker with Name Badge & OnTap Modal
                   if (activeLocation != null)
@@ -1018,110 +796,10 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
             ],
           ),
 
-          // Top Mode Switcher Bar
-          Positioned(
-            top: 12,
-            left: 12,
-            right: 12,
-            child: Card(
-              elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _ModeTabButton(
-                        title: 'Directions to Child',
-                        icon: Icons.alt_route,
-                        isSelected: _trackingMode == MapTrackingMode.directionsToChild,
-                        onTap: () {
-                          setState(() => _trackingMode = MapTrackingMode.directionsToChild);
-                          _fetchParentLocationAndRoute();
-                        },
-                      ),
-                    ),
-                    Expanded(
-                      child: _ModeTabButton(
-                        title: 'Child History Trail',
-                        icon: Icons.timeline,
-                        isSelected: _trackingMode == MapTrackingMode.historyTrail,
-                        onTap: () {
-                          setState(() => _trackingMode = MapTrackingMode.historyTrail);
-                          _fitMapToBounds();
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Sub-Filter Chips Bar (Only shown in History Trail mode)
-          if (_trackingMode == MapTrackingMode.historyTrail)
-            Positioned(
-              top: 72,
-              left: 12,
-              right: 12,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _FilterChip(
-                      label: 'Live',
-                      icon: Icons.my_location,
-                      isSelected: _selectedFilter == RouteTimeFilter.liveOnly,
-                      onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.liveOnly);
-                        _loadLocationData();
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Today',
-                      isSelected: _selectedFilter == RouteTimeFilter.today,
-                      onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.today);
-                        _loadLocationData();
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Past 24h',
-                      isSelected: _selectedFilter == RouteTimeFilter.past24Hours,
-                      onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.past24Hours);
-                        _loadLocationData();
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Past 7 Days',
-                      isSelected: _selectedFilter == RouteTimeFilter.past7Days,
-                      onSelected: () {
-                        setState(() => _selectedFilter = RouteTimeFilter.past7Days);
-                        _loadLocationData();
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: _customDateRange != null
-                          ? '${DateFormat('M/d').format(_customDateRange!.start)} - ${DateFormat('M/d').format(_customDateRange!.end)}'
-                          : 'Custom Range',
-                      icon: Icons.calendar_today,
-                      isSelected: _selectedFilter == RouteTimeFilter.custom,
-                      onSelected: _selectCustomDateRange,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
           // Geofence Breach Banner (shown when opened via push notification)
           if (widget.focusTimestamp != null && !_breachBannerDismissed)
             Positioned(
-              top: _trackingMode == MapTrackingMode.historyTrail ? 116 : 72,
+              top: 12,
               left: 12,
               right: 12,
               child: Card(
@@ -1151,7 +829,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               ),
                             ),
                             Text(
-                              'Showing trail around ${DateFormat('MMM d, h:mm a').format(widget.focusTimestamp!.toLocal())}',
+                              'Showing breach location at ${DateFormat('MMM d, h:mm a').format(widget.focusTimestamp!.toLocal())}',
                               style: TextStyle(fontSize: 11, color: Colors.red.shade800),
                             ),
                           ],
@@ -1173,7 +851,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
           // Floating Action Buttons (Recenter / Layer / Fit)
           Positioned(
             right: 16,
-            bottom: _trackingMode == MapTrackingMode.directionsToChild ? 240 : 220,
+            bottom: 230,
             child: Column(
               children: [
                 FloatingActionButton.small(
@@ -1183,16 +861,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                   onPressed: () => setState(() => _isSatelliteView = !_isSatelliteView),
                   child: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
                 ),
-                if (_trackingMode == MapTrackingMode.historyTrail) ...[
-                  const SizedBox(height: 8),
-                  FloatingActionButton.small(
-                    heroTag: 'toggle_trail',
-                    backgroundColor: theme.colorScheme.surface,
-                    tooltip: _showBreadcrumbs ? 'Hide Trail' : 'Show Trail',
-                    onPressed: () => setState(() => _showBreadcrumbs = !_showBreadcrumbs),
-                    child: Icon(_showBreadcrumbs ? Icons.timeline : Icons.timeline_outlined),
-                  ),
-                ],
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
                   heroTag: 'recenter_child',
@@ -1204,10 +872,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                       : theme.colorScheme.onSurface,
                   tooltip: 'Follow Child',
                   onPressed: () {
-                    setState(() {
-                      _isFollowingChild = true;
-                      _scrubbedPointIndex = null;
-                    });
+                    setState(() => _isFollowingChild = true);
                     if (_latestLocation != null) {
                       _mapController.move(_latestLocation!.latLng, 16.0);
                     }
@@ -1249,7 +914,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                     else if (_error != null)
                       Text(_error!, style: TextStyle(color: theme.colorScheme.error))
                     else if (activeLocation == null)
-                      const Text('No location data recorded yet for this period.')
+                      const Text('No location data recorded yet for child.')
                     else ...[
                       // Human-Readable Address Header
                       Row(
@@ -1262,9 +927,7 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Icon(
-                              _trackingMode == MapTrackingMode.directionsToChild
-                                  ? Icons.directions
-                                  : Icons.location_on,
+                              Icons.location_on,
                               color: theme.colorScheme.onPrimaryContainer,
                             ),
                           ),
@@ -1290,135 +953,97 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
                         ],
                       ),
 
-                      // Directions Mode Route Info & Google Maps Button
-                      if (_trackingMode == MapTrackingMode.directionsToChild) ...[
-                        const Divider(height: 20),
-                        if (_loadingRoute)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                                SizedBox(width: 12),
-                                Text('Calculating road route from your location...'),
-                              ],
-                            ),
-                          )
-                        else if (_routeError != null)
-                          Text(_routeError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 13))
-                        else if (_routeDistanceKm != null && _routeDurationMinutes != null)
-                          Row(
+                      // Directions Route Info & Google Maps Button
+                      if (_loadingRoute)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 12.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.shade50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.directions_car, size: 18, color: Colors.blue.shade700),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '${_routeDistanceKm!.toStringAsFixed(1)} km',
-                                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '(${_routeDurationMinutes!} mins)',
-                                      style: TextStyle(color: Colors.blue.shade800),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Spacer(),
-                              FilledButton.icon(
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: const Color(0xFF2563EB),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: () => _launchGoogleMapsNavigation(
-                                  activeLocation.latitude,
-                                  activeLocation.longitude,
-                                ),
-                                icon: const Icon(Icons.navigation, size: 18),
-                                label: const Text('Navigate'),
-                              ),
+                              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              SizedBox(width: 12),
+                              Text('Calculating road route from your location...'),
                             ],
                           ),
-                      ],
-
-                      // History Trail Mode Metrics & Scrubber
-                      if (_trackingMode == MapTrackingMode.historyTrail) ...[
+                        )
+                      else if (_routeError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            _routeError!,
+                            style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+                          ),
+                        )
+                      else if (_routeDistanceKm != null && _routeDurationMinutes != null) ...[
                         const Divider(height: 20),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
-                            _MetricItem(
-                              icon: Icons.speed,
-                              label: 'Speed',
-                              value: activeLocation.speedKmh != null
-                                  ? '${activeLocation.speedKmh!.toStringAsFixed(1)} km/h'
-                                  : '0 km/h',
-                            ),
-                            _MetricItem(
-                              icon: Icons.battery_charging_full,
-                              label: 'Battery',
-                              value: activeLocation.batteryLevel != null
-                                  ? '${activeLocation.batteryLevel}%'
-                                  : '--',
-                            ),
-                            _MetricItem(
-                              icon: Icons.gps_not_fixed,
-                              label: 'Accuracy',
-                              value: activeLocation.accuracy != null
-                                  ? '±${activeLocation.accuracy!.toStringAsFixed(0)}m'
-                                  : '--',
-                            ),
-                            if (_routeHistory.length > 1)
-                              _MetricItem(
-                                icon: Icons.straighten,
-                                label: 'Distance',
-                                value: '${_calculateTotalDistanceKm().toStringAsFixed(2)} km',
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(8),
                               ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.directions_car, size: 18, color: Colors.blue.shade700),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${_routeDistanceKm!.toStringAsFixed(1)} km',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '(${_routeDurationMinutes!} mins)',
+                                    style: TextStyle(color: Colors.blue.shade800),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              onPressed: () => _launchGoogleMapsNavigation(
+                                activeLocation.latitude,
+                                activeLocation.longitude,
+                              ),
+                              icon: const Icon(Icons.navigation, size: 18),
+                              label: const Text('Navigate'),
+                            ),
                           ],
                         ),
+                      ],
 
-                        if (_routeHistory.length > 1) ...[
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Text('Trail Scrubber', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                              const Spacer(),
-                              if (_scrubbedPointIndex != null)
-                                TextButton(
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  onPressed: () => setState(() => _scrubbedPointIndex = null),
-                                  child: const Text('Back to Live'),
-                                ),
-                            ],
+                      const Divider(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _MetricItem(
+                            icon: Icons.speed,
+                            label: 'Speed',
+                            value: activeLocation.speedKmh != null
+                                ? '${activeLocation.speedKmh!.toStringAsFixed(1)} km/h'
+                                : '0 km/h',
                           ),
-                          Slider(
-                            min: 0,
-                            max: (_routeHistory.length - 1).toDouble(),
-                            divisions: _routeHistory.length - 1,
-                            value: (_scrubbedPointIndex ?? (_routeHistory.length - 1)).toDouble(),
-                            onChanged: (val) {
-                              final idx = val.round();
-                              setState(() {
-                                _scrubbedPointIndex = idx;
-                                _isFollowingChild = false;
-                              });
-                              _mapController.move(_routeHistory[idx].latLng, _mapController.camera.zoom);
-                              _updateReverseGeocoding(_routeHistory[idx].latitude, _routeHistory[idx].longitude);
-                            },
+                          _MetricItem(
+                            icon: Icons.battery_charging_full,
+                            label: 'Battery',
+                            value: activeLocation.batteryLevel != null
+                                ? '${activeLocation.batteryLevel}%'
+                                : '--',
+                          ),
+                          _MetricItem(
+                            icon: Icons.gps_not_fixed,
+                            label: 'Accuracy',
+                            value: activeLocation.accuracy != null
+                                ? '±${activeLocation.accuracy!.toStringAsFixed(0)}m'
+                                : '--',
                           ),
                         ],
-                      ],
+                      ),
                     ],
                   ],
                 ),
@@ -1427,93 +1052,6 @@ class _LocationTrackingScreenState extends State<LocationTrackingScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ModeTabButton extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _ModeTabButton({
-    required this.title,
-    required this.icon,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? theme.colorScheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: isSelected ? Colors.white : theme.colorScheme.onSurface,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected ? Colors.white : theme.colorScheme.onSurface,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final IconData? icon;
-  final bool isSelected;
-  final VoidCallback onSelected;
-
-  const _FilterChip({
-    required this.label,
-    this.icon,
-    required this.isSelected,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return FilterChip(
-      selected: isSelected,
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: isSelected ? theme.colorScheme.onPrimary : null),
-            const SizedBox(width: 4),
-          ],
-          Text(label),
-        ],
-      ),
-      selectedColor: theme.colorScheme.primary,
-      labelStyle: TextStyle(
-        color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-      ),
-      onSelected: (_) => onSelected(),
     );
   }
 }

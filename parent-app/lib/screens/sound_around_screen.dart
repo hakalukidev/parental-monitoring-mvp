@@ -33,6 +33,7 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
   bool _remoteDescriptionSet = false;
   bool _isMuted = false;
   bool _isSpeakerOn = true;
+  MediaStreamTrack? _remoteAudioTrack;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
   // Stopwatch / Duration timer
@@ -188,8 +189,17 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     });
     _pc = pc;
 
+    // Explicitly declare audio receiver transceiver for Unified Plan WebRTC
+    try {
+      await pc.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+    } catch (_) {}
+
     pc.onTrack = (RTCTrackEvent event) {
       if (event.track.kind == 'audio') {
+        _remoteAudioTrack = event.track;
         if (event.streams.isNotEmpty) {
           final stream = event.streams.first;
           _audioRenderer.srcObject = stream;
@@ -201,7 +211,6 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
         }
         try {
           Helper.setSpeakerphoneOn(_isSpeakerOn);
-          event.track.enableSpeakerphone(_isSpeakerOn);
         } catch (_) {}
 
         if (mounted) {
@@ -295,6 +304,7 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     setState(() {
       _isMuted = !_isMuted;
     });
+    _remoteAudioTrack?.enabled = !_isMuted;
     if (_audioRenderer.srcObject != null) {
       for (final track in _audioRenderer.srcObject!.getAudioTracks()) {
         track.enabled = !_isMuted;
@@ -308,11 +318,6 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     });
     try {
       Helper.setSpeakerphoneOn(_isSpeakerOn);
-      if (_audioRenderer.srcObject != null) {
-        for (final track in _audioRenderer.srcObject!.getAudioTracks()) {
-          track.enableSpeakerphone(_isSpeakerOn);
-        }
-      }
     } catch (_) {}
   }
 
@@ -334,6 +339,7 @@ class _SoundAroundScreenState extends State<SoundAroundScreen>
     }
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
+    _remoteAudioTrack = null;
     try {
       _audioRenderer.srcObject = null;
     } catch (_) {}

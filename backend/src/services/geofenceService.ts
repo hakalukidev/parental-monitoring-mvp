@@ -176,7 +176,7 @@ export async function evaluateChildGeofences(
               geofence.triggerType === "ENTRY" ||
               geofence.triggerType === "BOTH";
             alertTitle = `⚠️ Restricted Zone Alert: ${geofence.name}`;
-            alertBody = `${childName || "Child"} is currently inside restricted zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+            alertBody = `${childName || "Child"} is currently inside restricted zone ${geofence.name} (detected at ${timeString}). Tap to view location.`;
           }
         } else {
           // SAFE_ZONE
@@ -187,7 +187,7 @@ export async function evaluateChildGeofences(
               geofence.triggerType === "EXIT" ||
               geofence.triggerType === "BOTH";
             alertTitle = `🚨 Safe Zone Alert: ${geofence.name}`;
-            alertBody = `${childName || "Child"} is currently outside safe zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+            alertBody = `${childName || "Child"} is currently outside safe zone ${geofence.name} (detected at ${timeString}). Tap to view location.`;
           } else if (currentState === "INSIDE") {
             // Child is currently inside safe zone
             if (
@@ -197,7 +197,7 @@ export async function evaluateChildGeofences(
               transitionType = "ENTRY";
               shouldTrigger = true;
               alertTitle = `✅ Safe Zone Reached: ${geofence.name}`;
-              alertBody = `${childName || "Child"} is currently inside safe zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+              alertBody = `${childName || "Child"} is currently inside safe zone ${geofence.name} (detected at ${timeString}). Tap to view location.`;
             }
           }
         }
@@ -219,13 +219,13 @@ export async function evaluateChildGeofences(
               transitionType === "ENTRY"
                 ? `⚠️ Restricted Zone Entered: ${geofence.name}`
                 : `🛡️ Restricted Zone Exited: ${geofence.name}`;
-            alertBody = `${childName || "Child"} ${transitionType === "ENTRY" ? "entered" : "left"} restricted zone ${geofence.name} at ${timeString}. Tap to view route trail.`;
+            alertBody = `${childName || "Child"} ${transitionType === "ENTRY" ? "entered" : "left"} restricted zone ${geofence.name} at ${timeString}. Tap to view location.`;
           } else {
             alertTitle =
               transitionType === "EXIT"
                 ? `🚨 Safe Zone Left: ${geofence.name}`
                 : `✅ Safe Zone Reached: ${geofence.name}`;
-            alertBody = `${childName || "Child"} ${transitionType === "EXIT" ? "left" : "entered"} safe zone ${geofence.name} at ${timeString}. Tap to view route trail.`;
+            alertBody = `${childName || "Child"} ${transitionType === "EXIT" ? "left" : "entered"} safe zone ${geofence.name} at ${timeString}. Tap to view location.`;
           }
         }
       } else {
@@ -245,11 +245,11 @@ export async function evaluateChildGeofences(
           if (isRestrictedViolation) {
             transitionType = "ENTRY";
             alertTitle = `⚠️ Ongoing Restricted Zone Alert: ${geofence.name}`;
-            alertBody = `${childName || "Child"} is still inside restricted zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+            alertBody = `${childName || "Child"} is still inside restricted zone ${geofence.name} (detected at ${timeString}). Tap to view location.`;
           } else {
             transitionType = "EXIT";
             alertTitle = `🚨 Ongoing Safe Zone Alert: ${geofence.name}`;
-            alertBody = `${childName || "Child"} is still outside safe zone ${geofence.name} (detected at ${timeString}). Tap to view route trail.`;
+            alertBody = `${childName || "Child"} is still outside safe zone ${geofence.name} (detected at ${timeString}). Tap to view location.`;
           }
         }
       }

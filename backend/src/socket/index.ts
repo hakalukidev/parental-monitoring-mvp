@@ -177,6 +177,16 @@ export function registerSocketHandlers(io: Server): void {
       for (const s of activeCameraSessions) {
         socket.join(`session:${s.id}`);
       }
+
+      const activeAudioSessions = await AudioStreamSession.find({
+        $or: [
+          { parentId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
+          { childId: userId, status: { $in: ["REQUESTED", "ACCEPTED", "ACTIVE"] } },
+        ],
+      });
+      for (const s of activeAudioSessions) {
+        socket.join(`session:${s.id}`);
+      }
     } catch {
       // ignore lookup error on socket connect
     }
@@ -199,6 +209,16 @@ export function registerSocketHandlers(io: Server): void {
           (role === "PARENT" && cameraSession.parentId.toString() === userId) ||
           (role === "CHILD" && cameraSession.childId.toString() === userId);
         if (isParticipant) socket.join(`session:${sessionId}`);
+        return;
+      }
+
+      const audioSession = await AudioStreamSession.findById(sessionId);
+      if (audioSession) {
+        const isParticipant =
+          (role === "PARENT" && audioSession.parentId.toString() === userId) ||
+          (role === "CHILD" && audioSession.childId.toString() === userId);
+        if (isParticipant) socket.join(`session:${sessionId}`);
+        return;
       }
     });
 
@@ -473,12 +493,6 @@ export function registerSocketHandlers(io: Server): void {
             batteryLevel: data.batteryLevel,
             recordedAt: recordedDate,
           };
-
-          await LocationRecord.create({
-            childId: userId,
-            deviceId: device?._id || null,
-            ...locationPayload,
-          });
 
           if (device) {
             device.lastLocation = locationPayload;

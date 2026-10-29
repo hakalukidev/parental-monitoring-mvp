@@ -3,11 +3,7 @@ import { LocationRecord } from "../models/LocationRecord";
 import { Device } from "../models/Device";
 import { User } from "../models/User";
 import { asyncHandler, AppError } from "../utils/http";
-import {
-  recordLocationSchema,
-  recordLocationBatchSchema,
-  locationHistoryQuerySchema,
-} from "../utils/validation";
+import { recordLocationSchema } from "../utils/validation";
 import { AuthedRequest } from "../middleware/auth";
 import { assertParentOwnsChild } from "./childrenController";
 import { getIO } from "../socket/io";
@@ -54,19 +50,6 @@ export const recordLocation = asyncHandler(async (req: AuthedRequest, res: Respo
   const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
   const recordedDate = data.recordedAt ? new Date(data.recordedAt) : new Date();
 
-  const record = await LocationRecord.create({
-    childId,
-    deviceId: device?._id || null,
-    latitude: data.latitude,
-    longitude: data.longitude,
-    accuracy: data.accuracy,
-    altitude: data.altitude,
-    speed: data.speed,
-    heading: data.heading,
-    batteryLevel: data.batteryLevel,
-    recordedAt: recordedDate,
-  });
-
   const locationPayload = {
     latitude: data.latitude,
     longitude: data.longitude,
@@ -92,60 +75,8 @@ export const recordLocation = asyncHandler(async (req: AuthedRequest, res: Respo
   }
 
   res.status(201).json({
-    id: record._id,
-    childId: record.childId,
-    ...locationPayload,
-  });
-});
-
-// POST /api/location/batch (Child only)
-export const recordLocationBatch = asyncHandler(async (req: AuthedRequest, res: Response) => {
-  const childId = req.user!.id;
-  const { points } = recordLocationBatchSchema.parse(req.body);
-
-  const child = await User.findById(childId);
-  if (!child || child.role !== "CHILD") throw new AppError("Child not found", 404);
-
-  const device = await Device.findOne({ childId }).sort({ updatedAt: -1 });
-
-  const docs = points.map((p) => ({
     childId,
-    deviceId: device?._id || null,
-    latitude: p.latitude,
-    longitude: p.longitude,
-    accuracy: p.accuracy,
-    altitude: p.altitude,
-    speed: p.speed,
-    heading: p.heading,
-    batteryLevel: p.batteryLevel,
-    recordedAt: p.recordedAt ? new Date(p.recordedAt) : new Date(),
-  }));
-
-  const inserted = await LocationRecord.insertMany(docs);
-
-  if (docs.length > 0) {
-    // Sort to find the latest point in the batch
-    const latestDoc = [...docs].sort(
-      (a, b) => b.recordedAt.getTime() - a.recordedAt.getTime()
-    )[0];
-
-    if (device) {
-      device.lastLocation = latestDoc;
-      device.lastSeen = new Date();
-      await device.save();
-    }
-
-    if (child.parentId) {
-      broadcastChildLocation(childId, child.parentId.toString(), latestDoc);
-      evaluateChildGeofences(childId, child.parentId.toString(), latestDoc).catch((err) =>
-        console.error("Error in evaluateChildGeofences (recordLocationBatch):", err)
-      );
-    }
-  }
-
-  res.status(201).json({
-    count: inserted.length,
-    message: `Recorded ${inserted.length} location points`,
+    ...locationPayload,
   });
 });
 
@@ -168,7 +99,7 @@ export const getLatestLocation = asyncHandler(async (req: AuthedRequest, res: Re
     return;
   }
 
-  // Fallback to most recent LocationRecord
+  // Fallback to most recent LocationRecord if device lastLocation is not yet set
   const latestRecord = await LocationRecord.findOne({ childId }).sort({ recordedAt: -1 });
   if (!latestRecord) {
     res.json({
@@ -194,55 +125,5 @@ export const getLatestLocation = asyncHandler(async (req: AuthedRequest, res: Re
     },
     deviceStatus: device?.status || "OFFLINE",
     lastSeen: device?.lastSeen || null,
-  });
-});
-
-// GET /api/location/history/:childId (Parent only)
-export const getLocationHistory = asyncHandler(async (req: AuthedRequest, res: Response) => {
-  const parentId = req.user!.id;
-  const childId = req.params.childId;
-
-  await assertParentOwnsChild(parentId, childId);
-
-  const queryParams = locationHistoryQuerySchema.parse(req.query);
-
-  const filter: Record<string, unknown> = { childId };
-
-  if (queryParams.startTime || queryParams.endTime) {
-    const timeFilter: Record<string, Date> = {};
-    if (queryParams.startTime) {
-      timeFilter.$gte = new Date(queryParams.startTime);
-    }
-    if (queryParams.endTime) {
-      timeFilter.$lte = new Date(queryParams.endTime);
-    }
-    filter.recordedAt = timeFilter;
-  } else {
-    // Default to last 24 hours if no time range provided
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    filter.recordedAt = { $gte: oneDayAgo };
-  }
-
-  const records = await LocationRecord.find(filter)
-    .sort({ recordedAt: 1 }) // Chronological order for breadcrumb route rendering
-    .limit(queryParams.limit)
-    .lean();
-
-  const points = records.map((r) => ({
-    id: r._id,
-    latitude: r.latitude,
-    longitude: r.longitude,
-    accuracy: r.accuracy,
-    altitude: r.altitude,
-    speed: r.speed,
-    heading: r.heading,
-    batteryLevel: r.batteryLevel,
-    recordedAt: r.recordedAt,
-  }));
-
-  res.json({
-    childId,
-    count: points.length,
-    points,
   });
 });

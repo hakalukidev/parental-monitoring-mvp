@@ -50,13 +50,28 @@ class AmbientAudioService : Service() {
         isStopping.set(false)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            startForeground(
-                NOTIFICATION_ID,
-                buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Microphone FGS rejected, falling back to basic notification: ${e.message}")
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Failed startForeground fallback: ${e2.message}", e2)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error starting Microphone FGS: ${e.message}")
+            }
         } else {
-            startForeground(NOTIFICATION_ID, buildNotification())
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed startForeground on pre-R: ${e.message}", e)
+            }
         }
 
         val activeSock = ChildMonitoringService.activeSocket
@@ -85,7 +100,7 @@ class AmbientAudioService : Service() {
         val defaultIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        )
+        ) + getFallbackTurnServers()
 
         val webRtc = AmbientAudioWebRtcManager(
             context = applicationContext,
@@ -176,9 +191,15 @@ class AmbientAudioService : Service() {
             } catch (_: Exception) {}
         }
 
+        // If shared socket, clear temporary callbacks so they don't leak dead manager
+        val activeSock = ChildMonitoringService.activeSocket
+        if (socketManager == null && activeSock != null) {
+            activeSock.onWebrtcAnswer = null
+            activeSock.onIceCandidate = null
+        }
+
         socketManager?.disconnect()
         socketManager = null
-
 
         isSessionRunning.set(false)
         sessionId = null
@@ -208,10 +229,10 @@ class AmbientAudioService : Service() {
             val channel = NotificationChannel(
                 channelId,
                 "Ambient Audio Monitoring",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifies when surrounding audio is active for parental supervision"
-                setShowBadge(false)
+                setShowBadge(true)
             }
             nm.createNotificationChannel(channel)
         }
@@ -231,14 +252,38 @@ class AmbientAudioService : Service() {
             .setContentText("Parental supervision is listening to surroundings")
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPending)
             .build()
+    }
+
+    private fun getFallbackTurnServers(): List<PeerConnection.IceServer> {
+        return listOf(
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer()
+        )
     }
 
     private fun parseIceServers(config: JSONObject): List<PeerConnection.IceServer> {
         val list = mutableListOf<PeerConnection.IceServer>()
         val arr = config.optJSONArray("iceServers") ?: return list
+        var hasTurn = false
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             val urls = obj.optJSONArray("urls")
@@ -248,6 +293,7 @@ class AmbientAudioService : Service() {
             if (urls != null) {
                 for (j in 0 until urls.length()) {
                     val url = urls.getString(j)
+                    if (url.startsWith("turn:") || url.startsWith("turns:")) hasTurn = true
                     val builder = PeerConnection.IceServer.builder(url)
                     if (username.isNotEmpty()) builder.setUsername(username)
                     if (credential.isNotEmpty()) builder.setPassword(credential)
@@ -256,12 +302,16 @@ class AmbientAudioService : Service() {
             } else {
                 val url = obj.optString("url", "")
                 if (url.isNotEmpty()) {
+                    if (url.startsWith("turn:") || url.startsWith("turns:")) hasTurn = true
                     val builder = PeerConnection.IceServer.builder(url)
                     if (username.isNotEmpty()) builder.setUsername(username)
                     if (credential.isNotEmpty()) builder.setPassword(credential)
                     list.add(builder.createIceServer())
                 }
             }
+        }
+        if (!hasTurn) {
+            list.addAll(getFallbackTurnServers())
         }
         return list
     }

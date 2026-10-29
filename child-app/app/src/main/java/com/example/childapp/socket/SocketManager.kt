@@ -51,7 +51,7 @@ class SocketManager(private var accessToken: String) {
         val uri = java.net.URI.create(BuildConfig.SOCKET_URL)
         android.util.Log.i("SocketManager", "Connecting socket to $uri")
         val okClient = okhttp3.OkHttpClient.Builder()
-            .hostnameVerifier { hostname, _ -> hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "10.95.254.124" || hostname == "192.168.0.150" || hostname == "localhost" }
+            .hostnameVerifier { hostname, _ -> hostname == "187.127.113.175" || hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "192.168.0.141" || hostname == "10.95.254.124" || hostname == "192.168.0.150" || hostname == "localhost" }
             .build()
 
         IO.setDefaultOkHttpCallFactory(okClient)

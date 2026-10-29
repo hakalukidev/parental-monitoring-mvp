@@ -65,6 +65,14 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTop" />
 
+        <!-- Invisible Headless Activity to establish foreground eligible state for Camera FGS on Android 14 -->
+        <activity
+            android:name=".camera.InvisibleCameraActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop" />
+
         <!-- 24/7 Persistent Background Monitoring Daemon -->
         <service
             android:name=".service.ChildMonitoringService"

@@ -80,17 +80,17 @@ flowchart TD
   - Audio microphone stream toggle.
   - Managed by `CameraStreamService` and `CameraWebRtcManager` on Android, rendered in `CameraStreamScreen` on Flutter.
 
-### 2.3. Live GPS Location Tracking, Breadcrumbs & Navigation
-* **Objective:** Continuous real-time location monitoring with battery-efficient deadband filtering, travel history breadcrumbs, and live directions for parents.
+### 2.3. Live GPS Location Tracking & Navigation
+* **Objective:** Continuous real-time location monitoring with battery-efficient deadband filtering, active geofence visualization, and live directions for parents to find their child.
 * **Child Location Engine (`LocationService.kt`):**
   - Uses Google Play Services `FusedLocationProviderClient` with `PRIORITY_HIGH_ACCURACY`.
   - **Accuracy Filter:** Drops inaccurate fixes where horizontal accuracy $> 35\text{ m}$.
   - **Stationary Deadband Filter:** When displacement $< 15\text{ m}$ and speed $< 1.5\text{ km/h}$, drops redundant jitter points if updated within 2 minutes.
-  - Dispatches updates via Socket.IO (`location_update`) for instant live tracking and `POST /api/location/record` for history.
+  - Dispatches updates via Socket.IO (`location_update`) for instant live tracking and `POST /api/location/record` to persist the latest child location state.
 * **Parent Location Interface (`LocationTrackingScreen.dart`):**
   - Built with `flutter_map` (OpenStreetMap / Esri Satellite raster tiles).
-  - **Mode 1 — Directions to Child:** Tracks parent's live GPS, queries OSRM (Open Source Routing Machine) routing API for real-time driving polyline, distance (km), and estimated duration (mins), plus quick-launch buttons for Google Maps & Waze.
-  - **Mode 2 — History Breadcrumb Trail:** Filter by Today, Past 24 Hours, Past 7 Days, or Custom Date Range. Interactive timeline scrubber slider to inspect timestamp, speed, battery level, and reverse-geocoded physical address (Nominatim API).
+  - Plotted live child position with name badge, battery, speed, and reverse-geocoded physical address (Nominatim API).
+  - Directions to Child: Tracks parent's live GPS, queries OSRM (Open Source Routing Machine) routing API for real-time driving polyline, distance (km), and estimated duration (mins), plus quick-launch button for Google Maps navigation.
 
 ### 2.4. App & Game Blocker & Screen Time Scheduling
 * **Child App Inventory Sync:** `AppScanner.kt` scans all installed launcher packages (filtering out internal OS packages) and syncs them to `POST /api/children/:childId/apps/sync`.
@@ -307,10 +307,8 @@ flowchart TD
 | **Camera Stream** | `POST` | `/api/camera-stream/request` | Parent | Request new camera stream session |
 | | `GET` | `/api/camera-stream/:id` | Auth | Get camera stream session status |
 | | `POST` | `/api/camera-stream/:id/stop` | Auth | Stop camera stream |
-| **Location** | `POST` | `/api/location/record` | Child | Record a single GPS location |
-| | `POST` | `/api/location/batch` | Child | Batch upload offline GPS points |
+| **Location** | `POST` | `/api/location/record` | Child | Record latest GPS location |
 | | `GET` | `/api/location/latest/:childId`| Parent | Get latest child location point |
-| | `GET` | `/api/location/history/:childId`| Parent | Get location trail with start/end filter |
 | **Geofences** | `POST` | `/api/children/:childId/geofences` | Parent | Create safe/restricted boundary |
 | | `GET` | `/api/children/:childId/geofences` | Parent | List child geofences |
 | | `GET` | `/api/children/:childId/geofences/:id` | Parent | Get geofence details |

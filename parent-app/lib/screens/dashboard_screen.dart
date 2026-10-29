@@ -435,7 +435,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   builder: (_) => LocationTrackingScreen(
                     childId: childId,
                     childName: childName,
-                    initialTrackingMode: MapTrackingMode.historyTrail,
                     focusTimestamp: timestamp,
                     focusLocation: (lat != null && lon != null) ? LatLng(lat, lon) : null,
                     highlightGeofenceId: geofenceId,
@@ -445,7 +444,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               );
             },
             icon: const Icon(Icons.map, size: 18),
-            label: const Text('View Trail on Map'),
+            label: const Text('View on Map'),
           ),
         ],
       ),

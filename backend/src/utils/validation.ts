@@ -65,16 +65,6 @@ export const recordLocationSchema = z.object({
   recordedAt: z.string().or(z.date()).optional(),
 });
 
-export const recordLocationBatchSchema = z.object({
-  points: z.array(recordLocationSchema).min(1).max(500),
-});
-
-export const locationHistoryQuerySchema = z.object({
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(2000).default(500),
-});
-
 // App Policy Validation Schemas
 export const syncInstalledAppsSchema = z.object({
   apps: z.array(

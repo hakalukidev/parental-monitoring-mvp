@@ -18,7 +18,7 @@ class ApiClient(private val session: SessionStore) {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .hostnameVerifier { hostname, session ->
-            if (hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "10.95.254.124" || hostname == "192.168.0.150" || hostname == "localhost") true
+            if (hostname == "187.127.113.175" || hostname == "163.227.239.88" || hostname == "api.hakaluki.dev" || hostname == "192.168.0.141" || hostname == "10.95.254.124" || hostname == "192.168.0.150" || hostname == "localhost") true
             else javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
         }
 
@@ -217,13 +217,6 @@ class ApiClient(private val session: SessionStore) {
             recordedAt?.let { put("recordedAt", it) }
         }
         val req = authedRequest("/api/location/record", "POST", payload).build()
-        return execute(req)
-    }
-
-    /** POST /api/location/batch */
-    fun postLocationBatch(points: org.json.JSONArray): JSONObject {
-        val payload = JSONObject().put("points", points)
-        val req = authedRequest("/api/location/batch", "POST", payload).build()
         return execute(req)
     }
 

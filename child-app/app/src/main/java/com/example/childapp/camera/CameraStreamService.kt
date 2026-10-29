@@ -51,15 +51,47 @@ class CameraStreamService : Service() {
         isSessionRunning.set(true)
         isStopping.set(false)
 
+        var actualWithAudio = withAudio
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            if (withAudio) {
-                serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            var started = false
+            if (actualWithAudio) {
+                try {
+                    val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    startForeground(NOTIFICATION_ID, buildNotification(), serviceType)
+                    started = true
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "Microphone FGS rejected, falling back to camera-only FGS: ${e.message}")
+                    actualWithAudio = false
+                } catch (e: Exception) {
+                    Log.e(TAG, "Unexpected error starting Camera+Mic FGS: ${e.message}")
+                    actualWithAudio = false
+                }
             }
-            startForeground(NOTIFICATION_ID, buildNotification(), serviceType)
+            if (!started) {
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+                    started = true
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "Camera FGS rejected, falling back to default notification: ${e.message}")
+                    try {
+                        startForeground(NOTIFICATION_ID, buildNotification())
+                        started = true
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Failed startForeground fallback: ${e2.message}", e2)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Unexpected error starting Camera FGS: ${e.message}")
+                }
+            }
         } else {
-            startForeground(NOTIFICATION_ID, buildNotification())
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed startForeground on pre-R: ${e.message}", e)
+            }
         }
+
+        InvisibleCameraActivity.onCameraInitialized?.invoke()
 
         val activeSock = ChildMonitoringService.activeSocket
         val isShared = activeSock != null && activeSock.isConnected
@@ -128,7 +160,7 @@ class CameraStreamService : Service() {
             socket.acceptCameraStream(sid)
             webRtc.startStreaming(
                 cameraFacing = cameraFacing,
-                withAudio = withAudio,
+                withAudio = actualWithAudio,
                 iceServers = iceServers
             )
         }

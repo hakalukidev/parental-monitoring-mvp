@@ -7,6 +7,9 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import org.webrtc.*
+import org.webrtc.audio.AudioDeviceModule
+import org.webrtc.audio.JavaAudioDeviceModule
+import android.media.MediaRecorder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -21,6 +24,7 @@ class AmbientAudioWebRtcManager(
     private val onError: ((String) -> Unit)? = null
 ) {
     private lateinit var factory: PeerConnectionFactory
+    private var audioDeviceModule: AudioDeviceModule? = null
     private var peerConnection: PeerConnection? = null
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
@@ -35,7 +39,18 @@ class AmbientAudioWebRtcManager(
                 .setEnableInternalTracer(false)
                 .createInitializationOptions()
         )
+
+        // Use standard MIC audio source and disable hardware AEC/NS so that ambient room sounds,
+        // whispers, and background voice are not aggressively filtered as telephony noise.
+        val adm = JavaAudioDeviceModule.builder(context)
+            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setUseHardwareAcousticEchoCanceler(false)
+            .setUseHardwareNoiseSuppressor(false)
+            .createAudioDeviceModule()
+        audioDeviceModule = adm
+
         factory = PeerConnectionFactory.builder()
+            .setAudioDeviceModule(adm)
             .createPeerConnectionFactory()
     }
 
@@ -97,12 +112,12 @@ class AmbientAudioWebRtcManager(
         try {
             val audioConstraints = MediaConstraints().apply {
                 // Ambient surveillance: capture room sounds and distant voices without filtering them as noise
-                mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
-                mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false"))
-                mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
-                mandatory.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
-                mandatory.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
+                // Use optional instead of mandatory so unsupported legacy keys do not fail audio source creation
+                optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
+                optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false"))
+                optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
+                optional.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
             }
             val aSource = factory.createAudioSource(audioConstraints)
             audioSource = aSource
