@@ -77,122 +77,122 @@ class AppPalette {
 class AppColors {
   /// Light theme palette (:root)
   static const light = AppPalette(
-    // --background: oklch(0.9755 0.0045 258.3245)
-    background: Color(0xFFF5F7FA),
-    // --foreground: oklch(0.2558 0.0433 268.0662)
-    foreground: Color(0xFF1A2238),
-    // --card: oklch(0.9341 0.0132 251.5628)
-    card: Color(0xFFE3EAF2),
-    // --card-foreground: oklch(0.2558 0.0433 268.0662)
-    cardForeground: Color(0xFF1A2238),
-    // --popover: oklch(0.9856 0.0278 98.0540)
-    popover: Color(0xFFFFFBE6),
-    // --popover-foreground: oklch(0.2558 0.0433 268.0662)
-    popoverForeground: Color(0xFF1A2238),
-    // --primary: oklch(0.4815 0.1178 263.3758)
-    primary: Color(0xFF3A5BA0),
-    // --primary-foreground: oklch(0.9856 0.0278 98.0540)
-    primaryForeground: Color(0xFFFFFBE6),
-    // --secondary: oklch(0.8567 0.1164 81.0092)
-    secondary: Color(0xFFF7C873),
-    // --secondary-foreground: oklch(0.2558 0.0433 268.0662)
-    secondaryForeground: Color(0xFF1A2238),
-    // --muted: oklch(0.9202 0.0080 106.5563)
-    muted: Color(0xFFE5E5DF),
-    // --muted-foreground: oklch(0.4815 0.1178 263.3758)
-    mutedForeground: Color(0xFF3A5BA0),
-    // --accent: oklch(0.6896 0.0714 234.0387)
-    accent: Color(0xFF6EA3C1),
-    // --accent-foreground: oklch(0.9856 0.0278 98.0540)
-    accentForeground: Color(0xFFFFFBE6),
-    // --destructive: oklch(0.2611 0.0376 322.5267)
-    destructive: Color(0xFF2D1E2F),
-    // --border: oklch(0.7791 0.0156 251.1926)
-    border: Color(0xFFB0B8C1),
-    // --input: oklch(0.6896 0.0714 234.0387)
-    input: Color(0xFF6EA3C1),
-    // --ring: oklch(0.8567 0.1164 81.0092)
-    ring: Color(0xFFF7C873),
+    // --background: oklch(1.0000 0 0)
+    background: Color(0xFFFFFFFF),
+    // --foreground: oklch(0.1884 0.0128 248.5103)
+    foreground: Color(0xFF0F1419),
+    // --card: oklch(0.9784 0.0011 197.1387)
+    card: Color(0xFFF7F8F8),
+    // --card-foreground: oklch(0.438 0.142 267.074)
+    cardForeground: Color(0xFF2F4A9F),
+    // --popover: oklch(1.0000 0 0)
+    popover: Color(0xFFFFFFFF),
+    // --popover-foreground: oklch(0.438 0.142 267.074)
+    popoverForeground: Color(0xFF2F4A9F),
+    // --primary: oklch(0.438 0.142 267.074)
+    primary: Color(0xFF2F4A9F),
+    // --primary-foreground: oklch(1.0000 0 0)
+    primaryForeground: Color(0xFFFFFFFF),
+    // --secondary: oklch(0.188 0.013 248.51)
+    secondary: Color(0xFF0F1419),
+    // --secondary-foreground: oklch(1.0000 0 0)
+    secondaryForeground: Color(0xFFFFFFFF),
+    // --muted: oklch(0.9222 0.0013 286.3737)
+    muted: Color(0xFFE5E5E6),
+    // --muted-foreground: oklch(0.188 0.013 248.51)
+    mutedForeground: Color(0xFF0F1419),
+    // --accent: oklch(0.9392 0.0166 250.8453)
+    accent: Color(0xFFE3ECF6),
+    // --accent-foreground: oklch(0.438 0.142 267.074)
+    accentForeground: Color(0xFF2F4A9F),
+    // --destructive: oklch(0.6188 0.2376 25.7658)
+    destructive: Color(0xFFF4212E),
+    // --border: oklch(0.9317 0.0118 231.6594)
+    border: Color(0xFFE1EAEF),
+    // --input: oklch(0.9809 0.0025 228.7836)
+    input: Color(0xFFF7F9FA),
+    // --ring: oklch(0.6818 0.1584 243.3540)
+    ring: Color(0xFF1DA1F2),
     // --chart-1
-    chart1: Color(0xFF3A5BA0),
+    chart1: Color(0xFF2F4A9F),
     // --chart-2
-    chart2: Color(0xFFF7C873),
+    chart2: Color(0xFF00B87A),
     // --chart-3
-    chart3: Color(0xFF6EA3C1),
+    chart3: Color(0xFFF7B928),
     // --chart-4
-    chart4: Color(0xFFB0B8C1),
+    chart4: Color(0xFF17BF63),
     // --chart-5
-    chart5: Color(0xFF2D1E2F),
+    chart5: Color(0xFFE0245E),
     // --sidebar
-    sidebar: Color(0xFFE3EAF2),
-    sidebarForeground: Color(0xFF1A2238),
-    sidebarPrimary: Color(0xFF3A5BA0),
-    sidebarPrimaryForeground: Color(0xFFFFFBE6),
-    sidebarAccent: Color(0xFFF7C873),
-    sidebarAccentForeground: Color(0xFF1A2238),
-    sidebarBorder: Color(0xFFB0B8C1),
-    sidebarRing: Color(0xFFF7C873),
+    sidebar: Color(0xFFF7F8F8),
+    sidebarForeground: Color(0xFF0F1419),
+    sidebarPrimary: Color(0xFF2F4A9F),
+    sidebarPrimaryForeground: Color(0xFFFFFFFF),
+    sidebarAccent: Color(0xFFE3ECF6),
+    sidebarAccentForeground: Color(0xFF2F4A9F),
+    sidebarBorder: Color(0xFFE1E8ED),
+    sidebarRing: Color(0xFF2F4A9F),
     // --radius: 0.625rem
     radius: 10.0,
   );
 
   /// Dark theme palette (.dark) - Kept ready for future activation
   static const dark = AppPalette(
-    // --background: oklch(0.2204 0.0198 275.8439)
-    background: Color(0xFF181A24),
-    // --foreground: oklch(0.9366 0.0129 266.6974)
-    foreground: Color(0xFFE6EAF3),
-    // --card: oklch(0.2703 0.0407 281.3036)
-    card: Color(0xFF23243A),
-    // --card-foreground: oklch(0.9366 0.0129 266.6974)
-    cardForeground: Color(0xFFE6EAF3),
-    // --popover: oklch(0.2703 0.0407 281.3036)
-    popover: Color(0xFF23243A),
-    // --popover-foreground: oklch(0.9097 0.1440 95.1120)
-    popoverForeground: Color(0xFFFFE066),
-    // --primary: oklch(0.4815 0.1178 263.3758)
-    primary: Color(0xFF3A5BA0),
-    // --primary-foreground: oklch(0.9097 0.1440 95.1120)
-    primaryForeground: Color(0xFFFFE066),
-    // --secondary: oklch(0.9097 0.1440 95.1120)
-    secondary: Color(0xFFFFE066),
-    // --secondary-foreground: oklch(0.2703 0.0407 281.3036)
-    secondaryForeground: Color(0xFF23243A),
-    // --muted: oklch(0.2424 0.0324 281.0890)
-    muted: Color(0xFF1D1E2F),
-    // --muted-foreground: oklch(0.6243 0.0412 262.0375)
-    mutedForeground: Color(0xFF7A88A1),
-    // --accent: oklch(0.8469 0.0524 264.7751)
-    accent: Color(0xFFBCCDF0),
-    // --accent-foreground: oklch(0.2204 0.0198 275.8439)
-    accentForeground: Color(0xFF181A24),
-    // --destructive: oklch(0.5280 0.1200 357.1130)
-    destructive: Color(0xFFA04A6C),
-    // --border: oklch(0.3072 0.0287 281.7681)
-    border: Color(0xFF2D2E3E),
-    // --input: oklch(0.4815 0.1178 263.3758)
-    input: Color(0xFF3A5BA0),
-    // --ring: oklch(0.9097 0.1440 95.1120)
-    ring: Color(0xFFFFE066),
+    // --background: oklch(0 0 0)
+    background: Color(0xFF000000),
+    // --foreground: oklch(0.9328 0.0025 228.7857)
+    foreground: Color(0xFFE7E9EA),
+    // --card: oklch(0.2097 0.0080 274.5332)
+    card: Color(0xFF17181C),
+    // --card-foreground: oklch(0.8853 0 0)
+    cardForeground: Color(0xFFD9D9D9),
+    // --popover: oklch(0 0 0)
+    popover: Color(0xFF000000),
+    // --popover-foreground: oklch(0.9328 0.0025 228.7857)
+    popoverForeground: Color(0xFFE7E9EA),
+    // --primary: oklch(0.6692 0.1607 245.0110)
+    primary: Color(0xFF1C9CF0),
+    // --primary-foreground: oklch(1.0000 0 0)
+    primaryForeground: Color(0xFFFFFFFF),
+    // --secondary: oklch(0.9622 0.0035 219.5331)
+    secondary: Color(0xFFF0F3F4),
+    // --secondary-foreground: oklch(0.1884 0.0128 248.5103)
+    secondaryForeground: Color(0xFF0F1419),
+    // --muted: oklch(0.2090 0 0)
+    muted: Color(0xFF181818),
+    // --muted-foreground: oklch(0.5637 0.0078 247.9662)
+    mutedForeground: Color(0xFF72767A),
+    // --accent: oklch(0.1928 0.0331 242.5459)
+    accent: Color(0xFF061622),
+    // --accent-foreground: oklch(0.6692 0.1607 245.0110)
+    accentForeground: Color(0xFF1C9CF0),
+    // --destructive: oklch(0.6188 0.2376 25.7658)
+    destructive: Color(0xFFF4212E),
+    // --border: oklch(0.2674 0.0047 248.0045)
+    border: Color(0xFF242628),
+    // --input: oklch(0.3020 0.0288 244.8244)
+    input: Color(0xFF22303C),
+    // --ring: oklch(0.6818 0.1584 243.3540)
+    ring: Color(0xFF1DA1F2),
     // --chart-1
-    chart1: Color(0xFF3A5BA0),
+    chart1: Color(0xFF1E9DF1),
     // --chart-2
-    chart2: Color(0xFFFFE066),
+    chart2: Color(0xFF00B87A),
     // --chart-3
-    chart3: Color(0xFF6EA3C1),
+    chart3: Color(0xFFF7B928),
     // --chart-4
-    chart4: Color(0xFF7A88A1),
+    chart4: Color(0xFF17BF63),
     // --chart-5
-    chart5: Color(0xFFA04A6C),
+    chart5: Color(0xFFE0245E),
     // --sidebar
-    sidebar: Color(0xFF23243A),
-    sidebarForeground: Color(0xFFE6EAF3),
-    sidebarPrimary: Color(0xFF3A5BA0),
-    sidebarPrimaryForeground: Color(0xFFFFE066),
-    sidebarAccent: Color(0xFFFFE066),
-    sidebarAccentForeground: Color(0xFF23243A),
-    sidebarBorder: Color(0xFF2D2E3E),
-    sidebarRing: Color(0xFFFFE066),
+    sidebar: Color(0xFF17181C),
+    sidebarForeground: Color(0xFFD9D9D9),
+    sidebarPrimary: Color(0xFF1DA1F2),
+    sidebarPrimaryForeground: Color(0xFFFFFFFF),
+    sidebarAccent: Color(0xFF061622),
+    sidebarAccentForeground: Color(0xFF1C9CF0),
+    sidebarBorder: Color(0xFF38444D),
+    sidebarRing: Color(0xFF1DA1F2),
     // --radius: 0.625rem
     radius: 10.0,
   );

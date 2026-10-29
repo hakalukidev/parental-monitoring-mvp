@@ -50,7 +50,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Seftly Parent Login', style: Theme.of(context).textTheme.headlineMedium),
+                  Center(
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      height: 110,
+                      width: 110,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Seftly Parent Login',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
                   const SizedBox(height: 24),
                   TextFormField(
                     controller: _email,
@@ -77,7 +90,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(color: Theme.of(context).colorScheme.error),
+                      ),
                     ),
                   FilledButton(
                     onPressed: _loading ? null : _submit,
