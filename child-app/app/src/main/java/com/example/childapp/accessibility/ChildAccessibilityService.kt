@@ -206,18 +206,22 @@ class ChildAccessibilityService : AccessibilityService() {
         ) {
             return false
         }
-        val check = AppUsageTracker.evaluatePackage(this, packageName)
-        if (check.isBlocked) {
-            val intent = Intent(this, BlockedAppActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra("PACKAGE_NAME", packageName)
-                putExtra("APP_NAME", check.policy?.appName ?: packageName)
-                putExtra("REASON", check.reason ?: "This app has been restricted by your parent.")
+        try {
+            val check = AppUsageTracker.evaluatePackage(this, packageName)
+            if (check.isBlocked) {
+                val intent = Intent(this, BlockedAppActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra("PACKAGE_NAME", packageName)
+                    putExtra("APP_NAME", check.policy?.appName ?: packageName)
+                    putExtra("REASON", check.reason ?: "This app has been restricted by your parent.")
+                }
+                startActivity(intent)
+                return true
             }
-            startActivity(intent)
-            return true
+        } catch (e: Exception) {
+            Log.e("ChildAccessibility", "Error checking app block for $packageName: ${e.message}", e)
         }
         return false
     }

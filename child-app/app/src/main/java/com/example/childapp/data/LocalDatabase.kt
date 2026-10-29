@@ -270,6 +270,19 @@ class LocalDatabase private constructor(context: Context) :
         )
     }
 
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        if (!db.isReadOnly) {
+            try {
+                db.execSQL("UPDATE app_policies SET category = 'OTHER' WHERE category IS NULL")
+                db.execSQL("UPDATE app_policies SET app_name = package_name WHERE app_name IS NULL")
+                db.execSQL("UPDATE app_policies SET status = 'ALWAYS_ALLOWED' WHERE status IS NULL")
+                db.execSQL("UPDATE app_policies SET schedules_json = '[]' WHERE schedules_json IS NULL")
+                db.execSQL("UPDATE app_policies SET is_system_whitelisted = 0 WHERE is_system_whitelisted IS NULL")
+            } catch (_: Exception) {}
+        }
+    }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         db.execSQL("DROP TABLE IF EXISTS app_policies")
         db.execSQL("DROP TABLE IF EXISTS web_rules")
@@ -345,10 +358,19 @@ class LocalDatabase private constructor(context: Context) :
     @Synchronized
     fun blockAppForSafety(packageName: String, appName: String) {
         val db = writableDatabase
+        val existing = getPolicyForPackage(packageName)
         val cv = ContentValues().apply {
             put("package_name", packageName)
-            put("app_name", appName)
+            put("app_name", if (appName.isNotBlank()) appName else (existing?.appName ?: packageName))
+            put("category", existing?.category ?: "OTHER")
             put("status", "BLOCKED")
+            if (existing?.dailyLimitMinutes != null) {
+                put("daily_limit_minutes", existing.dailyLimitMinutes)
+            } else {
+                putNull("daily_limit_minutes")
+            }
+            put("schedules_json", existing?.schedulesJson ?: "[]")
+            put("is_system_whitelisted", if (existing?.isSystemWhitelisted == true) 1 else 0)
         }
         db.insertWithOnConflict("app_policies", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
 
@@ -443,13 +465,13 @@ class LocalDatabase private constructor(context: Context) :
         ).use { cursor ->
             if (cursor.moveToFirst()) {
                 return CachedAppPolicy(
-                    packageName = cursor.getString(0),
-                    appName = cursor.getString(1),
-                    category = cursor.getString(2),
-                    status = cursor.getString(3),
+                    packageName = cursor.getString(0) ?: packageName,
+                    appName = cursor.getString(1) ?: packageName,
+                    category = cursor.getString(2) ?: "OTHER",
+                    status = cursor.getString(3) ?: "ALWAYS_ALLOWED",
                     dailyLimitMinutes = if (cursor.isNull(4)) null else cursor.getInt(4),
-                    schedulesJson = cursor.getString(5),
-                    isSystemWhitelisted = cursor.getInt(6) == 1
+                    schedulesJson = if (cursor.isNull(5)) "[]" else (cursor.getString(5) ?: "[]"),
+                    isSystemWhitelisted = !cursor.isNull(6) && cursor.getInt(6) == 1
                 )
             }
         }
@@ -467,13 +489,13 @@ class LocalDatabase private constructor(context: Context) :
             while (cursor.moveToNext()) {
                 list.add(
                     CachedAppPolicy(
-                        packageName = cursor.getString(0),
-                        appName = cursor.getString(1),
-                        category = cursor.getString(2),
-                        status = cursor.getString(3),
+                        packageName = cursor.getString(0) ?: "",
+                        appName = cursor.getString(1) ?: "",
+                        category = cursor.getString(2) ?: "OTHER",
+                        status = cursor.getString(3) ?: "ALWAYS_ALLOWED",
                         dailyLimitMinutes = if (cursor.isNull(4)) null else cursor.getInt(4),
-                        schedulesJson = cursor.getString(5),
-                        isSystemWhitelisted = cursor.getInt(6) == 1
+                        schedulesJson = if (cursor.isNull(5)) "[]" else (cursor.getString(5) ?: "[]"),
+                        isSystemWhitelisted = !cursor.isNull(6) && cursor.getInt(6) == 1
                     )
                 )
             }
@@ -555,10 +577,10 @@ class LocalDatabase private constructor(context: Context) :
             while (cursor.moveToNext()) {
                 list.add(
                     CachedWebRule(
-                        id = cursor.getString(0),
-                        ruleType = cursor.getString(1),
-                        target = cursor.getString(2),
-                        action = cursor.getString(3),
+                        id = cursor.getString(0) ?: "",
+                        ruleType = cursor.getString(1) ?: "DOMAIN",
+                        target = cursor.getString(2) ?: "",
+                        action = cursor.getString(3) ?: "BLOCK",
                         isEnabled = cursor.getInt(4) == 1
                     )
                 )
@@ -600,14 +622,14 @@ class LocalDatabase private constructor(context: Context) :
                 list.add(
                     CachedBrowsingHistory(
                         id = cursor.getLong(0),
-                        url = cursor.getString(1),
-                        domain = cursor.getString(2),
-                        title = cursor.getString(3),
-                        browser = cursor.getString(4),
+                        url = cursor.getString(1) ?: "",
+                        domain = cursor.getString(2) ?: "",
+                        title = cursor.getString(3) ?: "",
+                        browser = cursor.getString(4) ?: "",
                         isIncognito = cursor.getInt(5) == 1,
-                        category = cursor.getString(6),
+                        category = cursor.getString(6) ?: "Uncategorized",
                         isBlockedAttempt = cursor.getInt(7) == 1,
-                        blockedReason = cursor.getString(8),
+                        blockedReason = if (cursor.isNull(8)) null else cursor.getString(8),
                         visitedAt = cursor.getLong(9),
                         isSynced = false
                     )
@@ -689,15 +711,15 @@ class LocalDatabase private constructor(context: Context) :
             while (cursor.moveToNext()) {
                 list.add(
                     CachedGeofence(
-                        id = cursor.getString(0),
-                        name = cursor.getString(1),
+                        id = cursor.getString(0) ?: "",
+                        name = cursor.getString(1) ?: "Boundary",
                         latitude = cursor.getDouble(2),
                         longitude = cursor.getDouble(3),
                         radius = cursor.getDouble(4),
-                        zoneType = cursor.getString(5),
-                        triggerType = cursor.getString(6),
+                        zoneType = cursor.getString(5) ?: "SAFE_ZONE",
+                        triggerType = cursor.getString(6) ?: "EXIT",
                         isEnabled = cursor.getInt(7) == 1,
-                        colorHex = cursor.getString(8)
+                        colorHex = cursor.getString(8) ?: "#2196F3"
                     )
                 )
             }
@@ -772,10 +794,10 @@ class LocalDatabase private constructor(context: Context) :
                 list.add(
                     CachedCallRecord(
                         id = cursor.getLong(0),
-                        externalId = cursor.getString(1),
-                        phoneNumber = cursor.getString(2),
-                        contactName = cursor.getString(3),
-                        direction = cursor.getString(4),
+                        externalId = cursor.getString(1) ?: "",
+                        phoneNumber = if (cursor.isNull(2)) null else cursor.getString(2),
+                        contactName = if (cursor.isNull(3)) null else cursor.getString(3),
+                        direction = cursor.getString(4) ?: "INCOMING",
                         durationSeconds = cursor.getInt(5),
                         timestamp = cursor.getLong(6),
                         isSynced = false
@@ -822,11 +844,11 @@ class LocalDatabase private constructor(context: Context) :
                 list.add(
                     CachedSmsRecord(
                         id = cursor.getLong(0),
-                        externalId = cursor.getString(1),
-                        phoneNumber = cursor.getString(2),
-                        contactName = cursor.getString(3),
-                        direction = cursor.getString(4),
-                        body = cursor.getString(5),
+                        externalId = cursor.getString(1) ?: "",
+                        phoneNumber = if (cursor.isNull(2)) null else cursor.getString(2),
+                        contactName = if (cursor.isNull(3)) null else cursor.getString(3),
+                        direction = cursor.getString(4) ?: "INCOMING",
+                        body = if (cursor.isNull(5)) null else cursor.getString(5),
                         hasBody = cursor.getInt(6) == 1,
                         timestamp = cursor.getLong(7),
                         isSynced = false
@@ -876,12 +898,12 @@ class LocalDatabase private constructor(context: Context) :
                 list.add(
                     CachedSafetyAlert(
                         id = cursor.getLong(0),
-                        externalId = cursor.getString(1),
-                        alertType = cursor.getString(2),
-                        packageName = cursor.getString(3),
-                        appName = cursor.getString(4),
+                        externalId = cursor.getString(1) ?: "",
+                        alertType = cursor.getString(2) ?: "UNKNOWN",
+                        packageName = if (cursor.isNull(3)) null else cursor.getString(3),
+                        appName = if (cursor.isNull(4)) null else cursor.getString(4),
                         confidence = cursor.getDouble(5),
-                        severity = cursor.getString(6),
+                        severity = cursor.getString(6) ?: "MEDIUM",
                         timestamp = cursor.getLong(7),
                         isSynced = false
                     )
@@ -930,12 +952,12 @@ class LocalDatabase private constructor(context: Context) :
                 list.add(
                     CachedNotificationRecord(
                         id = cursor.getLong(0),
-                        externalId = cursor.getString(1),
-                        packageName = cursor.getString(2),
-                        appName = cursor.getString(3),
+                        externalId = cursor.getString(1) ?: "",
+                        packageName = cursor.getString(2) ?: "",
+                        appName = cursor.getString(3) ?: "",
                         title = cursor.getString(4) ?: "",
                         content = cursor.getString(5) ?: "",
-                        subText = cursor.getString(6),
+                        subText = if (cursor.isNull(6)) null else cursor.getString(6),
                         postTime = cursor.getLong(7),
                         isSynced = false
                     )
