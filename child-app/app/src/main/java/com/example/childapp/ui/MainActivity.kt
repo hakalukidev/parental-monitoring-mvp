@@ -9,9 +9,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import com.example.childapp.ui.theme.ChildAppTheme
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.childapp.accessibility.ChildAccessibilityService
@@ -59,8 +62,11 @@ class MainActivity : ComponentActivity() {
             var deviceConnected by remember { mutableStateOf(false) }
             val state by screenState
 
-            MaterialTheme {
-                Surface {
+            ChildAppTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     if (!loggedIn) {
                         LoginScreen(
                             loading = loading,

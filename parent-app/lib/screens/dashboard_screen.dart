@@ -21,6 +21,7 @@ import 'safety_alerts_screen.dart';
 import 'notification_monitoring_screen.dart';
 import 'sound_around_screen.dart';
 import 'login_screen.dart';
+import '../theme/app_colors.dart';
 
 
 class DashboardScreen extends StatefulWidget {
@@ -738,8 +739,8 @@ class _ChildCard extends StatelessWidget {
                 Expanded(
                   child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: Colors.teal.shade50,
-                      foregroundColor: Colors.teal.shade800,
+                      backgroundColor: AppColors.accent.withValues(alpha: 0.15),
+                      foregroundColor: AppColors.primary,
                     ),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -799,8 +800,8 @@ class _ChildCard extends StatelessWidget {
               width: double.infinity,
               child: FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: online ? const Color(0xFFE0F2FE) : null,
-                  foregroundColor: online ? const Color(0xFF0369A1) : null,
+                  backgroundColor: online ? AppColors.accent.withValues(alpha: 0.2) : null,
+                  foregroundColor: online ? AppColors.primary : null,
                 ),
                 onPressed: online
                     ? () => Navigator.of(context).push(
@@ -828,7 +829,8 @@ class _ChildCard extends StatelessWidget {
               width: double.infinity,
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: Colors.blue.shade700,
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: AppColors.primaryForeground,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () => Navigator.of(context).push(
@@ -851,8 +853,8 @@ class _ChildCard extends StatelessWidget {
                 Expanded(
                   child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: Colors.indigo.shade50,
-                      foregroundColor: Colors.indigo.shade900,
+                      backgroundColor: AppColors.card,
+                      foregroundColor: AppColors.primary,
                     ),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -870,8 +872,8 @@ class _ChildCard extends StatelessWidget {
                 Expanded(
                   child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: Colors.teal.shade50,
-                      foregroundColor: Colors.teal.shade900,
+                      backgroundColor: AppColors.accent.withValues(alpha: 0.2),
+                      foregroundColor: AppColors.primary,
                     ),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -912,8 +914,8 @@ class _ChildCard extends StatelessWidget {
               width: double.infinity,
               child: FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: Colors.purple.shade50,
-                  foregroundColor: Colors.purple.shade900,
+                  backgroundColor: AppColors.card,
+                  foregroundColor: AppColors.primary,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () => Navigator.of(context).push(
@@ -936,8 +938,8 @@ class _ChildCard extends StatelessWidget {
               width: double.infinity,
               child: FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red.shade50,
-                  foregroundColor: Colors.red.shade900,
+                  backgroundColor: AppColors.destructive.withValues(alpha: 0.12),
+                  foregroundColor: AppColors.destructive,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () => Navigator.of(context).push(
@@ -960,8 +962,8 @@ class _ChildCard extends StatelessWidget {
               width: double.infinity,
               child: FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: Colors.teal.shade50,
-                  foregroundColor: Colors.teal.shade900,
+                  backgroundColor: AppColors.card,
+                  foregroundColor: AppColors.primary,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () => Navigator.of(context).push(

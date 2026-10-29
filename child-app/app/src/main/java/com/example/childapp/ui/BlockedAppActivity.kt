@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.childapp.socket.SocketManager
+import com.example.childapp.ui.theme.ChildAppTheme
 
 class BlockedAppActivity : ComponentActivity() {
 
@@ -57,16 +58,7 @@ class BlockedAppActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    background = Color(0xFF121212),
-                    surface = Color(0xFF1E1E1E),
-                    primary = Color(0xFF3B82F6),
-                    onBackground = Color(0xFFEDEDED),
-                    onSurface = Color(0xFFEDEDED),
-                    onSurfaceVariant = Color(0xFFAAAAAA)
-                )
-            ) {
+            ChildAppTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

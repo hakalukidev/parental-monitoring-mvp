@@ -5,6 +5,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
+import 'theme/app_theme.dart';
 
 class MyHttpOverrides extends HttpOverrides {
   @override
@@ -36,10 +37,9 @@ class ParentApp extends StatelessWidget {
       navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Seftly Parent',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-      ),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.light,
       home: FutureBuilder<String?>(
         future: ApiService.instance.accessToken,
         builder: (context, snapshot) {
