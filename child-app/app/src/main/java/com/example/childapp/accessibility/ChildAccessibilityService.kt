@@ -24,6 +24,11 @@ import com.example.childapp.data.LocalDatabase
 import android.net.Uri
 import com.example.childapp.notification.ChildNotificationListenerService
 import com.example.childapp.ui.BlockedAppActivity
+import com.example.childapp.safety.ScreenSafetyMonitor
+import com.example.childapp.safety.SafetyAlertSyncManager
+import android.graphics.Bitmap
+import android.view.Display
+import java.util.concurrent.Executors
 import java.net.URI
 
 class ChildAccessibilityService : AccessibilityService() {
@@ -103,6 +108,26 @@ class ChildAccessibilityService : AccessibilityService() {
         "com.duckduckgo.mobile.android" to "OTHER"
     )
 
+    private val screenSafetyMonitor by lazy { ScreenSafetyMonitor(applicationContext) }
+    private val safetyExecutor = Executors.newSingleThreadExecutor()
+    private var lastScreenshotTime = 0L
+    private var isScreenshotInProgress = false
+
+    private val mediaInspectionPackages = setOf(
+        "com.android.chrome",
+        "org.mozilla.firefox",
+        "com.sec.android.app.sbrowser",
+        "com.microsoft.emmx",
+        "com.brave.browser",
+        "com.opera.browser",
+        "com.opera.mini.native",
+        "com.duckduckgo.mobile.android",
+        "com.reddit.frontpage",
+        "com.twitter.android",
+        "com.instagram.android",
+        "com.zhiliaoapp.musically"
+    )
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         try {
@@ -123,6 +148,9 @@ class ChildAccessibilityService : AccessibilityService() {
         instance = null
         isRunning = false
         handler.removeCallbacksAndMessages(null)
+        try {
+            safetyExecutor.shutdown()
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 
@@ -148,6 +176,7 @@ class ChildAccessibilityService : AccessibilityService() {
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 handleWindowStateChanged(packageName, event)
+                checkScreenSafetyPeriodically(packageName)
             }
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
@@ -155,6 +184,10 @@ class ChildAccessibilityService : AccessibilityService() {
                     if (checkAndBlockIncognito(packageName)) return
                     inspectBrowserContent(packageName)
                 }
+                if (packageName == "com.reddit.frontpage" || packageName == "com.twitter.android") {
+                    checkSocialMediaNsfwContent(packageName, rootInActiveWindow)
+                }
+                checkScreenSafetyPeriodically(packageName)
             }
         }
     }
@@ -379,6 +412,129 @@ class ChildAccessibilityService : AccessibilityService() {
                     Log.e("ChildAccessibility", "Failed recording adult safety alert: ${e.message}")
                 }
             }
+        }
+    }
+
+    private fun getAppNameForPackage(pkg: String): String {
+        return try {
+            val pm = packageManager
+            val info = pm.getApplicationInfo(pkg, 0)
+            pm.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            pkg
+        }
+    }
+
+    private fun checkScreenSafetyPeriodically(packageName: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (!mediaInspectionPackages.contains(packageName)) return
+
+        val now = System.currentTimeMillis()
+        if (isScreenshotInProgress || now - lastScreenshotTime < 2500L) {
+            return
+        }
+
+        isScreenshotInProgress = true
+        lastScreenshotTime = now
+
+        try {
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                safetyExecutor,
+                object : AccessibilityService.TakeScreenshotCallback {
+                    override fun onSuccess(screenshotResult: AccessibilityService.ScreenshotResult) {
+                        try {
+                            val hardwareBuffer = screenshotResult.hardwareBuffer
+                            val colorSpace = screenshotResult.colorSpace
+                            val hwBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace)
+                            val swBitmap = hwBitmap?.copy(Bitmap.Config.ARGB_8888, false)
+                            hardwareBuffer.close()
+
+                            if (swBitmap != null) {
+                                val appName = getAppNameForPackage(packageName)
+                                screenSafetyMonitor.evaluateFrame(
+                                    bitmap = swBitmap,
+                                    packageName = packageName,
+                                    appName = appName,
+                                    onExplicitConfirmed = { explicitPkg, explicitApp ->
+                                        handler.post {
+                                            enforceSafetyBlock(
+                                                explicitPkg ?: packageName,
+                                                explicitApp ?: appName,
+                                                "Inappropriate visual media was detected on screen."
+                                            )
+                                        }
+                                    }
+                                )
+                                swBitmap.recycle()
+                            }
+                        } catch (e: Exception) {
+                            Log.e("ChildAccessibility", "Error processing safety screenshot: ${e.message}")
+                        } finally {
+                            isScreenshotInProgress = false
+                        }
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        isScreenshotInProgress = false
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            isScreenshotInProgress = false
+            Log.w("ChildAccessibility", "Failed initiating takeScreenshot: ${e.message}")
+        }
+    }
+
+    private fun checkSocialMediaNsfwContent(packageName: String, root: AccessibilityNodeInfo?) {
+        if (root == null) return
+        val now = System.currentTimeMillis()
+        if (now - lastAdultAlertTime < 15000L) return
+
+        try {
+            val nsfwNodes = root.findAccessibilityNodeInfosByText("NSFW")
+            val adult18Nodes = root.findAccessibilityNodeInfosByText("18+")
+            val ageRestricted = root.findAccessibilityNodeInfosByText("Age-restricted")
+            val sensitiveContent = root.findAccessibilityNodeInfosByText("Sensitive content")
+
+            val isExplicitTag = nsfwNodes.isNotEmpty() || adult18Nodes.isNotEmpty() ||
+                    ageRestricted.isNotEmpty() || sensitiveContent.isNotEmpty()
+
+            if (isExplicitTag) {
+                lastAdultAlertTime = now
+                val appName = getAppNameForPackage(packageName)
+                Log.w("ChildAccessibility", "NSFW tag/flair detected in $appName - triggering safety alert")
+                SafetyAlertSyncManager.recordAlert(
+                    context = applicationContext,
+                    alertType = "EXPLICIT_SCREEN_CONTENT",
+                    packageName = packageName,
+                    appName = appName,
+                    confidence = 0.95,
+                    severity = "CRITICAL"
+                )
+                enforceSafetyBlock(packageName, appName, "Inappropriate age-restricted content is restricted.")
+            }
+        } catch (e: Exception) {
+            Log.d("ChildAccessibility", "Error checking social NSFW text: ${e.message}")
+        }
+    }
+
+    private fun enforceSafetyBlock(packageName: String, appName: String, reason: String) {
+        try {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            val intent = Intent(this, BlockedAppActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("PACKAGE_NAME", packageName)
+                putExtra("APP_NAME", appName)
+                putExtra("REASON", reason)
+                putExtra("BLOCKED_TARGET", "Safety & Content Filter")
+                putExtra("IS_WEB_BLOCK", true)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("ChildAccessibility", "Failed enforcing safety block: ${e.message}")
         }
     }
 

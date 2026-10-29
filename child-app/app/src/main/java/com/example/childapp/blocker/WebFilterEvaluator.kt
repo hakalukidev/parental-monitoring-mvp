@@ -71,7 +71,7 @@ object WebFilterEvaluator {
         }
 
         // 3. Classify general category
-        val category = classifyCategory(lowerUrl, lowerDomain, lowerQuery)
+        val category = classifyCategory(lowerUrl, lowerDomain, lowerQuery, lowerTitle)
         return WebCheckResult(isBlocked = false, category = category)
     }
 
@@ -124,8 +124,8 @@ object WebFilterEvaluator {
         return classifyCategory(lowerUrl, lowerDomain, "")
     }
 
-    fun classifyCategory(lowerUrl: String, lowerDomain: String, lowerQuery: String = ""): String {
-        if (isAdultContent(lowerUrl, lowerDomain, lowerQuery)) return "ADULT"
+    fun classifyCategory(lowerUrl: String, lowerDomain: String, lowerQuery: String = "", lowerTitle: String = ""): String {
+        if (isAdultContent(lowerUrl, lowerDomain, lowerQuery, lowerTitle)) return "ADULT"
         if (isGamblingContent(lowerUrl, lowerDomain, lowerQuery)) return "SUSPICIOUS"
         if (isGamingContent(lowerDomain, lowerQuery)) return "GAMING"
         if (isSocialContent(lowerDomain, lowerQuery)) return "SOCIAL"
@@ -138,9 +138,17 @@ object WebFilterEvaluator {
         return "GENERAL"
     }
 
-    private fun isAdultContent(url: String, domain: String, query: String): Boolean {
-        val adultKeywords = listOf("porn", "xxx", "adult", "sex", "hentai", "xvideos", "pornhub", "xnxx", "erotic")
-        return adultKeywords.any { url.contains(it) || domain.contains(it) || query.contains(it) }
+    val adultKeywords = listOf(
+        "porn", "xxx", "adult", "sex", "hentai", "xvideos", "pornhub", "xnxx",
+        "erotic", "nsfw", "nude", "boobs", "naked", "redtube", "youporn",
+        "onlyfans", "rule34", "chaturbate", "cam4", "brazzers", "spankbang",
+        "tube8", "tits", "gonewild", "stripchat", "bongacams"
+    )
+
+    fun isAdultContent(url: String, domain: String, query: String = "", title: String = ""): Boolean {
+        return adultKeywords.any {
+            url.contains(it) || domain.contains(it) || query.contains(it) || title.contains(it)
+        }
     }
 
     private fun isGamblingContent(url: String, domain: String, query: String): Boolean {

@@ -19,7 +19,12 @@ class ScreenSafetyMonitor(private val context: Context) {
      * Inspects a live sampled screen frame.
      * Uses a 2-consecutive-frame debouncer to prevent false positives.
      */
-    fun evaluateFrame(bitmap: Bitmap, packageName: String?, appName: String?) {
+    fun evaluateFrame(
+        bitmap: Bitmap,
+        packageName: String?,
+        appName: String?,
+        onExplicitConfirmed: ((packageName: String?, appName: String?) -> Unit)? = null
+    ) {
         try {
             val result = classifier.classify(bitmap)
             if (result.isExplicit) {
@@ -28,8 +33,8 @@ class ScreenSafetyMonitor(private val context: Context) {
 
                 if (consecutiveExplicitCount >= DEBOUNCE_REQUIRED_CONSECUTIVE) {
                     val now = System.currentTimeMillis()
-                    // Minimum 30-second cooldown between alerts for same app to prevent flooding
-                    if (now - lastAlertTimestamp > 30000L) {
+                    // Minimum 20-second cooldown between alerts for same app to prevent flooding
+                    if (now - lastAlertTimestamp > 20000L) {
                         lastAlertTimestamp = now
                         SafetyAlertSyncManager.recordAlert(
                             context = context,
@@ -41,6 +46,7 @@ class ScreenSafetyMonitor(private val context: Context) {
                         )
                     }
                     consecutiveExplicitCount = 0
+                    onExplicitConfirmed?.invoke(packageName, appName)
                 }
             } else {
                 consecutiveExplicitCount = 0

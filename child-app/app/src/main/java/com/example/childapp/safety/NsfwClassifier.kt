@@ -125,18 +125,28 @@ class NsfwClassifier(private val context: Context) {
     }
 
     /**
-     * Highly optimized fallback heuristic analyzer that checks chromatic color distribution
-     * and high-density skin tone entropy when custom model file is awaiting update.
+     * Multi-region chromatic skin tone entropy and focal container analyzer.
+     * Evaluates central media viewports (where photos and videos render in Reddit, Twitter, Chrome)
+     * as well as full-screen exposure.
      */
     private fun classifyWithHeuristic(bitmap: Bitmap): SafetyClassificationResult {
         val width = 120
         val height = 120
         val scaled = Bitmap.createScaledBitmap(bitmap, width, height, false)
 
-        var skinPixelCount = 0
+        var totalSkinPixels = 0
+        var centerSkinPixels = 0
         val totalPixels = width * height
 
+        // Focal media viewport: central 70% width, central 65% height
+        val centerXMin = (width * 0.15).toInt()
+        val centerXMax = (width * 0.85).toInt()
+        val centerYMin = (height * 0.18).toInt()
+        val centerYMax = (height * 0.82).toInt()
+        val centerTotalPixels = (centerXMax - centerXMin) * (centerYMax - centerYMin)
+
         for (y in 0 until height) {
+            val inCenterY = y in centerYMin until centerYMax
             for (x in 0 until width) {
                 val color = scaled.getPixel(x, y)
                 val r = Color.red(color)
@@ -147,22 +157,47 @@ class NsfwClassifier(private val context: Context) {
                 // R > 95, G > 40, B > 20, max(R,G,B) - min(R,G,B) > 15, |R - G| > 15, R > G, R > B
                 val max = maxOf(r, maxOf(g, b))
                 val min = minOf(r, minOf(g, b))
-                if (r > 95 && g > 40 && b > 20 && (max - min) > 15 && Math.abs(r - g) > 15 && r > g && r > b) {
-                    skinPixelCount++
+                val isSkinTone = r > 95 && g > 40 && b > 20 && (max - min) > 15 && Math.abs(r - g) > 15 && r > g && r > b
+
+                if (isSkinTone) {
+                    totalSkinPixels++
+                    if (inCenterY && x in centerXMin until centerXMax) {
+                        centerSkinPixels++
+                    }
                 }
             }
         }
 
-        val skinRatio = skinPixelCount.toFloat() / totalPixels.toFloat()
-        // If skin tone coverage is excessively high (>62% of entire viewport), flag as potential explicit content
-        val isExplicit = skinRatio > 0.62f
-        val confidence = if (isExplicit) minOf(0.95f, skinRatio + 0.25f) else (1.0f - skinRatio)
+        val fullSkinRatio = totalSkinPixels.toFloat() / totalPixels.toFloat()
+        val centerSkinRatio = centerSkinPixels.toFloat() / centerTotalPixels.toFloat()
+
+        // Explicit detection: central viewport has high flesh ratio (>30%) or full screen is >35%
+        val isExplicit = centerSkinRatio > 0.30f || fullSkinRatio > 0.35f
+        val isSuggestive = !isExplicit && (centerSkinRatio > 0.22f || fullSkinRatio > 0.25f)
+
+        val confidence = when {
+            isExplicit -> minOf(0.96f, maxOf(centerSkinRatio, fullSkinRatio) + 0.35f)
+            isSuggestive -> minOf(0.85f, maxOf(centerSkinRatio, fullSkinRatio) + 0.25f)
+            else -> maxOf(0.10f, 1.0f - maxOf(centerSkinRatio, fullSkinRatio))
+        }
+
+        val category = when {
+            isExplicit -> "EXPLICIT_EXPOSURE"
+            isSuggestive -> "SEXY"
+            else -> "NEUTRAL"
+        }
+
+        val severity = when {
+            isExplicit -> "CRITICAL"
+            isSuggestive -> "HIGH"
+            else -> "MEDIUM"
+        }
 
         return SafetyClassificationResult(
             isExplicit = isExplicit,
             confidence = confidence,
-            category = if (isExplicit) "EXPLICIT_EXPOSURE" else "NEUTRAL",
-            severity = if (isExplicit) "CRITICAL" else "MEDIUM"
+            category = category,
+            severity = severity
         )
     }
 
